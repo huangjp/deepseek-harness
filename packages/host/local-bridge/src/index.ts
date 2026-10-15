@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import z from '@deepseek-ai/schemastery'
-import { createLocalBridgeControl, type PreflightFacts } from './control.ts'
+import { createLocalBridgeControl, type LocalBridgeControl, type PreflightFacts } from './control.ts'
 import { internals } from './internals.ts'
 import {
   LOCAL_BRIDGE_LOG_PATH, LOCAL_BRIDGE_REFRESH_PATH, LOCAL_BRIDGE_STATUS_PATH,
@@ -96,7 +96,9 @@ export interface Config {
     /** 装了但没在跑时，是否自动把它们拉起来。 */
     autoStart: boolean
     /**
-     * Copilot 令牌陈旧且前置条件齐备时，是否自动触发 `refresh-token.ps1`。
+     * Copilot 令牌陈旧且前置条件齐备时，是否自动触发 `refresh-token.ps1`：
+     * 启动时陈旧就刷一次；运行中反代在**没有请求在途**的空档里刷，并且在换新落盘
+     * 之前不放新请求进去（见 `bridge/token-gate.mjs`）。
      * 注意：该脚本会**临时切换系统代理**（约 1 分钟，`finally` 里还原），
      * 并用 UI 自动化让 Copilot 建一次连接 —— 介意的话把它关掉。
      */
@@ -290,19 +292,14 @@ interface ControlRouteOptions {
  * —— 刷新会临时改系统代理并驱动 UI 自动化，绝不能暴露给未经鉴权的调用方。
  *
  * @param ctx - the Cordis context.
- * @param options - 收割目录、刷新脚本与预检模块的位置，以及两个反代端口。
+ * @param options - 控制面本体，以及两个反代端口。
  */
-function registerControlRoutes(ctx: Context, options: ControlRouteOptions): void {
+function registerControlRoutes(ctx: Context, options: ControlRouteOptions & {
+  /** 反代与设置页共用的控制面：反代拿它当刷新入口，路由拿它读状态。 */
+  control: LocalBridgeControl
+}): void {
   ctx.inject(['webServer', 'connection'], (scope: Context) => {
-    const control = createLocalBridgeControl({
-      loadPreflight: async () => preflightFacts(await loadPreflightModule(options.preflightUrl)),
-      refreshScript: options.refreshScript,
-      harvestDir: options.harvestDir,
-      workbuddyPort: options.workbuddyPort,
-      copilotPort: options.copilotPort,
-      // 预检的拒绝原因是给人看的操作提示，落日志；线上只传代码，文案由页面自己的字典出。
-      log: (message) => { scope.logger.warn(message) },
-    })
+    const control = options.control
     /** 拒绝一个不可信或未鉴权的请求；已拒绝时返回 true。 */
     const rejected = (req: IncomingMessage, res: ServerResponse): boolean => {
       const rejection = connectionOf(scope).requestRejection(req)
@@ -373,9 +370,22 @@ export function apply(ctx: Context, config: Config): void {
   // 否则外部 powershell.exe 打不开它，刷新链路会静默失效。
   const refreshScript = resolveRealPath(fileURLToPath(new URL('../bridge/refresh-token.ps1', import.meta.url)))
 
+  // 控制面在反代之前建好，并且只建一个：反代要拿它当刷新入口，设置页路由要拿它
+  // 读状态 —— 两边必须看同一把刷新锁，否则自动刷新与手动刷新会各刷一次。
+  const control = createLocalBridgeControl({
+    loadPreflight: async () => preflightFacts(await loadPreflightModule(preflightUrl)),
+    refreshScript,
+    harvestDir,
+    workbuddyPort: config.port,
+    copilotPort: config.copilot.port,
+    // 预检的拒绝原因是给人看的操作提示，落日志；线上只传代码，文案由页面自己的字典出。
+    log: (message) => { ctx.logger.warn(message) },
+  })
+
   // 控制面不受 enabled 影响：反代关掉时设置页仍要能读到令牌与前置状态，
   // 用户才判断得出该不该把它打开。
   registerControlRoutes(ctx, {
+    control,
     harvestDir,
     refreshScript,
     workbuddyPort: config.port,
@@ -413,6 +423,10 @@ export function apply(ctx: Context, config: Config): void {
       overrides: {
         server: { host: config.host, port: config.copilot.port },
         ...config.copilot.harvestDir ? { harvest: { dir: config.copilot.harvestDir } } : {},
+        // 运行时自动换令牌：只有反代知道有没有请求正在用令牌，所以「什么时候换」由它
+        // 决定，宿主只交出触发能力。关掉 deps.autoRefreshToken 就整段不注入，反代连
+        // 闸门都不会建，行为与从前一致。
+        ...config.deps.autoRefreshToken ? { refreshToken: () => control.refresh() } : {},
       },
     })
   }

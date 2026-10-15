@@ -1452,7 +1452,9 @@ export interface Config {
     /** 装了但没在跑时，是否自动把它们拉起来。 */
     autoStart: boolean
     /**
-     * Copilot 令牌陈旧且前置条件齐备时，是否自动触发 `refresh-token.ps1`。
+     * Copilot 令牌陈旧且前置条件齐备时，是否自动触发 `refresh-token.ps1`：
+     * 启动时陈旧就刷一次；运行中反代在**没有请求在途**的空档里刷，并且在换新落盘
+     * 之前不放新请求进去（见 `bridge/token-gate.mjs`）。
      * 注意：该脚本会**临时切换系统代理**（约 1 分钟，`finally` 里还原），
      * 并用 UI 自动化让 Copilot 建一次连接 —— 介意的话把它关掉。
      */

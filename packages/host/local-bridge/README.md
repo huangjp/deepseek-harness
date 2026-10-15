@@ -37,12 +37,23 @@ Mount this plugin in a composition that ships the bundled relays; the desktop ap
 | `copilot.port` | `8899` | Copilot relay port |
 | `copilot.harvestDir` | `%USERPROFILE%\copilot-probe` | Harvested token, request template, and refresh transcripts |
 | `deps.autoStart` | `true` | Start a companion application that is installed but not running |
-| `deps.autoRefreshToken` | `true` | Run the token refresh at boot when the harvested token is stale |
+| `deps.autoRefreshToken` | `true` | Refresh the token automatically: at boot when it is stale, and during use before a request would go out with one about to expire |
 | `deps.bootstrap` | `true` | Copy the shipped harvest files into the harvest directory at boot |
 | `deps.autoInstallCa` | `true` | Import the interception certificate when it is not trusted yet |
 | `deps.autoInstallMitm` | `true` | Start a background `pip install mitmproxy` when the proxy is missing |
 
 A relay that fails to start logs one warning and leaves the other running; neither failure blocks host startup.
+
+### Refreshing while the app runs
+
+An access token lasts about an hour, and replacing one rewrites the file every request is reading, so the two operations are kept apart:
+
+- **A request in flight is never interrupted.** The Copilot relay counts the requests currently holding the token, and a refresh does not start while that count is above zero. A request arriving in that window is served with the token already in use rather than made to wait behind its neighbour.
+- **A refresh is never served through.** Once one starts, a request arriving before the new token lands waits for it instead of reading a file that is being replaced. The wait is bounded; if no newer token appears, the request proceeds with the existing one and the attempt is logged.
+
+The trigger is the token's own age, read from the harvest file: a request that would go out with a token older than 45 minutes replaces it first, and the last request of a burst does the same on its way out so the next one does not have to wait. There is no idle timer — refreshing while nothing is using the relay would change the system proxy and drive the Copilot window for no benefit. A failed attempt is not retried for a minute, because whatever stopped it (Copilot closed, a prerequisite unmet) does not clear in seconds.
+
+The relay owns these rules because it is the only place that knows what is in flight; the host injects the trigger, so an automatic refresh and the settings page's button take the same lock and cannot run together.
 
 ### The settings routes
 
@@ -92,8 +103,8 @@ None; this package neither assembles nor sends a provider request.
 
 - **The whole refresh chain is Windows-only.** The probes, the script, the UI automation, and the certificate import all assume Windows; the routes report `process.platform` so the page can say so rather than failing obscurely.
 - **The interception ports are fixed.** `bridge/refresh-token.ps1` listens on `8082` and tunnels through `127.0.0.1:7890` — the mixed port of the proxy client it ships against — and neither is configurable, because the control plane probes the same ports the script uses and a value that moved only one of them would report a checkout as ready when the chain cannot run.
-- **A refresh is not awaited.** The host starts a detached process and reports only that it started; progress is read back from the lock file and the harvested token's timestamp.
-- **`deps.autoRefreshToken` is on by default and its side effects are not silent.** It changes the system proxy for about a minute at boot, and the certificate import shows one Windows security prompt that cannot be suppressed.
+- **A refresh is not awaited by the trigger.** The host starts a detached process and reports only that it started. The caller that needs the result — the relay, before serving a request — reads it back by polling the harvested token's timestamp, bounded by a deadline; progress the settings page shows comes from the lock file and that same timestamp.
+- **`deps.autoRefreshToken` is on by default and its side effects are not silent.** It changes the system proxy for about a minute, and drives the Copilot window to send one message; the certificate import shows one Windows security prompt that cannot be suppressed.
 - **The relays are not probed for readiness.** A listener that binds proves nothing about the application behind it; the first request is what discovers an unauthenticated upstream.
 
 ### Dev Note

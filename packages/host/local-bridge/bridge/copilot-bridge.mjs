@@ -16,8 +16,26 @@ import { readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { randomUUID, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createTokenGate } from './token-gate.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * 令牌年龄超过它就视为需要更换（毫秒以外一律用秒）。
+ *
+ * 微软 access_token 约 1 小时过期，留 15 分钟余量。这个阈值同时决定 `/health`
+ * 的 `stale`、错误提示里那句「很可能已失效」，以及是否触发自动刷新 —— 三处必须
+ * 同源，否则页面说「陈旧」而反代不刷新，或者反过来。
+ */
+const TOKEN_STALE_SEC = 45 * 60;
+
+/**
+ * 触发刷新后等新令牌落盘的上限。
+ *
+ * 刷新脚本自身最坏约 100 秒（见 refresh-token.ps1 的收割轮询），加上 mitmdump
+ * 启动，120 秒足够覆盖一次正常刷新。超时就放弃等待、让请求带现有令牌继续。
+ */
+const TOKEN_WAIT_MS = 120000;
 
 // ---------------------------------------------------------------- 配置
 
@@ -38,6 +56,10 @@ let serverCfg = {};
 let harvestDir = '';
 let tokenFile = '';
 let templateFile = '';
+/** 宿主注入的刷新触发能力；独立运行时为 null（没有脚本路径与锁，刷新无从谈起）。 */
+let refreshToken = null;
+/** 令牌使用闸门；没有刷新能力时为 null，整段自动刷新不生效。 */
+let gate = null;
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 
@@ -58,6 +80,21 @@ function initRuntime(overrides = {}) {
     || path.join(process.env.USERPROFILE || '', 'copilot-probe');
   tokenFile = path.join(harvestDir, 'token.json');
   templateFile = path.join(harvestDir, 'chat_template.json');
+  // 收割目录换了，上一个目录的缓存值一律作废：否则重启到另一个目录时，
+  // 头 5 秒（令牌）/ 30 秒（模板）里读到的还是旧目录的令牌。
+  _tokenCache = { at: 0, value: null };
+  _tplCache = { at: 0, value: null };
+
+  // 刷新能力是宿主注入的函数，不是配置项：单独持有，别混进 config。
+  refreshToken = typeof overrides.refreshToken === 'function' ? overrides.refreshToken : null;
+  delete config.refreshToken;
+  gate = refreshToken === null ? null : createTokenGate({
+    readStamp: readTokenStamp,
+    staleSec: TOKEN_STALE_SEC,
+    waitMs: TOKEN_WAIT_MS,
+    trigger: () => refreshToken(),
+    log: (message) => { log(message); },
+  });
 }
 
 // ---------------------------------------------------------------- 令牌 / 模板
@@ -79,6 +116,18 @@ function loadHarvest() {
   }
   _tokenCache = { at: now, value };
   return value;
+}
+
+/**
+ * 读当前令牌的收割时间戳（秒），没有令牌时为 0。
+ *
+ * 刻意绕过上面那 5 秒缓存：闸门判断「是否陈旧」和「新令牌是否落盘」都读这个值，
+ * 读到缓存里的旧值会让自动刷新永远以为没换成功，从而把每个请求都拖满等待上限。
+ * @returns 收割时间戳（秒），或 0。
+ */
+function readTokenStamp() {
+  _tokenCache = { at: 0, value: null };
+  return loadHarvest()?.harvestedAt || 0;
 }
 
 /** 请求模板：优先用收割到的；没有则退回抓包导出的静态模板。 */
@@ -372,7 +421,7 @@ function withTokenAgeHint(error) {
   const ageText = ageSec >= 5400
     ? `${Math.round(ageSec / 3600)} 小时`
     : `${Math.max(Math.round(ageSec / 60), 0)} 分钟`;
-  if (ageSec < 45 * 60) return error;
+  if (ageSec < TOKEN_STALE_SEC) return error;
   error.message += `\n（令牌已收割 ${ageText}，微软 access_token 约 1 小时过期，很可能已失效；`
     + '请保持 Copilot 桌面端运行并执行 refresh-token.ps1 重新收割，然后重试。）';
   return error;
@@ -497,14 +546,15 @@ function messagesToPrompt(messages = []) {
 function handleHealth(req, res) {
   const h = loadHarvest();
   const tpl = loadTemplate();
+  const tokens = gate?.state() ?? { inFlight: 0, refreshing: false };
   sendJson(res, 200, {
     ok: Boolean(h),
     token: h ? {
       harvestedAt: h.harvestedAt ? new Date(h.harvestedAt * 1000).toISOString() : null,
       ageSec: h.harvestedAt ? Math.round(Date.now() / 1000 - h.harvestedAt) : null,
-      // 微软 access_token 约 1 小时过期；超过 45 分钟就标为可疑，省得调用时才报
-      // 一句笼统的 WebSocket 错误。
-      stale: h.harvestedAt ? (Date.now() / 1000 - h.harvestedAt) > 45 * 60 : null,
+      // 微软 access_token 约 1 小时过期；超过 TOKEN_STALE_SEC 就标为可疑，省得调用时
+      // 才报一句笼统的 WebSocket 错误。这个阈值同时决定是否自动刷新。
+      stale: h.harvestedAt ? (Date.now() / 1000 - h.harvestedAt) > TOKEN_STALE_SEC : null,
       length: h.access_token ? h.access_token.length : 0,
       host: h.params?.host || null,
       conversationId: h.params?.ConversationId || null,
@@ -513,7 +563,9 @@ function handleHealth(req, res) {
     tokenFile,
     // 宿主启动时跑一次的依赖预检结果（独立运行时为 null）。
     deps: config.preflight ?? null,
-    hint: h?.harvestedAt && (Date.now() / 1000 - h.harvestedAt) > 45 * 60
+    // 令牌替换与使用互斥的状态：`auto` 说明宿主是否注入了刷新能力。
+    refresh: { auto: gate !== null, inFlight: tokens.inFlight, running: tokens.refreshing },
+    hint: h?.harvestedAt && (Date.now() / 1000 - h.harvestedAt) > TOKEN_STALE_SEC
       ? '令牌已超过 45 分钟，很可能已过期 —— 请保持 Copilot 桌面端运行并执行 refresh-token.ps1 重新收割'
       : undefined,
   });
@@ -549,52 +601,60 @@ async function handleChatCompletions(req, res) {
   const ctl = new AbortController();
   req.on('close', () => ctl.abort());
 
-  if (!body.stream) {
-    let text = '';
-    const r = await runChat({ prompt, signal: ctl.signal, onDelta: (d) => { text += d; } });
-    return sendJson(res, 200, {
-      id, object: 'chat.completion', created, model,
-      choices: [{ index: 0, message: { role: 'assistant', content: r.text || text }, finish_reason: 'stop' }],
-      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-    });
-  }
-
-  res.writeHead(200, {
-    'content-type': 'text/event-stream; charset=utf-8',
-    'cache-control': 'no-cache',
-    connection: 'keep-alive',
-    'access-control-allow-origin': serverCfg.cors || '*',
-  });
-  const frame = (delta, finish = null) => {
-    res.write(`data: ${JSON.stringify({
-      id, object: 'chat.completion.chunk', created, model,
-      choices: [{ index: 0, delta, finish_reason: finish }],
-    })}\n\n`);
-  };
-  const usageIfNeeded = () => {
-    if (!body.stream_options?.include_usage) return;
-    res.write(`data: ${JSON.stringify({
-      id, object: 'chat.completion.chunk', created, model, choices: [],
-      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-    })}\n\n`);
-  };
-
+  // 令牌陈旧就先换新再占用通道；正在刷新则在这里等它落地。占用之后到 leave() 之前，
+  // 闸门不会开始刷新 —— 在途请求带着的令牌不会被中途替换掉。
+  if (gate) await gate.enter();
   try {
-    frame({ role: 'assistant', content: '' });
-    await runChat({ prompt, signal: ctl.signal, onDelta: (t) => frame({ content: t }) });
-    frame({}, 'stop');
-    usageIfNeeded();
-    res.write('data: [DONE]\n\n');
-    res.end();
-  } catch (err) {
-    res.write(`data: ${JSON.stringify({
-      id, object: 'chat.completion.chunk', created, model,
-      choices: [{ index: 0, delta: { content: `\n\n[调用失败] ${err.message}` }, finish_reason: 'stop' }],
-      error: { message: err.message, code: err.code || 'internal_error' },
-    })}\n\n`);
-    usageIfNeeded();
-    res.write('data: [DONE]\n\n');
-    res.end();
+    if (!body.stream) {
+      let text = '';
+      const r = await runChat({ prompt, signal: ctl.signal, onDelta: (d) => { text += d; } });
+      return sendJson(res, 200, {
+        id, object: 'chat.completion', created, model,
+        choices: [{ index: 0, message: { role: 'assistant', content: r.text || text }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      });
+    }
+
+    res.writeHead(200, {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-cache',
+      connection: 'keep-alive',
+      'access-control-allow-origin': serverCfg.cors || '*',
+    });
+    const frame = (delta, finish = null) => {
+      res.write(`data: ${JSON.stringify({
+        id, object: 'chat.completion.chunk', created, model,
+        choices: [{ index: 0, delta, finish_reason: finish }],
+      })}\n\n`);
+    };
+    const usageIfNeeded = () => {
+      if (!body.stream_options?.include_usage) return;
+      res.write(`data: ${JSON.stringify({
+        id, object: 'chat.completion.chunk', created, model, choices: [],
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      })}\n\n`);
+    };
+
+    try {
+      frame({ role: 'assistant', content: '' });
+      await runChat({ prompt, signal: ctl.signal, onDelta: (t) => frame({ content: t }) });
+      frame({}, 'stop');
+      usageIfNeeded();
+      res.write('data: [DONE]\n\n');
+      res.end();
+    } catch (err) {
+      res.write(`data: ${JSON.stringify({
+        id, object: 'chat.completion.chunk', created, model,
+        choices: [{ index: 0, delta: { content: `\n\n[调用失败] ${err.message}` }, finish_reason: 'stop' }],
+        error: { message: err.message, code: err.code || 'internal_error' },
+      })}\n\n`);
+      usageIfNeeded();
+      res.write('data: [DONE]\n\n');
+      res.end();
+    }
+  } finally {
+    // 最后一个请求离开时闸门会顺手把陈旧的令牌换掉，下一个请求就不必再等一次刷新。
+    if (gate) gate.leave();
   }
 }
 
@@ -724,6 +784,9 @@ export async function startCopilotBridge(overrides = {}) {
   log(h
     ? `令牌: 已收割（${h.params?.host || '?'}，长度 ${h.access_token?.length}）`
     : '令牌: 未收割 —— 请在 Copilot 里发一条消息，收割器会自动写入');
+  log(gate
+    ? `令牌自动刷新: 开启（超过 ${Math.round(TOKEN_STALE_SEC / 60)} 分钟时，在无请求在途的空档里换新）`
+    : '令牌自动刷新: 关闭 —— 未注入刷新能力（独立运行时没有刷新脚本路径与锁）');
   return activeBridge;
 }
 
@@ -732,6 +795,9 @@ export async function stopCopilotBridge() {
   const current = activeBridge;
   if (!current) return;
   activeBridge = null;
+  // 等新令牌的那个轮询是唯一的定时器；反代一停就让它收尾。
+  gate?.dispose();
+  gate = null;
   await current.close();
 }
 

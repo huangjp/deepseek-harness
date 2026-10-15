@@ -16,7 +16,7 @@ import { createServer, connect, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
@@ -26,14 +26,29 @@ import { internals } from '../src/internals.ts'
 
 let root: string | undefined
 let context: Context | undefined
+let harvestRoot: string | undefined
 
 afterEach(async () => {
   await context?.fiber.dispose()
   context = undefined
   if (root !== undefined) await rm(root, { recursive: true, force: true })
   root = undefined
+  if (harvestRoot !== undefined) await rm(harvestRoot, { recursive: true, force: true })
+  harvestRoot = undefined
   internals.preflight = undefined
 })
+
+/** 现在（秒）。 */
+const stamp = (agoSec: number): number => Math.floor(Date.now() / 1000) - agoSec
+
+/** 一份反代认得的令牌；上游指向没人监听的端口，建连必定失败。 */
+function token(harvestedAgoSec: number): string {
+  return JSON.stringify({
+    access_token: 'fake-token',
+    harvestedAt: stamp(harvestedAgoSec),
+    params: { host: '127.0.0.1:9', path: '/probe' },
+  })
+}
 
 /** Bind one ephemeral loopback port and report it; the caller closes it. */
 async function openPort(): Promise<{ port: number; close: () => Promise<void> }> {
@@ -113,11 +128,14 @@ function bootReport(overrides: Record<string, unknown> = {}): Record<string, unk
 function preflightModule(options: {
   /** What `runPreflight` resolves; `null` rejects, and `false` removes the export. */
   report?: Record<string, unknown> | null | false
+  /** Control-plane facts to replace, for a test that drives a real refresh decision. */
+  control?: Record<string, unknown>
 } = {}): Record<string, unknown> {
   const report = options.report === undefined ? bootReport() : options.report
-  if (report === false) return { ...CONTROL_EXPORTS }
+  const control = { ...CONTROL_EXPORTS, ...options.control }
+  if (report === false) return { ...control }
   return {
-    ...CONTROL_EXPORTS,
+    ...control,
     runPreflight: (settings: Record<string, unknown>) => {
       // The shipped preflight reports progress through the callback the plugin
       // hands it; a double that never calls it would leave that path unproven.
@@ -142,6 +160,8 @@ interface BootOptions {
   module?: Record<string, unknown>
   /** Receives every message the composition's logger exports. */
   logs?: string[]
+  /** Whether the composition turns runtime token auto-refresh on. */
+  autoRefresh?: boolean
 }
 
 /**
@@ -175,7 +195,7 @@ async function boot(options: BootOptions): Promise<string> {
     ...copilot,
     '    deps:',
     '      autoStart: false',
-    '      autoRefreshToken: false',
+    `      autoRefreshToken: ${options.autoRefresh === true ? 'true' : 'false'}`,
     '      bootstrap: false',
     '      autoInstallCa: false',
     '      autoInstallMitm: false',
@@ -364,5 +384,79 @@ describe('local-bridge relay lifecycle', () => {
     expect(Array.isArray(payload.copilot?.missing)).toBe(true)
     // The real probes spawn `tasklist` and PowerShell, which outlast the
     // default per-test budget when the suite runs beside every other lane.
+  }, 60_000)
+
+  /**
+   * 自动换令牌的宿主侧接线：反代拿到的刷新触发必须真的连到控制面。
+   *
+   * 这是唯一证明这条接线的检查 —— 反代自己的规则由 `copilot-auto-refresh.spec.ts`
+   * 覆盖，但「宿主到底有没有把触发交出去」只有走一次真实组合才知道。判据不靠日志：
+   * 令牌陈旧时建连失败会带一句「很可能已失效」，而请求成功穿过刷新之后就不该再有
+   * 那句 —— 说明它建连时用的已经是新令牌。
+   */
+  it('hands the Copilot relay a refresh trigger that reaches the control plane', async () => {
+    harvestRoot = await mkdtemp(join(tmpdir(), 'dsh-local-bridge-auto-'))
+    const tokenFile = join(harvestRoot, 'token.json')
+    await writeFile(tokenFile, token(3600), 'utf8')
+    const refreshCopilotToken = vi.fn(async () => {
+      // 刷新成功的表现就是收割时间戳前进。
+      await writeFile(tokenFile, token(0), 'utf8')
+      return { started: true, logFile: join(harvestRoot as string, 'auto-refresh.log') }
+    })
+    // 建连必失败，只试一次就不必等退避。反代只在独立运行时读这个环境变量。
+    const relayConfig = join(harvestRoot, 'copilot.config.json')
+    await writeFile(relayConfig, JSON.stringify({ session: { connectRetries: 1, timeoutMs: 3000 } }), 'utf8')
+    const saved = process.env['COPILOT_BRIDGE_CONFIG']
+    process.env['COPILOT_BRIDGE_CONFIG'] = relayConfig
+
+    try {
+      const copilot = await freePort()
+      await boot({
+        workbuddy: await freePort(),
+        copilot,
+        harvestDir: harvestRoot,
+        autoRefresh: true,
+        module: preflightModule({
+          control: {
+            detectHarvest: () => Promise.resolve({
+              hasToken: true,
+              harvestedAt: new Date(stamp(3600) * 1000).toISOString(),
+              ageSec: 3600,
+              stale: true,
+              mitmdump: 'mitmdump',
+              harvester: 'harvester',
+              mitmRunning: true,
+              upstreamProxyUp: true,
+            }),
+            detectAllApps: () => Promise.resolve({
+              copilot: { label: 'Copilot', installed: true, running: true, started: false },
+            }),
+            detectCa: () => Promise.resolve({ installed: true, notAfter: '2030-01-01' }),
+            refreshCopilotToken,
+          },
+        }),
+      })
+      await expect.poll(() => listening(copilot), { timeout: 15_000 }).toBe(true)
+
+      const response = await fetch(`http://127.0.0.1:${copilot}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'copilot', messages: [{ role: 'user', content: 'hi' }] }),
+      })
+      const body = await response.text()
+
+      expect(response.status).toBe(502)
+      expect(refreshCopilotToken).toHaveBeenCalledTimes(1)
+      expect(refreshCopilotToken).toHaveBeenCalledWith({
+        scriptPath: expect.stringContaining('refresh-token.ps1') as string,
+        harvestDir: harvestRoot,
+      })
+      // 建连失败了，但不是在陈旧令牌上失败的。
+      expect(body).toContain('连接 substrate 失败')
+      expect(body).not.toContain('很可能已失效')
+    } finally {
+      if (saved === undefined) delete process.env['COPILOT_BRIDGE_CONFIG']
+      else process.env['COPILOT_BRIDGE_CONFIG'] = saved
+    }
   }, 60_000)
 })

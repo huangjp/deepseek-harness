@@ -15,8 +15,11 @@
   en: b563e4ec4727d0de
   zh: b563e4ec4727d0de
 /deepseek-ai-dsh-host-local-bridge/use-this-package:
-  en: 3c4b9f7fec2db335
-  zh: e03d99041a185748
+  en: 757074d4055e0e4c
+  zh: cc12d99b700c5b26
+/deepseek-ai-dsh-host-local-bridge/use-this-package/refreshing-while-the-app-runs:
+  en: 40ace05a78b39df0
+  zh: 2ccc714202320630
 /deepseek-ai-dsh-host-local-bridge/use-this-package/the-settings-routes:
   en: 73fead29a647af5d
   zh: ae6d6092c2e1e60c
@@ -33,8 +36,8 @@
   en: ca75c51c89c2c9b0
   zh: ca75c51c89c2c9b0
 /deepseek-ai-dsh-host-local-bridge/known-limitations-and-deferred-work:
-  en: c522c890d2ebacc6
-  zh: a6f2e27c3979b512
+  en: a23bf715b4fb0585
+  zh: a1a2fcaa8abf4020
 /deepseek-ai-dsh-host-local-bridge/known-limitations-and-deferred-work/dev-note:
   en: 3f179b447b9d5c27
   zh: 3f179b447b9d5c27
