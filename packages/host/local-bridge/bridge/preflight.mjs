@@ -510,7 +510,7 @@ export async function refreshCopilotToken(options) {
   }
 
   const logFile = options.logFile ?? path.join(harvestDir, REFRESH_LOG_FILES.transcript);
-  // PowerShell 自身这一层的痕迹单独落一份：Start-Transcript 只能覆盖脚本内部的
+  // PowerShell 自己的这层痕迹单独落一份：Start-Transcript 只能覆盖脚本内部的
   // Write-Host，抓不到「进程压根没起来」这种更早的失败。两个文件分工明确、互不覆盖。
   const spawnLog = path.join(harvestDir, REFRESH_LOG_FILES.spawn);
   // 脚本所在目录：scriptblock 方式执行时 $PSScriptRoot 为空，得显式传进去，
@@ -533,6 +533,16 @@ export async function refreshCopilotToken(options) {
   //   2. 用 `Start-Transcript` 包住：脚本通篇是 `Write-Host`，它不走 stdout，
   //      直接重定向 stdio 是抓不到的。转录才能把失败原因留下来。
   //   3. 把脚本目录与收割目录显式传给脚本（见上）。
+  //
+  // 拼装方式本身也是成败点，两处都不能改：
+  //   - **用换行分隔，不能用 `'; '`**：`'; '` 会把 `try { ... }` 与 `catch { ... }`
+  //     之间也塞一个分号，而 `try { ... }; catch { ... }` 是解析错误。PowerShell 连
+  //     Start-Transcript 都到不了，直接以退出码 1 结束，转录一个字节都不会有 ——
+  //     外部只看到「刷新已触发」，然后什么也没发生。
+  //   - **spawn 不能带 `detached: true`**：Windows 上它以 DETACHED_PROCESS 创建进程，
+  //     powershell.exe 在没有控制台时**立即以 0 退出且什么都不执行**，连 stderr 都不留，
+  //     转录、令牌、代理一个都不动。stdio 已全部重定向到文件而非管道，子进程本来就不会
+  //     随父进程退出，detached 没有必要。
   const command = [
     "$ErrorActionPreference='Continue'",
     `$DshBridgeDir='${bridgeDir}'`,
@@ -541,7 +551,7 @@ export async function refreshCopilotToken(options) {
     `try { $src = Get-Content -Raw -Encoding UTF8 '${scriptPath}'; & ([scriptblock]::Create($src)) }`,
     "catch { Write-Host ('SCRIPT ERROR: ' + $_.Exception.Message) }",
     'finally { Stop-Transcript | Out-Null }',
-  ].join('; ');
+  ].join('\r\n');
 
   let out = null;
   try { out = openSync(spawnLog, 'a'); } catch { /* 打不开就退化成丢弃输出，不阻断 */ }
@@ -552,7 +562,7 @@ export async function refreshCopilotToken(options) {
       powershell,
       ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command],
       {
-        detached: true,
+        // 不要加 detached —— 理由见上面的拼装说明。
         // stdio 不能用 'ignore'：那样「进程没起来」和「脚本跑了但失败」在外部看来
         // 一模一样 —— 都什么痕迹都不留。重定向到文件后，PowerShell 的原生输出
         // 与错误才有去处。

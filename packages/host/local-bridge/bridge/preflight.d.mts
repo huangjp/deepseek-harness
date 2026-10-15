@@ -9,3 +9,14 @@
 
 /** 解析 Windows PowerShell 的绝对路径，避免依赖调用方的 PATH。 */
 export function resolvePowerShell(): string
+
+/**
+ * 触发一次 Copilot 令牌刷新（异步 spawn，返回时进程通常刚起来）。
+ * @param options - 脚本路径与收割目录。
+ * @returns 是否已触发；未触发时带原因。
+ */
+export function refreshCopilotToken(options: { scriptPath: string; harvestDir: string; logFile?: string }): Promise<{
+  started: boolean
+  reason?: string
+  logFile?: string
+}>

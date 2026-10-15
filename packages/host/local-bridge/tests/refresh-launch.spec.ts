@@ -1,5 +1,9 @@
+import { existsSync } from 'node:fs'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { resolvePowerShell } from '../bridge/preflight.mjs'
+import { refreshCopilotToken, resolvePowerShell } from '../bridge/preflight.mjs'
 
 /**
  * 触发 Copilot 刷新时，PowerShell 必须能被找到。
@@ -34,4 +38,34 @@ describe('resolvePowerShell', () => {
       process.env.PATH = saved
     }
   })
+})
+
+/**
+ * 触发刷新时，被触发的脚本必须**真的跑起来**。
+ *
+ * 这里用一份只写标记文件的替身脚本走同一条触发路径。两个拼装缺陷都只表现为
+ * 「刷新显示已触发，转录却一个字节都没有」：`'; '` 拼接把 `try`/`catch` 隔开会让
+ * 整个 `-Command` 解析失败，`detached: true` 会让 PowerShell 立即以 0 退出且不执行
+ * 任何东西。这两者都不会让 `spawn` 报错，`started` 照样是 true —— 只有断言脚本
+ * 留下的痕迹才能拦住它们。
+ */
+describe('refreshCopilotToken', () => {
+  it.skipIf(process.platform !== 'win32')('actually runs the script it launches', async () => {
+    const harvestDir = await mkdtemp(join(tmpdir(), 'dsh-refresh-launch-'))
+    const script = join(harvestDir, 'fixture.ps1')
+    const marker = join(harvestDir, 'marker.txt')
+    await writeFile(script, [
+      '$ErrorActionPreference = "Stop"',
+      `Set-Content -Path '${marker}' -Value 'ran' -Encoding UTF8`,
+      '',
+    ].join('\r\n'), 'utf8')
+    try {
+      const outcome = await refreshCopilotToken({ scriptPath: script, harvestDir })
+      expect(outcome.started).toBe(true)
+      await expect.poll(() => existsSync(marker), { timeout: 30_000 }).toBe(true)
+    } finally {
+      // PowerShell may still hold the transcript open when the marker lands.
+      await rm(harvestDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 200 })
+    }
+  }, 60_000)
 })
