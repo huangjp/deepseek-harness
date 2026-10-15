@@ -22,6 +22,12 @@ export const LOCAL_BRIDGE_REFRESH_PATH = '/local-bridge/refresh'
 /** Browser-relative form of {@link LOCAL_BRIDGE_REFRESH_PATH}. */
 export const LOCAL_BRIDGE_REFRESH_ROUTE = LOCAL_BRIDGE_REFRESH_PATH.slice(1)
 
+/** GET route path serving the refresh transcripts' tails. */
+export const LOCAL_BRIDGE_LOG_PATH = '/local-bridge/log'
+
+/** Browser-relative form of {@link LOCAL_BRIDGE_LOG_PATH}. */
+export const LOCAL_BRIDGE_LOG_ROUTE = LOCAL_BRIDGE_LOG_PATH.slice(1)
+
 /** Whether one companion desktop application is installed and running. */
 export interface LocalBridgeAppStatus {
   /** The application is present on this machine. */
@@ -128,4 +134,25 @@ export interface LocalBridgeRefreshPayload {
   readonly refusal: LocalBridgeRefreshRefusal | null
   /** Host-side transcript path once started; null otherwise. */
   readonly logFile: string | null
+}
+
+/**
+ * One refresh transcript as the page shows it. Both are bounded tails: the
+ * spawn trace appends across every attempt, so its file grows without one.
+ */
+export interface LocalBridgeTranscript {
+  /** Absolute path this tail was read from, so a reader can open the whole file. */
+  readonly path: string
+  /** The file's text, or an empty string while it does not exist. */
+  readonly text: string
+  /** Whether the file holds more than this tail carries. */
+  readonly truncated: boolean
+}
+
+/** Log-route response: both transcripts one refresh attempt writes. */
+export interface LocalBridgeLogPayload {
+  /** What `Start-Transcript` captured from `refresh-token.ps1` itself. */
+  readonly transcript: LocalBridgeTranscript
+  /** The PowerShell-level trace, which records a process that never started. */
+  readonly spawn: LocalBridgeTranscript
 }

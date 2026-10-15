@@ -88,6 +88,7 @@ function preflightModule(options: {
     detectCa: () => Promise.resolve(options.ca ?? { installed: false, notAfter: null }),
     refreshCopilotToken: () => Promise.resolve(options.refresh ?? { started: true, logFile: '/probe/auto-refresh.log' }),
     refreshLockMs: 240_000,
+    refreshLogFiles: { transcript: 'auto-refresh.log', spawn: 'auto-refresh.spawn.log' },
   }
 }
 
@@ -133,6 +134,12 @@ async function fixture(module: PreflightFacts, options: {
 async function writeLock(stamp: number): Promise<void> {
   if (root === undefined) throw new Error('the fixture harvest directory is not ready')
   await writeFile(join(root, '.auto-refresh.lock'), String(stamp), 'utf8')
+}
+
+/** Write one refresh transcript into the fixture harvest directory. */
+async function writeTranscript(name: string, text: string): Promise<void> {
+  if (root === undefined) throw new Error('the fixture harvest directory is not ready')
+  await writeFile(join(root, name), text, 'utf8')
 }
 
 describe('local-bridge status', () => {
@@ -196,6 +203,59 @@ describe('local-bridge status', () => {
     const { control } = await fixture(preflightModule())
     await writeLock(Number.NaN)
     expect((await control.status()).refreshStartedAt).toBeNull()
+  })
+})
+
+describe('local-bridge refresh transcript', () => {
+  it('reports empty tails and their paths before any attempt has written one', async () => {
+    const { control } = await fixture(preflightModule())
+    const log = await control.log()
+    expect(log.transcript.text).toBe('')
+    expect(log.transcript.truncated).toBe(false)
+    expect(log.spawn.text).toBe('')
+    // The paths are always reported, so the page can name the file even when
+    // the attempt died before it wrote anything.
+    expect(log.transcript.path).toBe(join(root!, 'auto-refresh.log'))
+    expect(log.spawn.path).toBe(join(root!, 'auto-refresh.spawn.log'))
+  })
+
+  it('reports both transcripts whole while they fit the bound', async () => {
+    const { control } = await fixture(preflightModule())
+    await writeTranscript('auto-refresh.log', '第 1 轮\n第 2 轮\n')
+    await writeTranscript('auto-refresh.spawn.log', 'PowerShell 退出：code=1\n')
+    const log = await control.log()
+    expect(log.transcript).toEqual({
+      path: join(root!, 'auto-refresh.log'),
+      text: '第 1 轮\n第 2 轮\n',
+      truncated: false,
+    })
+    expect(log.spawn.text).toBe('PowerShell 退出：code=1\n')
+  })
+
+  it('reports only the tail once a transcript outgrows the bound', async () => {
+    const { control } = await fixture(preflightModule())
+    // The spawn trace appends across every attempt, so its file is the one that
+    // grows without a bound of its own.
+    const filler = `${'x'.repeat(200)}\n`
+    await writeTranscript('auto-refresh.spawn.log', filler.repeat(200) + 'LAST LINE\n')
+    const log = await control.log()
+    expect(log.spawn.truncated).toBe(true)
+    expect(log.spawn.text).toContain('LAST LINE')
+    expect(log.spawn.text.length).toBeLessThan(16 * 1024 + 64)
+    // The cut lands mid-line, so the partial leading line is dropped rather
+    // than shipped as a fragment: the first line is whole.
+    expect(log.spawn.text.split('\n', 1)[0]).toBe('x'.repeat(200))
+  })
+
+  it('keeps a multibyte transcript readable across the cut', async () => {
+    const { control } = await fixture(preflightModule())
+    const line = `${'收'.repeat(60)}\n`
+    await writeTranscript('auto-refresh.log', line.repeat(200) + '结尾\n')
+    const log = await control.log()
+    expect(log.transcript.truncated).toBe(true)
+    expect(log.transcript.text).toContain('结尾')
+    // A cut inside a character would leave a replacement character behind.
+    expect(log.transcript.text).not.toContain('\uFFFD')
   })
 })
 

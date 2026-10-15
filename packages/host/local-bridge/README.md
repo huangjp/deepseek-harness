@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@deepseek-ai/dsh-host-local-bridge` starts the two model relays bundled with the desktop installer as independent loopback listeners: the WorkBuddy relay on `127.0.0.1:8787` and the Microsoft Copilot relay on `127.0.0.1:8899`. Before either listens it runs a dependency preflight that starts the desktop applications behind them, deploys the harvest files, imports the interception certificate, and refreshes a stale Copilot access token. The same plugin serves the two routes the “Local model services” settings page reads: one status snapshot of both relays, and the trigger for a Copilot token refresh.
+`@deepseek-ai/dsh-host-local-bridge` starts the two model relays bundled with the desktop installer as independent loopback listeners: the WorkBuddy relay on `127.0.0.1:8787` and the Microsoft Copilot relay on `127.0.0.1:8899`. Before either listens it runs a dependency preflight that starts the desktop applications behind them, deploys the harvest files, imports the interception certificate, and refreshes a stale Copilot access token. The same plugin serves the routes the “Local model services” settings page reads: one status snapshot of both relays, the trigger for a Copilot token refresh, and the tails of the transcripts that refresh writes.
 
 ## Table of Contents
 
@@ -46,14 +46,19 @@ A relay that fails to start logs one warning and leaves the other running; neith
 
 ### The settings routes
 
-Both routes answer only under the composition's connection trust fence, and each answers one method. They carry facts and fixed codes, never prose: the refresh chain's operator diagnostics are Chinese-language text written for a log, so the browser chooses the guidance from its own dictionary.
+Every route answers only under the composition's connection trust fence, and each answers one method. They carry facts and fixed codes, never prose: the refresh chain's operator diagnostics are Chinese-language text written for a log, so the browser chooses the guidance from its own dictionary.
 
 | Route | Method | Answer |
 |---|---|---|
 | `/local-bridge/status` | `GET` | One snapshot: both relays' listeners and companion applications, the Copilot token's age, the unmet refresh prerequisites, and whether an attempt holds the refresh lock |
 | `/local-bridge/refresh` | `POST` | Whether a refresh process started, and a refusal code when it did not |
+| `/local-bridge/log` | `GET` | The tails of both transcripts the last attempt wrote, each with its absolute path and whether the file holds more |
 
 `POST /local-bridge/refresh` changes the Windows system proxy for about a minute and drives the Copilot window to send one message. It refuses off Windows, while the Copilot application is not running, while a prerequisite is unmet, while an earlier attempt holds the lock, and when the refresh script is missing.
+
+Each transcript tail is bounded to 16 KiB: `refresh-token.ps1` rewrites the transcript on every attempt, while the PowerShell trace appends to one file forever, so the bound is what keeps a long-lived harvest directory from being shipped to the browser. A read cut mid-file drops the partial leading line, and a cut inside a character leaves valid text.
+
+The two transcript filenames are `bridge/preflight.mjs`'s (`REFRESH_LOG_FILES`), not this package's: the module writes them, so it names them, and the control plane reads that name rather than guessing it.
 
 <a id="understand-the-implementation"></a>
 ## Understand the implementation

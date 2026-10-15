@@ -9,7 +9,7 @@
  * would change the Windows system proxy — can run. The filesystem is real.
  */
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -62,6 +62,7 @@ function preflightModule(options: {
     detectCa: () => Promise.resolve({ installed: true, notAfter: '2030-01-01' }),
     refreshCopilotToken: () => Promise.resolve(options.refresh ?? { started: true, logFile: '/probe/auto-refresh.log' }),
     REFRESH_LOCK_MS: 240_000,
+    REFRESH_LOG_FILES: { transcript: 'auto-refresh.log', spawn: 'auto-refresh.spawn.log' },
   }
 }
 
@@ -229,6 +230,35 @@ describe('local-bridge control routes', () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ started: false, refusal: 'spawn-failed', logFile: null })
     expect(logged.join('\n')).toContain('锁文件不可用：EACCES')
+  })
+
+  it('serves the refresh transcripts the harvest directory holds', async () => {
+    const base = await boot()
+    const harvest = join(root!, 'harvest')
+    await mkdir(harvest, { recursive: true })
+    await writeFile(join(harvest, 'auto-refresh.spawn.log'), 'PowerShell 退出：code=1\n', 'utf8')
+    const response = await fetch(`${base}/local-bridge/log`)
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    const payload = await response.json() as {
+      transcript: { path: string; text: string; truncated: boolean }
+      spawn: { text: string }
+    }
+    // The attempt never wrote a transcript, and that absence is a fact the page
+    // shows rather than an error.
+    expect(payload.transcript.text).toBe('')
+    expect(payload.transcript.truncated).toBe(false)
+    expect(payload.transcript.path.endsWith('auto-refresh.log')).toBe(true)
+    expect(payload.spawn.text).toBe('PowerShell 退出：code=1\n')
+  })
+
+  it('answers the log route only on GET, behind the same trust fence', async () => {
+    const base = await boot()
+    const posted = await fetch(`${base}/local-bridge/log`, { method: 'POST' })
+    expect(posted.status).toBe(405)
+    expect(posted.headers.get('allow')).toBe('GET')
+    trust.rejection = 403
+    expect((await fetch(`${base}/local-bridge/log`)).status).toBe(403)
   })
 
   it('answers a status read with the webserver refusal when the runtime cannot supply it', async () => {

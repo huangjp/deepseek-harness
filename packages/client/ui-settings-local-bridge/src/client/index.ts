@@ -19,7 +19,7 @@ import { LocalBridgeController } from './controller.ts'
 import { LocalBridgeSection, type LocalBridgeSectionInjected } from './LocalBridgeSection.tsx'
 import { en, zh, type LocalBridgeLocaleKey } from './locales.ts'
 
-export type { LocalBridgePageState } from './controller.ts'
+export type { LocalBridgeLogState, LocalBridgePageState } from './controller.ts'
 export type { LocalBridgeSectionInjected, LocalBridgeSectionProps } from './LocalBridgeSection.tsx'
 export type { LocalBridgeLocaleKey } from './locales.ts'
 
@@ -48,7 +48,7 @@ export function apply(ctx: ClientContext): void {
   // bound translate; copy freshness rides the locale revision.
   const t = ctx.locale.bind(NS)
   const injected = (): LocalBridgeSectionInjected => ({
-    hooks: { page: controller.page },
+    hooks: { page: controller.page, log: controller.logs },
     load: () => controller.load(),
     refresh: () => controller.refresh(),
     t,

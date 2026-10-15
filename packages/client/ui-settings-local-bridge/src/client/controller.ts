@@ -1,22 +1,24 @@
 /**
- * The local-model-relay page's status store.
+ * The local-model-relay page's stores.
  *
- * The page reads two host routes — one status snapshot and one refresh
- * trigger — over the same document-relative carrier the Open-In controls use.
- * A refresh is a detached one-to-two-minute process on the host, so the page
- * observes it instead of awaiting it: while the held lock and the token's age
- * say an attempt is still running, this controller keeps re-reading.
+ * The page reads three host routes — one status snapshot, one refresh trigger,
+ * and the refresh transcripts — over the same document-relative carrier the
+ * Open-In controls use. A refresh is a detached one-to-two-minute process on the
+ * host, so the page observes it instead of awaiting it: while the held lock and
+ * the token's age say an attempt is still running, this controller keeps
+ * re-reading, transcripts included.
  */
 
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import {
-  LOCAL_BRIDGE_REFRESH_ROUTE, LOCAL_BRIDGE_STATUS_ROUTE,
-  type LocalBridgeAppStatus, type LocalBridgeCopilotStatus, type LocalBridgePrerequisite,
-  type LocalBridgeRefreshPayload, type LocalBridgeRefreshRefusal, type LocalBridgeRelayStatus,
-  type LocalBridgeStatusPayload, type LocalBridgeTokenStatus, type LocalBridgeWorkBuddyStatus,
+  LOCAL_BRIDGE_LOG_ROUTE, LOCAL_BRIDGE_REFRESH_ROUTE, LOCAL_BRIDGE_STATUS_ROUTE,
+  type LocalBridgeAppStatus, type LocalBridgeCopilotStatus, type LocalBridgeLogPayload,
+  type LocalBridgePrerequisite, type LocalBridgeRefreshPayload, type LocalBridgeRefreshRefusal,
+  type LocalBridgeRelayStatus, type LocalBridgeStatusPayload, type LocalBridgeTokenStatus,
+  type LocalBridgeTranscript, type LocalBridgeWorkBuddyStatus,
 } from '@deepseek-ai/dsh-host-local-bridge/shared'
 
-/** HTTP carrier for the two control-plane routes. */
+/** HTTP carrier for the three control-plane routes. */
 type Fetch = (input: string | URL, init?: RequestInit) => Promise<Response>
 
 /**
@@ -34,7 +36,7 @@ const REFUSALS: readonly LocalBridgeRefreshRefusal[] = [
   'unsupported-platform', 'copilot-not-running', 'prerequisites-missing', 'busy', 'script-missing', 'spawn-failed',
 ]
 
-/** What the page renders. */
+/** What the page renders for the relays. */
 export type LocalBridgePageState =
   /** No snapshot read has settled yet. */
   | { readonly phase: 'loading' }
@@ -42,6 +44,15 @@ export type LocalBridgePageState =
   | { readonly phase: 'failed' }
   /** One status snapshot. */
   | { readonly phase: 'ready'; readonly status: LocalBridgeStatusPayload }
+
+/** What the page renders for the refresh transcripts. */
+export type LocalBridgeLogState =
+  /** No read has settled yet. */
+  | { readonly phase: 'loading' }
+  /** The host route did not answer, or answered with an unusable payload. */
+  | { readonly phase: 'unavailable' }
+  /** Both transcripts as the host last read them. */
+  | { readonly phase: 'ready'; readonly log: LocalBridgeLogPayload }
 
 /**
  * Whether the host is running a refresh attempt right now.
@@ -174,8 +185,31 @@ export function parseRefreshPayload(value: unknown): LocalBridgeRefreshPayload |
   return { started, refusal, logFile }
 }
 
+/** One transcript tail, or null when the payload does not describe one. */
+function parseTranscript(value: unknown): LocalBridgeTranscript | null {
+  if (!isRecord(value)) return null
+  const path = value['path']
+  const text = value['text']
+  const truncated = booleanOf(value['truncated'])
+  if (typeof path !== 'string' || typeof text !== 'string' || truncated === null) return null
+  return { path, text, truncated }
+}
+
 /**
- * Owns the page's status snapshot and the refresh request.
+ * Validate one log response at the wire.
+ * @param value - the decoded response body.
+ * @returns both tails, or null when the payload is unusable.
+ */
+export function parseLogPayload(value: unknown): LocalBridgeLogPayload | null {
+  if (!isRecord(value)) return null
+  const transcript = parseTranscript(value['transcript'])
+  const spawn = parseTranscript(value['spawn'])
+  return transcript === null || spawn === null ? null : { transcript, spawn }
+}
+
+/**
+ * Owns the page's status snapshot, the refresh transcripts, and the refresh
+ * request.
  *
  * One read is published at a time: a later read supersedes an earlier one still
  * in flight, so a slow answer cannot overwrite a fresher snapshot.
@@ -183,20 +217,50 @@ export function parseRefreshPayload(value: unknown): LocalBridgeRefreshPayload |
 export class LocalBridgeController {
   /** The page snapshot. */
   readonly page: SnapshotStore<LocalBridgePageState> = createSnapshotStore<LocalBridgePageState>({ phase: 'loading' })
+  /** The refresh transcripts, read alongside the snapshot. */
+  readonly logs: SnapshotStore<LocalBridgeLogState> = createSnapshotStore<LocalBridgeLogState>({ phase: 'loading' })
   private timer: ReturnType<typeof setTimeout> | undefined
   private generation = 0
+  private logGeneration = 0
   private disposed = false
 
   /**
-   * @param fetcher - HTTP carrier for the two routes.
+   * @param fetcher - HTTP carrier for the three routes.
    */
   constructor(private readonly fetcher: Fetch = (input, init) => fetch(input, init)) {}
 
   /**
-   * Read one status snapshot, and keep reading while a refresh attempt runs.
-   * @returns after the snapshot is published.
+   * Read one status snapshot and the transcripts behind it, and keep reading
+   * while a refresh attempt runs.
+   * @returns after both reads are published.
    */
   async load(): Promise<void> {
+    await this.readStatus()
+    await this.readLog()
+  }
+
+  /**
+   * Ask the host to start a refresh, then read the state it left behind.
+   * @returns the host's outcome, or null when the request itself failed.
+   */
+  async refresh(): Promise<LocalBridgeRefreshPayload | null> {
+    let outcome: LocalBridgeRefreshPayload | null = null
+    try {
+      const response = await this.fetcher(LOCAL_BRIDGE_REFRESH_ROUTE, { method: 'POST' })
+      outcome = response.ok ? parseRefreshPayload(await response.json()) : null
+    } catch {
+      // Swallows transport failures: the page reports the attempt as failed.
+      outcome = null
+    }
+    await this.load()
+    return outcome
+  }
+
+  /**
+   * Read one status snapshot, and queue the next read while an attempt runs.
+   * @returns after the snapshot is published.
+   */
+  private async readStatus(): Promise<void> {
     if (this.isDisposed()) return
     const generation = ++this.generation
     this.clearTimer()
@@ -216,20 +280,25 @@ export class LocalBridgeController {
   }
 
   /**
-   * Ask the host to start a refresh, then read the state it left behind.
-   * @returns the host's outcome, or null when the request itself failed.
+   * Read both refresh transcripts. A failure here is the transcripts' own
+   * state, so it never changes what the relays report.
+   * @returns after the transcripts are published.
    */
-  async refresh(): Promise<LocalBridgeRefreshPayload | null> {
-    let outcome: LocalBridgeRefreshPayload | null = null
+  private async readLog(): Promise<void> {
+    if (this.isDisposed()) return
+    const generation = ++this.logGeneration
+    let next: LocalBridgeLogState
     try {
-      const response = await this.fetcher(LOCAL_BRIDGE_REFRESH_ROUTE, { method: 'POST' })
-      outcome = response.ok ? parseRefreshPayload(await response.json()) : null
+      const response = await this.fetcher(LOCAL_BRIDGE_LOG_ROUTE, { headers: { accept: 'application/json' } })
+      const parsed = response.ok ? parseLogPayload(await response.json()) : null
+      next = parsed === null ? { phase: 'unavailable' } : { phase: 'ready', log: parsed }
     } catch {
-      // Swallows transport failures: the page reports the attempt as failed.
-      outcome = null
+      // Swallows transport failures: an older host without the route simply
+      // shows no transcripts rather than breaking the page.
+      next = { phase: 'unavailable' }
     }
-    await this.load()
-    return outcome
+    if (this.isDisposed() || generation !== this.logGeneration) return
+    this.logs.set(next)
   }
 
   /** Stop polling; the page calls this when it unmounts. */

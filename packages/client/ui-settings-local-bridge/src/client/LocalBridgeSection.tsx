@@ -11,26 +11,27 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import {
-  Button, Modal, relativeTime, StateDot,
+  Button, Modal, relativeTime, StateDot, writeClipboard,
   type RelativeTime, type StateDotState,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type {
-  LocalBridgeAppStatus, LocalBridgeCopilotStatus, LocalBridgePrerequisite,
+  LocalBridgeAppStatus, LocalBridgeCopilotStatus, LocalBridgeLogPayload, LocalBridgePrerequisite,
   LocalBridgeRefreshPayload, LocalBridgeRefreshRefusal, LocalBridgeStatusPayload,
 } from '@deepseek-ai/dsh-host-local-bridge/shared'
-import { refreshInFlight, type LocalBridgePageState } from './controller.ts'
+import { refreshInFlight, type LocalBridgeLogState, type LocalBridgePageState } from './controller.ts'
 import type { LocalBridgeLocaleKey, LocalBridgeTranslate } from './locales.ts'
 import styles from './LocalBridgeSection.module.css'
 
 /** Dependencies the renderer binds for the local-model-relay page. */
 export interface LocalBridgeSectionInjected {
-  /** The page snapshot, bound by the UI renderer as `usePage`. */
+  /** The page snapshot and the refresh transcripts, bound as `usePage`/`useLog`. */
   hooks: {
     page: SnapshotStore<LocalBridgePageState>
+    log: SnapshotStore<LocalBridgeLogState>
   }
-  /** Read one status snapshot now. */
+  /** Read the current snapshot and transcripts now. */
   load: () => Promise<void>
   /** Ask the host to refresh the Copilot token. */
   refresh: () => Promise<LocalBridgeRefreshPayload | null>
@@ -95,15 +96,19 @@ const REFUSAL_MESSAGE: Record<LocalBridgeRefreshRefusal, LocalBridgeLocaleKey> =
  * @returns the section, or null while the shell has not injected yet.
  */
 export function LocalBridgeSection(props: LocalBridgeSectionProps): ReactNode {
-  const { usePage, load, refresh, t } = props
-  if (usePage === undefined || load === undefined || refresh === undefined || t === undefined) return null
-  return <Loaded usePage={usePage} load={load} refresh={refresh} t={t} />
+  const { usePage, useLog, load, refresh, t } = props
+  if (usePage === undefined || useLog === undefined || load === undefined || refresh === undefined || t === undefined) {
+    return null
+  }
+  return <Loaded usePage={usePage} useLog={useLog} load={load} refresh={refresh} t={t} />
 }
 
 /** The page body, with every injected member present. */
-function Loaded({ usePage, load, refresh, t }: InjectFace<LocalBridgeSectionInjected>): ReactNode {
+function Loaded({ usePage, useLog, load, refresh, t }: InjectFace<LocalBridgeSectionInjected>): ReactNode {
   const state = usePage(value => value)
+  const logState = useLog(value => value)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [logOpen, setLogOpen] = useState(false)
   const [notice, setNotice] = useState<RefreshNotice>({ kind: 'none' })
   /**
    * The token this page saw before it asked for a refresh; `undefined` while
@@ -128,6 +133,11 @@ function Loaded({ usePage, load, refresh, t }: InjectFace<LocalBridgeSectionInje
     const now = status.copilot.token.harvestedAt
     setNotice({ kind: now === null || now === seen ? 'failed' : 'done' })
   }, [status])
+
+  // An attempt that failed or never started is exactly when the transcripts
+  // matter, so the log opens itself rather than waiting to be asked for.
+  const failed = notice.kind === 'failed' || notice.kind === 'refused' || notice.kind === 'request-failed'
+  useEffect(() => { if (failed) setLogOpen(true) }, [failed])
 
   const start = async (): Promise<void> => {
     setConfirmOpen(false)
@@ -195,6 +205,8 @@ function Loaded({ usePage, load, refresh, t }: InjectFace<LocalBridgeSectionInje
       </div>
 
       <Notice notice={notice} t={t} />
+
+      <RefreshLog state={logState} open={logOpen} onToggle={setLogOpen} t={t} />
 
       <Modal
         open={confirmOpen}
@@ -384,4 +396,82 @@ function Notice({ notice, t }: {
     default:
       return assertNever(notice, 'local-bridge refresh notice')
   }
+}
+
+/** The two transcripts, in the order the host writes them. */
+const TRANSCRIPT_KINDS = ['transcript', 'spawn'] as const
+
+/** Dictionary key naming one transcript. */
+const TRANSCRIPT_LABEL: Record<(typeof TRANSCRIPT_KINDS)[number], LocalBridgeLocaleKey> = {
+  transcript: 'logTranscript',
+  spawn: 'logSpawn',
+}
+
+/**
+ * The text one copy gesture places on the clipboard: every transcript that has
+ * content, each under the path it was read from, so a pasted log identifies
+ * itself.
+ * @param log - the transcripts the host served.
+ * @returns the text to copy.
+ */
+function copyText(log: LocalBridgeLogPayload): string {
+  return TRANSCRIPT_KINDS
+    .filter(kind => log[kind].text !== '')
+    .map(kind => `${log[kind].path}\n${log[kind].text}`)
+    .join('\n\n')
+}
+
+/**
+ * The refresh transcripts, collapsed until a failure opens them.
+ *
+ * A refresh that produces no token leaves its cause only in these files — the
+ * script's own transcript, or the PowerShell trace when the process never
+ * started — so the page shows them where the user already is instead of naming
+ * a path to go and read.
+ * @param props.state - the transcripts' read state.
+ * @param props.open - whether the disclosure is expanded.
+ * @param props.onToggle - received with the requested open state.
+ * @param props.t - the page's locale reader.
+ * @returns the disclosure, or null while there is nothing to show.
+ */
+function RefreshLog({ state, open, onToggle, t }: {
+  state: LocalBridgeLogState
+  open: boolean
+  onToggle: (open: boolean) => void
+  t: LocalBridgeTranslate
+}): ReactNode {
+  const [copied, setCopied] = useState<'idle' | 'done' | 'failed'>('idle')
+  const log = state.phase === 'ready' ? state.log : undefined
+  const texts = log === undefined ? [] : TRANSCRIPT_KINDS.filter(kind => log[kind].text !== '')
+  if (log === undefined || texts.length === 0) return null
+
+  const copy = async (): Promise<void> => {
+    setCopied(await writeClipboard(copyText(log)) ? 'done' : 'failed')
+  }
+
+  return (
+    <details
+      className={styles['log']}
+      open={open}
+      onToggle={(event) => { onToggle(event.currentTarget.open) }}
+    >
+      <summary className={styles['logSummary']}>{t('logTitle')}</summary>
+      <div className={styles['logBody']}>
+        {texts.map(kind => (
+          <div key={kind} className={styles['logBlock']}>
+            <p className={styles['logHeading']}>{t(TRANSCRIPT_LABEL[kind])}</p>
+            <p className={styles['logPath']}>{log[kind].path}</p>
+            <pre className={styles['logText']}>{log[kind].text}</pre>
+            {log[kind].truncated ? <p className={styles['logTruncated']}>{t('logTruncated')}</p> : null}
+          </div>
+        ))}
+        <div className={styles['logActions']}>
+          <Button variant="outline" onClick={() => { void copy() }}>{t('logCopy')}</Button>
+          <span className={styles['logStatus']} role="status" aria-live="polite">
+            {copied === 'idle' ? '' : t(copied === 'done' ? 'logCopied' : 'logCopyFailed')}
+          </span>
+        </div>
+      </div>
+    </details>
+  )
 }

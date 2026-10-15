@@ -11,9 +11,9 @@ import { Context } from '@deepseek-ai/cordis'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-test-runtime'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
-import type { LocalBridgeRefreshPayload, LocalBridgeStatusPayload } from '@deepseek-ai/dsh-host-local-bridge/shared'
+import type { LocalBridgeLogPayload, LocalBridgeRefreshPayload, LocalBridgeStatusPayload } from '@deepseek-ai/dsh-host-local-bridge/shared'
 import { LocalBridgeSection, type LocalBridgeSectionProps } from '../src/client/LocalBridgeSection.tsx'
-import type { LocalBridgePageState } from '../src/client/controller.ts'
+import type { LocalBridgeLogState, LocalBridgePageState } from '../src/client/controller.ts'
 import { NS } from '../src/client/index.ts'
 import { en, zh } from '../src/client/locales.ts'
 
@@ -54,6 +54,20 @@ function status(overrides: {
   }
 }
 
+/** One refresh-transcript payload the host serves, overridable per test. */
+function transcripts(overrides: {
+  transcriptText?: string
+  spawnText?: string
+  truncated?: boolean
+} = {}): LocalBridgeLogPayload {
+  const tail = (path: string, text: string): LocalBridgeLogPayload['transcript'] =>
+    ({ path, text, truncated: overrides.truncated ?? false })
+  return {
+    transcript: tail('C:/probe/auto-refresh.log', overrides.transcriptText ?? ''),
+    spawn: tail('C:/probe/auto-refresh.spawn.log', overrides.spawnText ?? ''),
+  }
+}
+
 /** The three actions the page calls, each a mock the test can inspect. */
 function actions(overrides: {
   load?: () => Promise<void>
@@ -66,25 +80,33 @@ function actions(overrides: {
   }
 }
 
-/** Render the page over one store, with actions the test can inspect. */
-function renderPage(state: LocalBridgePageState, overrides: Parameters<typeof actions>[0] = {}) {
+/** Render the page over one pair of stores, with actions the test can inspect. */
+function renderPage(
+  state: LocalBridgePageState,
+  overrides: Parameters<typeof actions>[0] = {},
+  log: LocalBridgeLogState = { phase: 'ready', log: transcripts() },
+) {
   const store = createSnapshotStore<LocalBridgePageState>(state)
+  const logs = createSnapshotStore<LocalBridgeLogState>(log)
   const bound = actions(overrides)
-  render(<LocalBridgeSection {...bound} usePage={bindSnapshotSelector(store)} />)
-  return { store, ...bound }
+  render(<LocalBridgeSection {...bound} usePage={bindSnapshotSelector(store)} useLog={bindSnapshotSelector(logs)} />)
+  return { store, logs, ...bound }
 }
 
 describe('LocalBridgeSection injection', () => {
   it('renders nothing until every injected member has arrived', () => {
     const store = createSnapshotStore<LocalBridgePageState>({ phase: 'loading' })
+    const logs = createSnapshotStore<LocalBridgeLogState>({ phase: 'loading' })
     const usePage = bindSnapshotSelector(store)
+    const useLog = bindSnapshotSelector(logs)
     const bound = actions()
     // Each partial omits exactly one member, so every guard operand decides once.
     const partials: readonly LocalBridgeSectionProps[] = [
-      { load: bound.load, refresh: bound.refresh, t },
-      { usePage, refresh: bound.refresh, t },
-      { usePage, load: bound.load, t },
-      { usePage, load: bound.load, refresh: bound.refresh },
+      { useLog, load: bound.load, refresh: bound.refresh, t },
+      { usePage, load: bound.load, refresh: bound.refresh, t },
+      { usePage, useLog, refresh: bound.refresh, t },
+      { usePage, useLog, load: bound.load, t },
+      { usePage, useLog, load: bound.load, refresh: bound.refresh },
     ]
     for (const partial of partials) {
       const { container, unmount } = render(<LocalBridgeSection {...partial} />)
@@ -346,5 +368,121 @@ describe('LocalBridgeSection refresh action', () => {
     fireEvent.click(screen.getByRole('button', { name: en.refresh }))
     fireEvent.click(screen.getByRole('button', { name: en.confirm }))
     await waitFor(() => { expect(screen.getByText(en.loadFailed)).toBeTruthy() })
+  })
+})
+
+describe('LocalBridgeSection refresh log', () => {
+  it('shows nothing at all while no attempt has written a transcript', () => {
+    renderPage({ phase: 'ready', status: status() }, {}, { phase: 'ready', log: transcripts() })
+    expect(screen.queryByText(en.logTitle)).toBeNull()
+    expect(screen.queryByRole('button', { name: en.logCopy })).toBeNull()
+  })
+
+  it('shows nothing while the transcripts are still unread or unavailable', () => {
+    renderPage({ phase: 'ready', status: status() }, {}, { phase: 'loading' })
+    expect(screen.queryByText(en.logTitle)).toBeNull()
+    renderPage({ phase: 'ready', status: status() }, {}, { phase: 'unavailable' })
+    expect(screen.queryByText(en.logTitle)).toBeNull()
+  })
+
+  it('shows each transcript under its own heading and path, collapsed until asked', () => {
+    renderPage({ phase: 'ready', status: status() }, {}, {
+      phase: 'ready',
+      log: transcripts({ transcriptText: '第 1 轮\n', spawnText: 'PowerShell 退出：code=1\n' }),
+    })
+
+    expect(screen.getByText(en.logTitle)).toBeTruthy()
+    expect(screen.getByText(en.logTranscript)).toBeTruthy()
+    expect(screen.getByText(en.logSpawn)).toBeTruthy()
+    expect(screen.getByText('C:/probe/auto-refresh.log')).toBeTruthy()
+    // `getByText` normalizes whitespace, so each transcript is matched by its
+    // content without the trailing line break the file carries.
+    expect(screen.getByText('第 1 轮')).toBeTruthy()
+    expect(screen.getByText('PowerShell 退出：code=1')).toBeTruthy()
+    // Nothing was asked for, so the disclosure stays closed.
+    expect(screen.getByText(en.logTitle).closest('details')).toHaveProperty('open', false)
+  })
+
+  it('omits a transcript that holds nothing', () => {
+    renderPage({ phase: 'ready', status: status() }, {}, {
+      phase: 'ready',
+      log: transcripts({ transcriptText: 'only the script spoke\n' }),
+    })
+    expect(screen.getByText(en.logTranscript)).toBeTruthy()
+    expect(screen.queryByText(en.logSpawn)).toBeNull()
+  })
+
+  it('says so when only the tail of a transcript is shown', () => {
+    renderPage({ phase: 'ready', status: status() }, {}, {
+      phase: 'ready',
+      log: transcripts({ spawnText: 'x\n', truncated: true }),
+    })
+    expect(screen.getByText(en.logTruncated)).toBeTruthy()
+  })
+
+  it('opens itself when a refresh fails, because that is when it is needed', async () => {
+    const refresh = vi.fn(() => Promise.resolve<LocalBridgeRefreshPayload | null>({
+      started: true, refusal: null, logFile: null,
+    }))
+    const { store } = renderPage({ phase: 'ready', status: status() }, { refresh }, {
+      phase: 'ready',
+      log: transcripts({ transcriptText: '第 1 轮\n' }),
+    })
+    expect(screen.getByText(en.logTitle).closest('details')).toHaveProperty('open', false)
+
+    fireEvent.click(screen.getByRole('button', { name: en.refresh }))
+    fireEvent.click(screen.getByRole('button', { name: en.confirm }))
+    store.set({ phase: 'ready', status: status({ refreshStartedAt: null }) })
+
+    await waitFor(() => { expect(screen.getByText(en.logTitle).closest('details')).toHaveProperty('open', true) })
+  })
+
+  it('opens itself when the host refused the attempt outright', async () => {
+    const refresh = vi.fn(() => Promise.resolve<LocalBridgeRefreshPayload | null>({
+      started: false, refusal: 'busy', logFile: null,
+    }))
+    const { store } = renderPage({ phase: 'ready', status: status() }, { refresh }, {
+      phase: 'ready',
+      log: transcripts({ transcriptText: '第 1 轮\n' }),
+    })
+    store.set({ phase: 'ready', status: status({ refreshStartedAt: 1_000_000 }) })
+
+    fireEvent.click(screen.getByRole('button', { name: en.refresh }))
+    fireEvent.click(screen.getByRole('button', { name: en.confirm }))
+
+    await waitFor(() => { expect(screen.getByText(en.logTitle).closest('details')).toHaveProperty('open', true) })
+  })
+
+  it('copies both transcripts under the path each came from', async () => {
+    const write = vi.fn((_text: string) => true)
+    vi.stubGlobal('navigator', { clipboard: { writeText: write } })
+    renderPage({ phase: 'ready', status: status() }, {}, {
+      phase: 'ready',
+      log: transcripts({ transcriptText: '第 1 轮\n', spawnText: 'PowerShell 退出：code=1\n' }),
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: en.logCopy }))
+
+    await waitFor(() => { expect(write).toHaveBeenCalledTimes(1) })
+    // Each transcript keeps its own trailing newline, so the block separator
+    // adds one blank line on top of it.
+    expect(write.mock.calls[0]?.[0]).toBe(
+      'C:/probe/auto-refresh.log\n第 1 轮\n\n\nC:/probe/auto-refresh.spawn.log\nPowerShell 退出：code=1\n',
+    )
+    await waitFor(() => { expect(screen.getByText(en.logCopied)).toBeTruthy() })
+    vi.unstubAllGlobals()
+  })
+
+  it('reports a copy the browser refused instead of claiming success', async () => {
+    vi.stubGlobal('navigator', { clipboard: { writeText: () => Promise.reject(new Error('denied')) } })
+    renderPage({ phase: 'ready', status: status() }, {}, {
+      phase: 'ready',
+      log: transcripts({ transcriptText: '第 1 轮\n' }),
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: en.logCopy }))
+
+    await waitFor(() => { expect(screen.getByText(en.logCopyFailed)).toBeTruthy() })
+    vi.unstubAllGlobals()
   })
 })

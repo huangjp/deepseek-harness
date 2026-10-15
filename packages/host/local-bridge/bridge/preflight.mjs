@@ -30,6 +30,19 @@ export const TOKEN_STALE_SEC = 45 * 60;
 /** 自动刷新的并发保护窗口：这么长时间内的重复触发会被忽略。 */
 export const REFRESH_LOCK_MS = 240_000;
 
+/**
+ * 刷新链路在收割目录里写下的两份转录（文件名，不含目录）。
+ *
+ * 由本模块拥有：写入方是 refreshCopilotToken()，读取方是宿主控制面 ——
+ * 控制面要能把日志送到设置页，就不能自己再猜一遍文件名。transcript 是脚本内
+ * Start-Transcript 的输出；spawn 是 PowerShell 自身这一层的痕迹，「进程压根
+ * 没起来」只有它记得。两份职责不同，互不覆盖。
+ */
+export const REFRESH_LOG_FILES = {
+  transcript: 'auto-refresh.log',
+  spawn: 'auto-refresh.spawn.log',
+};
+
 /** 配套应用的检测与启动描述。 */
 export const APPS = {
   workbuddy: {
@@ -496,10 +509,10 @@ export async function refreshCopilotToken(options) {
     return { started: false, reason: `锁文件不可用：${error?.message ?? error}` };
   }
 
-  const logFile = options.logFile ?? path.join(harvestDir, 'auto-refresh.log');
+  const logFile = options.logFile ?? path.join(harvestDir, REFRESH_LOG_FILES.transcript);
   // PowerShell 自身这一层的痕迹单独落一份：Start-Transcript 只能覆盖脚本内部的
   // Write-Host，抓不到「进程压根没起来」这种更早的失败。两个文件分工明确、互不覆盖。
-  const spawnLog = path.join(harvestDir, 'auto-refresh.spawn.log');
+  const spawnLog = path.join(harvestDir, REFRESH_LOG_FILES.spawn);
   // 脚本所在目录：scriptblock 方式执行时 $PSScriptRoot 为空，得显式传进去，
   // 否则脚本里的收割插件路径（token-harvester.py）会解析错。
   const bridgeDir = path.dirname(scriptPath);

@@ -19,6 +19,7 @@ export type LocalBridgeLocaleKey =
   | 'prereqMitmdump' | 'prereqHarvester' | 'prereqUpstreamProxy' | 'prereqCa'
   | 'guidanceMitmdump' | 'guidanceHarvester' | 'guidanceUpstreamProxy' | 'guidanceCa'
   | 'refresh' | 'refreshing' | 'refreshRunning' | 'refreshDone' | 'refreshFailed'
+  | 'logTitle' | 'logTranscript' | 'logSpawn' | 'logTruncated' | 'logCopy' | 'logCopied' | 'logCopyFailed'
   | 'confirmTitle' | 'confirmBody' | 'confirm' | 'cancel' | 'close'
   | 'refusalUnsupportedPlatform' | 'refusalCopilotNotRunning' | 'refusalPrerequisitesMissing'
   | 'refusalBusy' | 'refusalScriptMissing' | 'refusalSpawnFailed'
@@ -75,7 +76,14 @@ export const en: Record<LocalBridgeLocaleKey, string> = {
   refreshing: 'Refreshing…',
   refreshRunning: 'Refreshing. This usually takes one to two minutes, and the system proxy points at the local interception proxy meanwhile.',
   refreshDone: 'Refreshed. The relay keeps working for about another hour.',
-  refreshFailed: 'The refresh produced no new token. Check the log, then try again.',
+  refreshFailed: 'The refresh produced no new token. The log below names what stopped it.',
+  logTitle: 'Refresh log',
+  logTranscript: 'Script transcript',
+  logSpawn: 'PowerShell startup trace',
+  logTruncated: 'Only the tail of this file is shown; open the path above for the whole thing.',
+  logCopy: 'Copy log',
+  logCopied: 'Copied',
+  logCopyFailed: 'The browser refused the copy; select the text and copy it by hand.',
   confirmTitle: 'Refresh the Copilot token?',
   confirmBody: 'This changes the Windows system proxy for about a minute and drives the Copilot window to send one message. Leave Copilot running and avoid other network work until it finishes.',
   confirm: 'Start refresh',
@@ -134,7 +142,14 @@ export const zh: Record<LocalBridgeLocaleKey, string> = {
   refreshing: '刷新中…',
   refreshRunning: '正在刷新，通常需要 1–2 分钟。期间系统代理会临时指向本地拦截代理。',
   refreshDone: '刷新完成，中继大约还能再用一小时。',
-  refreshFailed: '这次刷新没有产生新令牌。看一下日志再重试。',
+  refreshFailed: '这次刷新没有产生新令牌，下面的日志会说明卡在哪里。',
+  logTitle: '刷新日志',
+  logTranscript: '脚本转录',
+  logSpawn: 'PowerShell 启动记录',
+  logTruncated: '这里只显示文件末尾一段；要看全文请打开上面的路径。',
+  logCopy: '复制日志',
+  logCopied: '已复制',
+  logCopyFailed: '浏览器拒绝了复制，请手动选中文本复制。',
   confirmTitle: '刷新 Copilot 令牌？',
   confirmBody: '该操作会临时修改 Windows 系统代理约 1 分钟，并自动驱动 Copilot 窗口发送一条消息。期间请保持 Copilot 运行，也不要进行其他联网操作。',
   confirm: '开始刷新',

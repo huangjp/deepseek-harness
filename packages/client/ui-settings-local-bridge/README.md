@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@deepseek-ai/dsh-client-ui-settings-local-bridge` is the “Local model services” page of the dsh web client. It reads two routes served by `@deepseek-ai/dsh-host-local-bridge` and shows both bundled relays: whether each is listening, whether the desktop application behind it is running, how old the harvested Copilot access token is, and which requirements a refresh is still missing. One confirmed action asks the host to refresh that token, and the page then reports the attempt's progress until a newer token arrives. The page writes no settings namespace.
+`@deepseek-ai/dsh-client-ui-settings-local-bridge` is the “Local model services” page of the dsh web client. It reads three routes served by `@deepseek-ai/dsh-host-local-bridge` and shows both bundled relays: whether each is listening, whether the desktop application behind it is running, how old the harvested Copilot access token is, and which requirements a refresh is still missing. One confirmed action asks the host to refresh that token, and the page then reports the attempt's progress until a newer token arrives, with the transcripts that attempt wrote below it. The page writes no settings namespace.
 
 ## Table of Contents
 
@@ -36,8 +36,15 @@ The page is read-only about the machine and its state lives where its owner put 
 | The Copilot token | When it was harvested, that age in the active language, and whether it is past the platform's one-hour lifetime |
 | Refresh requirements | Four checks — the interception proxy, the harvest script, the upstream proxy, and the interception certificate — each with its remedy while unmet |
 | The refresh action | One confirmed gesture, its progress while the host harvests, and its outcome once the token lands |
+| The refresh log | Both transcripts the last attempt wrote, each under its own heading and path, with one action that copies them together |
 
 The action is offered only where the host would accept it: on Windows, with the Copilot application running, with every requirement met, and with no attempt already in flight. A refusal the host returns anyway is reported with the reason it names.
+
+### Reading the refresh log
+
+A refresh that produces no token leaves its cause only in the transcripts — the script's own record, or the PowerShell trace when the process never started at all — so the page shows them where the user already is instead of naming a path to go and read. The disclosure opens itself whenever an attempt fails or is refused, and stays shut otherwise; a transcript holding nothing is left out, and one the host truncated says so.
+
+Copying places both transcripts on the clipboard, each preceded by the absolute path it came from, so a pasted log identifies its own files. A copy the browser refuses is reported rather than silently dropped.
 
 ### Refusals
 
@@ -57,10 +64,10 @@ The host answers a refresh request with a fixed code, and the page chooses the s
 
 Two decisions are load-bearing:
 
-- **The page observes a refresh; it never waits for one.** A refresh is a detached one-to-two-minute process on the host, so the page shows a running notice while the host's lock is held, and keeps re-reading every five seconds until it can tell the attempt finished. Completion is read from two facts rather than from the lock alone: the lock outlives the process that took it, so a token harvested after the lock was claimed is what marks success. An attempt that ends without one is reported as a failure rather than as a silent success.
-- **The wire is validated where it enters.** Every status response is checked field by field before it reaches render, so a payload this build cannot read becomes the page's failed state instead of rendering garbage. A prerequisite or refusal code this build does not know is dropped rather than failing the read, because a version skew must not blank the checklist the rest of the payload fills.
+- **The page observes a refresh; it never waits for one.** A refresh is a detached one-to-two-minute process on the host, so the page shows a running notice while the host's lock is held, and keeps re-reading every five seconds — transcripts included — until it can tell the attempt finished. Completion is read from two facts rather than from the lock alone: the lock outlives the process that took it, so a token harvested after the lock was claimed is what marks success. An attempt that ends without one is reported as a failure rather than as a silent success.
+- **The wire is validated where it enters.** Every response is checked field by field before it reaches render, so a payload this build cannot read becomes the page's own failed state instead of rendering garbage. A prerequisite or refusal code this build does not know is dropped rather than failing the read, because a version skew must not blank the checklist the rest of the payload fills. A host too old to serve the log route shows no transcripts, which is not an error.
 
-The page's status store coalesces nothing: a later read supersedes an earlier one still in flight, so a slow answer cannot overwrite a fresher snapshot, and disposal stops both polling and publishing.
+Each store coalesces nothing: a later read supersedes an earlier one still in flight, so a slow answer cannot overwrite a fresher snapshot, and disposal stops both polling and publishing. The transcripts keep their own store because a growing log must not re-render the relay facts.
 
 <a id="further-exploration"></a>
 ## Further Exploration
@@ -84,7 +91,7 @@ None; this package neither assembles nor sends a provider request.
 - **A refresh cannot be cancelled or awaited.** The host starts a detached process, so the page can report that it started and then only observe; leaving the settings page does not stop it.
 - **The upstream proxy is the user's own.** The refresh chain tunnels through `127.0.0.1:7890`, the mixed port of the client it ships against. The page reports that requirement as unmet, but it cannot configure a different one.
 - **The refresh lock outlives the attempt.** The reminder notice clears when the token advances, so a failed attempt reads as a failure promptly; a second gesture inside the host's lock window is refused as busy rather than queued.
-- **No progress beyond the token's timestamp.** The host exposes a transcript path, not a parsed progress stream, so the page cannot show which stage an attempt reached.
+- **No progress beyond the transcripts.** The host serves the attempts' raw output, not a parsed progress stream, so the page cannot show which stage an attempt reached — it shows what the script wrote.
 
 ### Dev Note
 

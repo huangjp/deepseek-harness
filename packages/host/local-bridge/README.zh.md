@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## Summary
 
-`@deepseek-ai/dsh-host-local-bridge` 把随桌面安装包分发的两个模型反代作为各自独立的回环监听启动：WorkBuddy 反代在 `127.0.0.1:8787`，Microsoft Copilot 反代在 `127.0.0.1:8899`。在任一开始监听之前，它会跑一次依赖预检：拉起背后的桌面应用、部署收割文件、导入拦截证书，并在 Copilot 访问令牌陈旧时刷新它。同一个插件还提供「本地模型服务」设置页读取的两条路由：一份两个反代的状态快照，以及触发 Copilot 令牌刷新的入口。
+`@deepseek-ai/dsh-host-local-bridge` 把随桌面安装包分发的两个模型反代作为各自独立的回环监听启动：WorkBuddy 反代在 `127.0.0.1:8787`，Microsoft Copilot 反代在 `127.0.0.1:8899`。在任一开始监听之前，它会跑一次依赖预检：拉起背后的桌面应用、部署收割文件、导入拦截证书，并在 Copilot 访问令牌陈旧时刷新它。同一个插件还提供「本地模型服务」设置页读取的路由：一份两个反代的状态快照、触发 Copilot 令牌刷新的入口，以及那次刷新写下的两份转录的末尾内容。
 
 ## Table of Contents
 
@@ -46,14 +46,19 @@ kind: "package-reference"
 
 ### The settings routes
 
-两条路由都只在组合的连接信任闸门之下应答，且各自只接受一种方法。它们只传事实与固定代码，不传文案：刷新链路的操作提示是写给日志的中文，所以指引由浏览器查自己的字典得出。
+每条路由都只在组合的连接信任闸门之下应答，且各自只接受一种方法。它们只传事实与固定代码，不传文案：刷新链路的操作提示是写给日志的中文，所以指引由浏览器查自己的字典得出。
 
 | Route | Method | Answer |
 |---|---|---|
 | `/local-bridge/status` | `GET` | 一份快照：两个反代的监听与配套应用、Copilot 令牌年龄、未满足的刷新前置条件，以及当前是否有一次刷新持有锁 |
 | `/local-bridge/refresh` | `POST` | 是否已启动刷新进程；未启动时给出拒绝代码 |
+| `/local-bridge/log` | `GET` | 上一次尝试写下的两份转录的末尾一段，各自带绝对路径，以及文件是否还有更多内容 |
 
 `POST /local-bridge/refresh` 会把 Windows 系统代理改向约一分钟，并驱动 Copilot 窗口发送一条消息。非 Windows、Copilot 未运行、前置条件未满足、已有一次刷新持锁、刷新脚本缺失，这五种情况下它都拒绝执行。
+
+每份转录都截取末尾 16 KiB：`refresh-token.ps1` 每次尝试都会重写转录，而 PowerShell 那一路的痕迹会一直追加到同一个文件，所以这个上限决定了长期使用的收割目录不会整个被送到浏览器。从文件中间开始读时会丢掉开头那半行，截断落在字符中间时解出的文本仍然是合法的。
+
+两个转录文件名归 `bridge/preflight.mjs` 所有（`REFRESH_LOG_FILES`）：写它们的是那个模块，所以由它命名，控制面读这个名字而不是自己猜。
 
 <a id="understand-the-implementation"></a>
 ## Understand the implementation

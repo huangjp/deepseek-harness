@@ -175,3 +175,114 @@
 .dialog {
   width: min(480px, 100%);
 }
+
+.log {
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+  padding-top: 10px;
+}
+
+/* Native disclosure marker replaced by a rotating chevron: the built-in
+   triangle differs per engine and cannot take the label color. */
+.logSummary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  padding: 2px 4px;
+  margin-left: -4px;
+  border-radius: var(--dsw-radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-secondary);
+  list-style: none;
+}
+
+.logSummary::-webkit-details-marker {
+  display: none;
+}
+
+.logSummary::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid currentcolor;
+  border-bottom: 1.5px solid currentcolor;
+  transform: rotate(-45deg) translate(-1px, -1px);
+  transition: transform 120ms ease;
+}
+
+.log[open] > .logSummary::before {
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+
+.logSummary:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+.logBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 10px;
+}
+
+.logBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.logHeading {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.logPath {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+  overflow-wrap: anywhere;
+}
+
+/* Raw program output: monospace, a fixed height so one long attempt cannot
+   push the rest of the page out of view, and its own scroll. */
+.logText {
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 0.5px solid var(--dsw-alias-settings-card-stroke);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-settings-card-fill);
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.logTruncated {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.logActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logStatus {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}

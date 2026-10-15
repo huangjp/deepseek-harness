@@ -43,6 +43,12 @@ const status = {
   },
 }
 
+/** The transcript payload the stubbed transport answers for its own route. */
+const logs = {
+  transcript: { path: 'C:/probe/auto-refresh.log', text: '', truncated: false },
+  spawn: { path: 'C:/probe/auto-refresh.spawn.log', text: '', truncated: false },
+}
+
 afterEach(() => { vi.unstubAllGlobals() })
 
 /** A client root carrying the slot registry and a locale at one language. */
@@ -96,12 +102,15 @@ describe('ui-settings-local-bridge apply', () => {
     await vi.waitFor(() => { expect(label()).toBe('本地模型服务') })
   })
 
-  it('injects the page store, its two actions, and its copy', async () => {
+  it('injects the page stores, its two actions, and its copy', async () => {
     const { ctx, slots } = await bench()
     declareRoot(slots)
     await ctx.plugin({ inject: [...inject], apply }).await()
 
-    const fetcher = vi.fn(() => Promise.resolve(new Response(JSON.stringify(status), { status: 200 })))
+    const fetcher = vi.fn((input: string | URL) => {
+      const body = String(input) === 'local-bridge/log' ? logs : status
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }))
+    })
     vi.stubGlobal('fetch', fetcher)
     const face = faceOf(slots)
     expect(Object.keys(face).sort()).toEqual(['hooks', 'load', 'refresh', 't'])
@@ -109,6 +118,7 @@ describe('ui-settings-local-bridge apply', () => {
 
     await face.load()
     expect(fetcher).toHaveBeenCalledWith('local-bridge/status', { headers: { accept: 'application/json' } })
+    expect(fetcher).toHaveBeenCalledWith('local-bridge/log', { headers: { accept: 'application/json' } })
   })
 
   it('posts a refresh request through the same face', async () => {
@@ -116,14 +126,19 @@ describe('ui-settings-local-bridge apply', () => {
     declareRoot(slots)
     await ctx.plugin({ inject: [...inject], apply }).await()
 
-    const fetcher = vi.fn(() => Promise.resolve(new Response(JSON.stringify({
-      started: true, refusal: null, logFile: '/probe/auto-refresh.log',
-    }), { status: 200 })))
+    const fetcher = vi.fn((input: string | URL) => {
+      const body: unknown = String(input) === 'local-bridge/log'
+        ? logs
+        : { started: true, refusal: null, logFile: '/probe/auto-refresh.log' }
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }))
+    })
     vi.stubGlobal('fetch', fetcher)
     const face = faceOf(slots)
 
     expect(await face.refresh()).toEqual({ started: true, refusal: null, logFile: '/probe/auto-refresh.log' })
-    expect(fetcher).toHaveBeenNthCalledWith(1, 'local-bridge/refresh', { method: 'POST' })
+    expect(fetcher).toHaveBeenCalledWith('local-bridge/refresh', { method: 'POST' })
+    // The read that follows a refresh carries the transcripts the attempt wrote.
+    expect(fetcher).toHaveBeenCalledWith('local-bridge/log', { headers: { accept: 'application/json' } })
   })
 
   it('collapses the page and stops its polling on teardown', async () => {
@@ -139,7 +154,10 @@ describe('ui-settings-local-bridge apply', () => {
     expect(slots.entries('settings.section')).toHaveLength(0)
     // The disposed store accepts no further read, so the page cannot resurrect
     // itself through a face a caller still holds.
-    const fetcher = vi.fn(() => Promise.resolve(new Response(JSON.stringify(status), { status: 200 })))
+    const fetcher = vi.fn((input: string | URL) => {
+      const body = String(input) === 'local-bridge/log' ? logs : status
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200 }))
+    })
     vi.stubGlobal('fetch', fetcher)
     await face.load()
     expect(fetcher).not.toHaveBeenCalled()

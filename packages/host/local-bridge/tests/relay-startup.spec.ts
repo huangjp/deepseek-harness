@@ -82,6 +82,7 @@ const CONTROL_EXPORTS = {
   detectCa: () => Promise.resolve({ installed: false, notAfter: null }),
   refreshCopilotToken: () => Promise.resolve({ started: false }),
   REFRESH_LOCK_MS: 240_000,
+  REFRESH_LOG_FILES: { transcript: 'auto-refresh.log', spawn: 'auto-refresh.spawn.log' },
 }
 
 /**

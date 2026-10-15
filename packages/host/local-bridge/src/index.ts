@@ -35,8 +35,8 @@ import z from '@deepseek-ai/schemastery'
 import { createLocalBridgeControl, type PreflightFacts } from './control.ts'
 import { internals } from './internals.ts'
 import {
-  LOCAL_BRIDGE_REFRESH_PATH, LOCAL_BRIDGE_STATUS_PATH,
-  type LocalBridgeRefreshPayload, type LocalBridgeStatusPayload,
+  LOCAL_BRIDGE_LOG_PATH, LOCAL_BRIDGE_REFRESH_PATH, LOCAL_BRIDGE_STATUS_PATH,
+  type LocalBridgeLogPayload, type LocalBridgeRefreshPayload, type LocalBridgeStatusPayload,
 } from './shared.ts'
 
 /** Stable Cordis plugin name. */
@@ -224,10 +224,12 @@ function preflightRunner(module: Record<string, unknown>): PreflightModule {
  * @throws 当模块缺少任一必需导出时。
  */
 function preflightFacts(module: Record<string, unknown>): PreflightFacts {
-  const { detectHarvest, detectAllApps, detectCa, refreshCopilotToken, REFRESH_LOCK_MS } = module
+  const { detectHarvest, detectAllApps, detectCa, refreshCopilotToken, REFRESH_LOCK_MS, REFRESH_LOG_FILES } = module
+  const files = REFRESH_LOG_FILES as { transcript?: unknown; spawn?: unknown } | null | undefined
   if (typeof detectHarvest !== 'function' || typeof detectAllApps !== 'function'
     || typeof detectCa !== 'function' || typeof refreshCopilotToken !== 'function'
-    || typeof REFRESH_LOCK_MS !== 'number') {
+    || typeof REFRESH_LOCK_MS !== 'number'
+    || typeof files?.transcript !== 'string' || typeof files.spawn !== 'string') {
     throw new Error('local-bridge: bridge/preflight.mjs 缺少控制面所需的导出')
   }
   return {
@@ -236,6 +238,7 @@ function preflightFacts(module: Record<string, unknown>): PreflightFacts {
     detectCa: detectCa as PreflightFacts['detectCa'],
     refreshCopilotToken: refreshCopilotToken as PreflightFacts['refreshCopilotToken'],
     refreshLockMs: REFRESH_LOCK_MS,
+    refreshLogFiles: { transcript: files.transcript, spawn: files.spawn },
   }
 }
 
@@ -336,6 +339,20 @@ function registerControlRoutes(ctx: Context, options: ControlRouteOptions): void
         sendJson(res, 200, payload)
       },
     }), `local-bridge: POST ${LOCAL_BRIDGE_REFRESH_PATH}`)
+
+    scope.effect(() => scope.webServer.register({
+      kind: 'exact',
+      path: LOCAL_BRIDGE_LOG_PATH,
+      handler: async (req, res) => {
+        if (rejected(req, res)) return
+        if (req.method !== 'GET') {
+          sendMethodNotAllowed(res, 'GET')
+          return
+        }
+        const payload: LocalBridgeLogPayload = await control.log()
+        sendJson(res, 200, payload)
+      },
+    }), `local-bridge: GET ${LOCAL_BRIDGE_LOG_PATH}`)
   })
 }
 

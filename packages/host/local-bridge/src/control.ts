@@ -12,17 +12,19 @@
  */
 
 import { existsSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { open, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import net from 'node:net'
 import type {
   LocalBridgeAppStatus,
   LocalBridgeCopilotStatus,
+  LocalBridgeLogPayload,
   LocalBridgePrerequisite,
   LocalBridgeRefreshPayload,
   LocalBridgeRefreshRefusal,
   LocalBridgeStatusPayload,
   LocalBridgeTokenStatus,
+  LocalBridgeTranscript,
 } from './shared.ts'
 
 /**
@@ -33,6 +35,15 @@ import type {
  * `bridge/preflight.mjs` runs for the same ports.
  */
 const PORT_PROBE_TIMEOUT_MS = 800
+
+/**
+ * How much of each refresh transcript the page receives. A bound of the read
+ * protocol rather than a deployment choice: the transcript is rewritten by
+ * every attempt, while the spawn trace appends to one file forever, so this is
+ * what keeps a long-lived harvest directory from being shipped to the browser.
+ * It is far larger than one attempt writes.
+ */
+const LOG_TAIL_BYTES = 16 * 1024
 
 /** The subset of `bridge/preflight.mjs` this control plane reads. */
 export interface PreflightFacts {
@@ -59,6 +70,8 @@ export interface PreflightFacts {
   }>
   /** Concurrency window a refresh attempt holds its lock for, in milliseconds. */
   refreshLockMs: number
+  /** The two transcript filenames one attempt writes into the harvest directory. */
+  refreshLogFiles: { transcript: string; spawn: string }
 }
 
 /** Paths and ports the control plane reads from the composition. */
@@ -87,6 +100,61 @@ export interface LocalBridgeControl {
   status(): Promise<LocalBridgeStatusPayload>
   /** @returns whether a refresh process started, and why not when it did not. */
   refresh(): Promise<LocalBridgeRefreshPayload>
+  /** @returns the tails of both refresh transcripts the last attempt wrote. */
+  log(): Promise<LocalBridgeLogPayload>
+}
+
+/**
+ * Read one file's tail as text.
+ *
+ * A cut can land inside a character or a line, so the bytes are decoded
+ * leniently and, when the read started mid-file, everything before the first
+ * line break is dropped. The caller is told the file held more.
+ * @param path - absolute path of the file to read.
+ * @returns the tail's text and whether the file held more than it carries.
+ */
+async function readTail(path: string): Promise<{ text: string; truncated: boolean }> {
+  let handle: Awaited<ReturnType<typeof open>>
+  try {
+    handle = await open(path, 'r')
+  } catch {
+    // Absent, or unreadable: an attempt that never wrote a transcript simply
+    // has nothing to show, which is not a failure of the read.
+    return { text: '', truncated: false }
+  }
+  try {
+    const size = (await handle.stat()).size
+    const start = Math.max(0, size - LOG_TAIL_BYTES)
+    const length = size - start
+    const buffer = Buffer.alloc(length)
+    await handle.read(buffer, 0, length, start)
+    const decoded = buffer.toString('utf8')
+    const breakAt = decoded.indexOf('\n')
+    return {
+      text: start === 0 || breakAt < 0 ? decoded : decoded.slice(breakAt + 1),
+      truncated: start > 0,
+    }
+  } finally {
+    await handle.close()
+  }
+}
+
+/**
+ * Read both transcripts one refresh attempt writes.
+ * @param harvestDir - directory the attempt writes them into.
+ * @param files - the filenames `bridge/preflight.mjs` owns.
+ * @returns one payload carrying both tails and their absolute paths.
+ */
+async function readLogs(
+  harvestDir: string,
+  files: { transcript: string; spawn: string },
+): Promise<LocalBridgeLogPayload> {
+  const transcriptPath = join(harvestDir, files.transcript)
+  const spawnPath = join(harvestDir, files.spawn)
+  const [transcript, spawn] = await Promise.all([readTail(transcriptPath), readTail(spawnPath)])
+  const tail = (path: string, read: { text: string; truncated: boolean }): LocalBridgeTranscript =>
+    ({ path, ...read })
+  return { transcript: tail(transcriptPath, transcript), spawn: tail(spawnPath, spawn) }
 }
 
 /** Whether a TCP connect to one loopback port succeeds within the probe deadline. */
@@ -226,6 +294,11 @@ export function createLocalBridgeControl(options: LocalBridgeControlOptions): Lo
         return refuse('spawn-failed')
       }
       return { started: true, refusal: null, logFile: outcome.logFile ?? null }
+    },
+
+    async log(): Promise<LocalBridgeLogPayload> {
+      const module = await facts()
+      return readLogs(options.harvestDir, module.refreshLogFiles)
     },
   }
 }

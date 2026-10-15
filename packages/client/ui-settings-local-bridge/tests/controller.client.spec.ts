@@ -1,15 +1,15 @@
 /**
- * The local-model-relay page's status store: what it accepts at the wire, which
- * read wins when two are in flight, and how it observes a refresh attempt the
+ * The local-model-relay page's stores: what they accept at the wire, which read
+ * wins when two are in flight, and how the page observes a refresh attempt the
  * host runs as a detached one-to-two-minute process.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  LOCAL_BRIDGE_REFRESH_ROUTE, LOCAL_BRIDGE_STATUS_ROUTE,
+  LOCAL_BRIDGE_LOG_ROUTE, LOCAL_BRIDGE_REFRESH_ROUTE, LOCAL_BRIDGE_STATUS_ROUTE,
 } from '@deepseek-ai/dsh-host-local-bridge/shared'
 import {
-  LocalBridgeController, parseRefreshPayload, parseStatusPayload, refreshInFlight,
+  LocalBridgeController, parseLogPayload, parseRefreshPayload, parseStatusPayload, refreshInFlight,
 } from '../src/client/controller.ts'
 
 afterEach(() => { vi.useRealTimers() })
@@ -43,12 +43,59 @@ function status(overrides: {
   }
 }
 
+/** One refresh-transcript payload the host serves. */
+function transcripts(overrides: {
+  transcriptText?: string
+  spawnText?: string
+  truncated?: boolean
+} = {}): Record<string, unknown> {
+  const tail = (path: string, text: string): Record<string, unknown> =>
+    ({ path, text, truncated: overrides.truncated ?? false })
+  return {
+    transcript: tail('C:/probe/auto-refresh.log', overrides.transcriptText ?? '第 1 轮\n'),
+    spawn: tail('C:/probe/auto-refresh.spawn.log', overrides.spawnText ?? ''),
+  }
+}
+
 /** A JSON response carrying one payload. */
 function json(body: unknown, status_ = 200): Response {
   return new Response(JSON.stringify(body), {
     status: status_,
     headers: { 'content-type': 'application/json' },
   })
+}
+
+/** The three-route carrier: a double whose per-route answers each test replaces. */
+interface Carrier {
+  readonly fetcher: (input: string | URL, init?: RequestInit) => Promise<Response>
+  /** @param route - the route to count. @returns how many requests reached it. */
+  readonly calls: (route: string) => number
+  /** @param route - the route whose answer to replace. @param answer - the new answer. */
+  readonly answer: (route: string, answer: () => Promise<Response>) => void
+}
+
+/**
+ * Build the carrier double.
+ * @param answers - initial per-route answers; the rest answer a well-formed default.
+ * @returns the carrier and its per-route helpers.
+ */
+function carrier(answers: Record<string, () => Promise<Response>> = {}): Carrier {
+  const table: Record<string, () => Promise<Response>> = {
+    [LOCAL_BRIDGE_STATUS_ROUTE]: () => Promise.resolve(json(status())),
+    [LOCAL_BRIDGE_LOG_ROUTE]: () => Promise.resolve(json(transcripts())),
+    [LOCAL_BRIDGE_REFRESH_ROUTE]: () => Promise.resolve(json({ started: true, refusal: null, logFile: null })),
+    ...answers,
+  }
+  const fetcher = vi.fn((input: string | URL): Promise<Response> => {
+    const answer = table[String(input)]
+    if (answer === undefined) throw new Error(`unexpected route: ${String(input)}`)
+    return answer()
+  })
+  return {
+    fetcher,
+    calls: route => fetcher.mock.calls.filter(call => String(call[0]) === route).length,
+    answer: (route, answer) => { table[route] = answer },
+  }
 }
 
 describe('parseStatusPayload', () => {
@@ -162,39 +209,51 @@ describe('refreshInFlight', () => {
 })
 
 describe('LocalBridgeController', () => {
-  it('publishes the snapshot the host served', async () => {
-    const fetcher = vi.fn(() => Promise.resolve(json(status())))
+  it('publishes the snapshot and the transcripts the host served', async () => {
+    const { fetcher } = carrier()
     const controller = new LocalBridgeController(fetcher)
     await controller.load()
 
     expect(fetcher).toHaveBeenCalledWith(LOCAL_BRIDGE_STATUS_ROUTE, { headers: { accept: 'application/json' } })
+    expect(fetcher).toHaveBeenCalledWith(LOCAL_BRIDGE_LOG_ROUTE, { headers: { accept: 'application/json' } })
     const state = controller.page.getSnapshot()
     expect(state.phase).toBe('ready')
     expect(state.phase === 'ready' ? state.status.copilot.relay.port : null).toBe(8899)
+    const logs = controller.logs.getSnapshot()
+    expect(logs.phase === 'ready' ? logs.log.transcript.text : null).toBe('第 1 轮\n')
   })
 
   it('reads a refused response and a transport failure as the same failed state', async () => {
     const refused = new LocalBridgeController(() => Promise.resolve(new Response('', { status: 500 })))
     await refused.load()
     expect(refused.page.getSnapshot()).toEqual({ phase: 'failed' })
+    // A host that cannot answer either read leaves both stores unusable, never
+    // one of them stale.
+    expect(refused.logs.getSnapshot()).toEqual({ phase: 'unavailable' })
 
     const unreachable = new LocalBridgeController(() => Promise.reject(new Error('offline')))
     await unreachable.load()
     expect(unreachable.page.getSnapshot()).toEqual({ phase: 'failed' })
+    expect(unreachable.logs.getSnapshot()).toEqual({ phase: 'unavailable' })
   })
 
   it('reads an unusable payload as failed rather than rendering it', async () => {
     const controller = new LocalBridgeController(() => Promise.resolve(json({ platform: 'win32' })))
     await controller.load()
     expect(controller.page.getSnapshot()).toEqual({ phase: 'failed' })
+    expect(controller.logs.getSnapshot()).toEqual({ phase: 'unavailable' })
   })
 
   it('keeps the newer read when two are in flight', async () => {
     let release: ((response: Response) => void) | undefined
-    const slow = new Promise<Response>((resolve) => { release = resolve })
-    const fetcher = vi.fn()
-      .mockReturnValueOnce(slow)
-      .mockReturnValueOnce(Promise.resolve(json(status({ listening: false }))))
+    let firstCall = true
+    const { fetcher, calls } = carrier({
+      [LOCAL_BRIDGE_STATUS_ROUTE]: () => {
+        if (!firstCall) return Promise.resolve(json(status({ listening: false })))
+        firstCall = false
+        return new Promise<Response>((resolve) => { release = resolve })
+      },
+    })
     const controller = new LocalBridgeController(fetcher)
 
     const first = controller.load()
@@ -205,100 +264,174 @@ describe('LocalBridgeController', () => {
 
     const state = controller.page.getSnapshot()
     expect(state.phase).toBe('ready')
+    // The first read settled last, and its answer was dropped rather than
+    // overwriting the fresher one.
     expect(state.phase === 'ready' ? state.status.copilot.relay.listening : null).toBe(false)
+    expect(calls(LOCAL_BRIDGE_STATUS_ROUTE)).toBe(2)
   })
 
   it('polls while a refresh is in flight and stops once the token advances', async () => {
     vi.useFakeTimers()
-    const fetcher = vi.fn()
-      .mockResolvedValueOnce(json(status({
+    const { fetcher, calls, answer } = carrier({
+      [LOCAL_BRIDGE_STATUS_ROUTE]: () => Promise.resolve(json(status({
         refreshStartedAt: 1_000_000,
         token: { present: true, harvestedAt: 940_000, ageSec: 60, stale: false },
-      })))
-      .mockResolvedValueOnce(json(status({
-        refreshStartedAt: null,
-        token: { present: true, harvestedAt: 1_030_000, ageSec: 0, stale: false },
-      })))
+      }))),
+    })
     const controller = new LocalBridgeController(fetcher)
 
     await controller.load()
-    expect(fetcher).toHaveBeenCalledTimes(1)
+    expect(calls(LOCAL_BRIDGE_STATUS_ROUTE)).toBe(1)
+    expect(calls(LOCAL_BRIDGE_LOG_ROUTE)).toBe(1)
+    answer(LOCAL_BRIDGE_STATUS_ROUTE, () => Promise.resolve(json(status({
+      refreshStartedAt: null,
+      token: { present: true, harvestedAt: 1_030_000, ageSec: 0, stale: false },
+    }))))
     await vi.advanceTimersByTimeAsync(5_000)
-    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(calls(LOCAL_BRIDGE_STATUS_ROUTE)).toBe(2)
+    // Each poll reads the transcripts too, so the log stays live while the
+    // attempt runs.
+    expect(calls(LOCAL_BRIDGE_LOG_ROUTE)).toBe(2)
     // The settled read left nothing in flight, so no further read is queued.
     await vi.advanceTimersByTimeAsync(20_000)
-    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(calls(LOCAL_BRIDGE_STATUS_ROUTE)).toBe(2)
   })
 
   it('cancels a queued read when a newer one starts', async () => {
     vi.useFakeTimers()
-    const fetcher = vi.fn(() => Promise.resolve(json(status({
-      refreshStartedAt: 1_000_000,
-      token: { present: true, harvestedAt: 940_000, ageSec: 60, stale: false },
-    }))))
+    const { fetcher, calls } = carrier({
+      [LOCAL_BRIDGE_STATUS_ROUTE]: () => Promise.resolve(json(status({
+        refreshStartedAt: 1_000_000,
+        token: { present: true, harvestedAt: 940_000, ageSec: 60, stale: false },
+      }))),
+    })
     const controller = new LocalBridgeController(fetcher)
 
     await controller.load()
     await controller.load()
-    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(calls(LOCAL_BRIDGE_STATUS_ROUTE)).toBe(2)
     // Only the second read's poll survives; the first was cancelled, not stacked.
     await vi.advanceTimersByTimeAsync(5_000)
-    expect(fetcher).toHaveBeenCalledTimes(3)
+    expect(calls(LOCAL_BRIDGE_STATUS_ROUTE)).toBe(3)
     controller.dispose()
   })
 
   it('stops polling and publishing once disposed', async () => {
     vi.useFakeTimers()
     let release: ((response: Response) => void) | undefined
-    const fetcher = vi.fn()
-      .mockReturnValueOnce(Promise.resolve(json(status({
+    const { fetcher, calls, answer } = carrier({
+      [LOCAL_BRIDGE_STATUS_ROUTE]: () => Promise.resolve(json(status({
         refreshStartedAt: 1_000_000,
         token: { present: false, harvestedAt: null, ageSec: null, stale: true },
-      }))))
-      .mockReturnValue(new Promise<Response>((resolve) => { release = resolve }))
+      }))),
+    })
     const controller = new LocalBridgeController(fetcher)
     await controller.load()
 
+    answer(LOCAL_BRIDGE_STATUS_ROUTE, () => new Promise<Response>((resolve) => { release = resolve }))
     await vi.advanceTimersByTimeAsync(5_000)
-    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(calls(LOCAL_BRIDGE_STATUS_ROUTE)).toBe(2)
     const settled = controller.page.getSnapshot()
     controller.dispose()
     release?.(json(status({ listening: false })))
     await vi.advanceTimersByTimeAsync(20_000)
 
-    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(calls(LOCAL_BRIDGE_STATUS_ROUTE)).toBe(2)
+    // The poll's status read never settled, so the transcripts behind it were
+    // never re-read either.
+    expect(calls(LOCAL_BRIDGE_LOG_ROUTE)).toBe(1)
     expect(controller.page.getSnapshot()).toEqual(settled)
   })
 
+  it('keeps the newer transcript read when two are in flight', async () => {
+    let releaseLog: ((response: Response) => void) | undefined
+    let firstLog = true
+    const { fetcher } = carrier({
+      [LOCAL_BRIDGE_LOG_ROUTE]: () => {
+        if (!firstLog) return Promise.resolve(json(transcripts({ transcriptText: 'newer\n' })))
+        firstLog = false
+        return new Promise<Response>((resolve) => { releaseLog = resolve })
+      },
+    })
+    const controller = new LocalBridgeController(fetcher)
+
+    const first = controller.load()
+    await vi.waitFor(() => { expect(releaseLog).toBeDefined() })
+    const second = controller.load()
+    await second
+    releaseLog?.(json(transcripts({ transcriptText: 'stale\n' })))
+    await first
+
+    const logs = controller.logs.getSnapshot()
+    expect(logs.phase === 'ready' ? logs.log.transcript.text : null).toBe('newer\n')
+  })
+
+  it('drops a transcript read that settles after disposal', async () => {
+    let releaseLog: ((response: Response) => void) | undefined
+    const { fetcher, answer } = carrier()
+    answer(LOCAL_BRIDGE_LOG_ROUTE, () => new Promise<Response>((resolve) => { releaseLog = resolve }))
+    const controller = new LocalBridgeController(fetcher)
+
+    const loading = controller.load()
+    await vi.waitFor(() => { expect(releaseLog).toBeDefined() })
+    controller.dispose()
+    releaseLog?.(json(transcripts({ transcriptText: 'late\n' })))
+    await loading
+
+    // The store keeps its pre-read state: a settled read after disposal is
+    // dropped rather than published into a page that no longer exists.
+    expect(controller.logs.getSnapshot()).toEqual({ phase: 'loading' })
+  })
+
   it('posts the refresh, then reads the state it left behind', async () => {
-    const fetcher = vi.fn()
-      .mockResolvedValueOnce(json({ started: true, refusal: null, logFile: '/probe/auto-refresh.log' }))
-      .mockResolvedValueOnce(json(status({ refreshStartedAt: 1_000_000 })))
+    const { fetcher, calls, answer } = carrier()
+    answer(LOCAL_BRIDGE_REFRESH_ROUTE, () => Promise.resolve(json({
+      started: true, refusal: null, logFile: '/probe/auto-refresh.log',
+    })))
     const controller = new LocalBridgeController(fetcher)
     const outcome = await controller.refresh()
 
-    expect(fetcher).toHaveBeenNthCalledWith(1, LOCAL_BRIDGE_REFRESH_ROUTE, { method: 'POST' })
-    expect(fetcher).toHaveBeenNthCalledWith(2, LOCAL_BRIDGE_STATUS_ROUTE, { headers: { accept: 'application/json' } })
+    expect(fetcher).toHaveBeenCalledWith(LOCAL_BRIDGE_REFRESH_ROUTE, { method: 'POST' })
     expect(outcome).toEqual({ started: true, refusal: null, logFile: '/probe/auto-refresh.log' })
     expect(controller.page.getSnapshot().phase).toBe('ready')
+    expect(calls(LOCAL_BRIDGE_STATUS_ROUTE)).toBe(1)
   })
 
   it('reports a refused refresh request as no outcome', async () => {
-    const refused = new LocalBridgeController(vi.fn()
-      .mockResolvedValueOnce(new Response('', { status: 500 }))
-      .mockResolvedValueOnce(json(status())))
-    expect(await refused.refresh()).toBeNull()
+    const refused = carrier({ [LOCAL_BRIDGE_REFRESH_ROUTE]: () => Promise.resolve(new Response('', { status: 500 })) })
+    expect(await new LocalBridgeController(refused.fetcher).refresh()).toBeNull()
 
-    const unreachable = new LocalBridgeController(vi.fn()
-      .mockRejectedValueOnce(new Error('offline'))
-      .mockResolvedValueOnce(json(status())))
-    expect(await unreachable.refresh()).toBeNull()
+    const unreachable = carrier({ [LOCAL_BRIDGE_REFRESH_ROUTE]: () => Promise.reject(new Error('offline')) })
+    expect(await new LocalBridgeController(unreachable.fetcher).refresh()).toBeNull()
   })
 
   it('reports an unusable refresh answer as no outcome', async () => {
-    const controller = new LocalBridgeController(vi.fn()
-      .mockResolvedValueOnce(json({ started: 'maybe' }))
-      .mockResolvedValueOnce(json(status())))
-    expect(await controller.refresh()).toBeNull()
+    const { fetcher } = carrier({
+      [LOCAL_BRIDGE_REFRESH_ROUTE]: () => Promise.resolve(json({ started: 'maybe' })),
+    })
+    expect(await new LocalBridgeController(fetcher).refresh()).toBeNull()
+  })
+})
+
+describe('parseLogPayload', () => {
+  it('accepts both tails', () => {
+    expect(parseLogPayload(transcripts({ truncated: true }))).toMatchObject({
+      transcript: { path: 'C:/probe/auto-refresh.log', text: '第 1 轮\n', truncated: true },
+      spawn: { text: '' },
+    })
+  })
+
+  it('rejects a payload missing either tail', () => {
+    expect(parseLogPayload(null)).toBeNull()
+    expect(parseLogPayload({})).toBeNull()
+    expect(parseLogPayload({ transcript: transcripts()['transcript'] })).toBeNull()
+    expect(parseLogPayload({
+      transcript: { path: 'a', text: 'b', truncated: 'yes' },
+      spawn: { path: 'a', text: 'b', truncated: false },
+    })).toBeNull()
+    expect(parseLogPayload({
+      transcript: { path: 1, text: 'b', truncated: false },
+      spawn: { path: 'a', text: 'b', truncated: false },
+    })).toBeNull()
   })
 })
