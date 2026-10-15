@@ -1,0 +1,43 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/client/ui-settings-local-bridge/README.md
+/:
+  en: d711fbcdcaddcc98
+  zh: a27948186d8f0033
+/deepseek-ai-dsh-client-ui-settings-local-bridge:
+  en: ad216bdce1b8cff4
+  zh: 4fe0bf58fa7e644e
+/deepseek-ai-dsh-client-ui-settings-local-bridge/summary:
+  en: 1eb4fb53274eec06
+  zh: ee5c180ac3742705
+/deepseek-ai-dsh-client-ui-settings-local-bridge/table-of-contents:
+  en: b563e4ec4727d0de
+  zh: b563e4ec4727d0de
+/deepseek-ai-dsh-client-ui-settings-local-bridge/use-this-package:
+  en: 03d05d7b0388df4a
+  zh: 5a297b241d25b450
+/deepseek-ai-dsh-client-ui-settings-local-bridge/use-this-package/what-the-page-shows:
+  en: d0213b4232025047
+  zh: 4f55081c68311f1e
+/deepseek-ai-dsh-client-ui-settings-local-bridge/use-this-package/refusals:
+  en: 4f1050e1750641ce
+  zh: 7ee995d8c6c2b814
+/deepseek-ai-dsh-client-ui-settings-local-bridge/understand-the-implementation:
+  en: 5763582f64bb3b6e
+  zh: fb9595b00aab7e90
+/deepseek-ai-dsh-client-ui-settings-local-bridge/further-exploration:
+  en: f3544fc4600dc22a
+  zh: c2a553277202b6da
+/deepseek-ai-dsh-client-ui-settings-local-bridge/model-experience:
+  en: 5b3fe2424b1bddc0
+  zh: 5b3fe2424b1bddc0
+/deepseek-ai-dsh-client-ui-settings-local-bridge/model-experience/kv-cache-effect:
+  en: ca75c51c89c2c9b0
+  zh: ca75c51c89c2c9b0
+/deepseek-ai-dsh-client-ui-settings-local-bridge/known-limitations-and-deferred-work:
+  en: 14fa9f05b6e3cc48
+  zh: 46d1c2195a6fff01
+/deepseek-ai-dsh-client-ui-settings-local-bridge/known-limitations-and-deferred-work/dev-note:
+  en: 16eedddc548ef98a
+  zh: 16eedddc548ef98a

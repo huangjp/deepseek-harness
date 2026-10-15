@@ -1,0 +1,40 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/host/local-bridge/README.md
+/:
+  en: 639a6cdb156731e0
+  zh: 4b7996cdf9512b04
+/deepseek-ai-dsh-host-local-bridge:
+  en: 482c2d2ff97e7e16
+  zh: 3ddd988124b9b7bf
+/deepseek-ai-dsh-host-local-bridge/summary:
+  en: a75b55bced23444b
+  zh: ec47dced2050f2bd
+/deepseek-ai-dsh-host-local-bridge/table-of-contents:
+  en: b563e4ec4727d0de
+  zh: b563e4ec4727d0de
+/deepseek-ai-dsh-host-local-bridge/use-this-package:
+  en: 3c4b9f7fec2db335
+  zh: e03d99041a185748
+/deepseek-ai-dsh-host-local-bridge/use-this-package/the-settings-routes:
+  en: 8aaf3cc7ba78801a
+  zh: e96e0cad86bf4fe1
+/deepseek-ai-dsh-host-local-bridge/understand-the-implementation:
+  en: 7b8805c29ea7a58a
+  zh: 269526d44986510d
+/deepseek-ai-dsh-host-local-bridge/further-exploration:
+  en: c260b247d1afe8e6
+  zh: 9873adf9af78617c
+/deepseek-ai-dsh-host-local-bridge/model-experience:
+  en: 1cfa8466d72ff69f
+  zh: 1cfa8466d72ff69f
+/deepseek-ai-dsh-host-local-bridge/model-experience/kv-cache-effect:
+  en: ca75c51c89c2c9b0
+  zh: ca75c51c89c2c9b0
+/deepseek-ai-dsh-host-local-bridge/known-limitations-and-deferred-work:
+  en: c522c890d2ebacc6
+  zh: a6f2e27c3979b512
+/deepseek-ai-dsh-host-local-bridge/known-limitations-and-deferred-work/dev-note:
+  en: 3f179b447b9d5c27
+  zh: 3f179b447b9d5c27

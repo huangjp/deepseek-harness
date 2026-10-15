@@ -189,6 +189,7 @@ flowchart TD
     pkg_client_ui_settings_account["client-ui-settings-account"]
     pkg_client_ui_settings_agent_loop["client-ui-settings-agent-loop"]
     pkg_client_ui_settings_general["client-ui-settings-general"]
+    pkg_client_ui_settings_local_bridge["client-ui-settings-local-bridge"]
     pkg_client_ui_settings_models["client-ui-settings-models"]
     pkg_client_ui_settings_plugin_inventory["client-ui-settings-plugin-inventory"]
     pkg_client_ui_settings_plugins["client-ui-settings-plugins"]
@@ -1448,6 +1449,7 @@ flowchart TD
 | [`client-ui-settings-account`](../packages/client/ui-settings-account) | `client` | — |
 | [`client-ui-settings-agent-loop`](../packages/client/ui-settings-agent-loop) | `client` | — |
 | [`client-ui-settings-general`](../packages/client/ui-settings-general) | `client` | — |
+| [`client-ui-settings-local-bridge`](../packages/client/ui-settings-local-bridge) | `client` | — |
 | [`client-ui-settings-models`](../packages/client/ui-settings-models) | `client` | — |
 | [`client-ui-settings-plugin-inventory`](../packages/client/ui-settings-plugin-inventory) | `client` | — |
 | [`client-ui-settings-plugins`](../packages/client/ui-settings-plugins) | `client` | — |

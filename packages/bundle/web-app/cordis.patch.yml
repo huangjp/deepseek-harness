@@ -102,6 +102,13 @@
           # mitmdump 缺失时后台尝试 pip install mitmproxy（不阻塞启动，装完下次生效）。
           autoInstallMitm: true
 
+    # 「设置 → 本地模型服务」页：读出上面两个反代的监听与后台应用状态、
+    # Copilot 令牌年龄与刷新前置条件，并让用户手动触发一次令牌刷新。
+    # 页面只读 host 侧 /local-bridge/status 与 POST /local-bridge/refresh 两条路由，
+    # 不写任何设置命名空间，因此不需要 settings 行。
+    - id: ui-settings-local-bridge
+      name: '@deepseek-ai/dsh-client-ui-settings-local-bridge'
+
     - id: desktop-product-telemetry
       name: '@deepseek-ai/dsh-host-product-telemetry-otel'
       disabled: !!js "ctx.get('profileContext')?.name !== 'desktop'"

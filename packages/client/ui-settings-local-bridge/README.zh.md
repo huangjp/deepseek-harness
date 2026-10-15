@@ -1,0 +1,91 @@
+---
+description: "dsh web 客户端的「本地模型服务」设置页：两个内置反代的监听状态、Copilot 令牌年龄、刷新前置条件，以及手动刷新令牌。"
+kind: "package-reference"
+---
+
+# @deepseek-ai/dsh-client-ui-settings-local-bridge
+
+[English](README.md) | 中文
+
+## Summary
+
+`@deepseek-ai/dsh-client-ui-settings-local-bridge` 是 dsh web 客户端的「本地模型服务」页。它读取 `@deepseek-ai/dsh-host-local-bridge` 提供的两条路由，展示两个内置反代：各自是否在监听、背后的桌面应用是否在运行、收割到的 Copilot 访问令牌有多旧，以及一次刷新还差哪些条件。一个需确认的动作会请求宿主刷新该令牌，页面随后持续报告这次尝试的进度，直到出现更新的令牌。本页不写任何设置命名空间。
+
+## Table of Contents
+
+- [Use this package](#use-this-package)
+- [Understand the implementation](#understand-the-implementation)
+- [Further Exploration](#further-exploration)
+- [Model Experience](#model-experience)
+- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+
+-----
+
+<a id="use-this-package"></a>
+## Use this package
+
+在同时挂载了 `@deepseek-ai/dsh-host-local-bridge` 的组合里挂载本插件；桌面端的 `web-app` bundle 两个都挂。本页注册一个 `settings.section` 条目，排在「模型」页之后 —— 它报告的路由正是那一页列出的路由。
+
+本页对机器只读，其状态留在各自属主处：这里不写任何设置命名空间，所有事实都由宿主回答。
+
+### What the page shows
+
+| Area | Reads |
+|---|---|
+| Each relay | Its loopback port, whether a connect succeeds, and whether the application behind it is running, installed-but-stopped, or absent |
+| The Copilot token | When it was harvested, that age in the active language, and whether it is past the platform's one-hour lifetime |
+| Refresh requirements | Four checks — the interception proxy, the harvest script, the upstream proxy, and the interception certificate — each with its remedy while unmet |
+| The refresh action | One confirmed gesture, its progress while the host harvests, and its outcome once the token lands |
+
+只有在宿主会接受时才提供该动作：Windows 上、Copilot 应用在运行、全部前置条件满足、且没有已在进行的尝试。宿主仍然返回的拒绝，会连它给出的原因一起报告。
+
+### Refusals
+
+宿主用固定代码回答刷新请求，句子由本页挑选。没有代码的拒绝与该约定相悖，按「进程没能启动」处理。
+
+| Code | Reported as |
+|---|---|
+| `unsupported-platform` | Refreshing is available on Windows only |
+| `copilot-not-running` | Start the Copilot desktop app first |
+| `prerequisites-missing` | A requirement above is unmet; the checklist names it |
+| `busy` | A refresh is already running |
+| `script-missing` | The refresh script is missing; restart the app to redeploy it |
+| `spawn-failed` | The refresh process could not start |
+
+<a id="understand-the-implementation"></a>
+## Understand the implementation
+
+两个决策是承重的：
+
+- **本页观察刷新，从不等待刷新。** 刷新是宿主上一个独立的一到两分钟进程，所以只要宿主持有的锁还在，本页就显示进行中的提示，并每五秒重读一次，直到能判断这次尝试已结束。完成与否由两个事实决定，而不是只看那把锁：锁的存活时间比取锁的进程更长，因此「锁被取得之后又收割到令牌」才算成功。没有新令牌就结束的尝试按失败报告，而不是静默当作成功。
+- **线上数据在入口处校验。** 每一份状态响应都逐字段检查后才进入渲染，所以本构建读不懂的载荷会变成页面的失败态，而不是渲染出乱码。本构建不认识的「前置条件」或「拒绝」代码会被丢弃，而不是让整次读取失败 —— 版本错配不该把载荷其余部分填出的清单清空。
+
+页面的状态存储不做合并：后一次读取会取代仍在飞行中的前一次，因此慢的应答不会覆盖更新的快照；销毁时轮询与发布同时停止。
+
+<a id="further-exploration"></a>
+## Further Exploration
+
+- [`dsh-host-local-bridge`](../../host/local-bridge/README.zh.md) —— 启动反代并提供这些路由的宿主插件。
+- [`dsh-client-ui-settings`](../ui-settings/README.zh.md) —— 本页所占 `settings.section` 座位所属的设置域基座。
+- [`dsh-client-ui-settings-models`](../ui-settings-models/README.zh.md) —— 导航中位于本页之前的页面，列出这些反代所服务的路由。
+
+<a id="model-experience"></a>
+## Model Experience
+
+None, as the package is a browser-side settings page that reads relay status; it registers nothing model-facing.
+
+#### KV Cache effect
+
+None; this package neither assembles nor sends a provider request.
+
+## Known Limitations and Deferred Work
+
+- **本页实际上只在 Windows 上有意义。** 两个反代与刷新链路都以 Windows 为前提；在其他平台上本页会直接说明，并收起那个动作，而不是提供一个必然被拒绝的控件。
+- **刷新无法取消，也无法等待。** 宿主启动的是分离进程，所以本页只能报告「已启动」然后观察；离开设置页并不会让它停下。
+- **上游代理是用户自己的。** 刷新链路经 `127.0.0.1:7890`（它配套客户端的混合端口）转发。本页会把该条件报为未满足，但无法配置成别的端口。
+- **刷新锁比这次尝试活得更久。** 提示在令牌推进时清除，所以失败的尝试会被及时读成失败；在宿主锁窗口内再次操作会以 busy 被拒绝，而不是排队。
+- **除令牌时间戳外没有进度。** 宿主给出的是转录文件路径，不是解析后的进度流，所以本页无法显示这次尝试走到了哪一步。
+
+### Dev Note
+
+**Runtime invariant:** No companion is published. The package owns one store whose snapshots are derived from the host's route answers; its behavior is covered by the controller and component suites beside it.

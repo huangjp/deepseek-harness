@@ -94,6 +94,7 @@
     "@deepseek-ai/dsh-client-ui-session": "workspace:*",
     "@deepseek-ai/dsh-client-ui-settings": "workspace:*",
     "@deepseek-ai/dsh-client-ui-settings-general": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-settings-local-bridge": "workspace:*",
     "@deepseek-ai/dsh-client-ui-settings-models": "workspace:*",
     "@deepseek-ai/dsh-client-ui-settings-plugin-inventory": "workspace:*",
     "@deepseek-ai/dsh-client-ui-settings-plugins": "workspace:*",

@@ -37,6 +37,8 @@ python/**/__pycache__/
 python/**/.pytest_cache/
 packages/**/__pycache__/
 apps/web/dist/
+.dsh-start.txt
+packages/host/local-bridge/bridge/.gateway-credentials.json
 .artifacts/
 .dsh-build/
 .playwright-mcp/

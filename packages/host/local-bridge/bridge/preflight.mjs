@@ -28,7 +28,7 @@ import path from 'node:path';
 export const TOKEN_STALE_SEC = 45 * 60;
 
 /** 自动刷新的并发保护窗口：这么长时间内的重复触发会被忽略。 */
-const REFRESH_LOCK_MS = 240_000;
+export const REFRESH_LOCK_MS = 240_000;
 
 /** 配套应用的检测与启动描述。 */
 export const APPS = {
@@ -229,8 +229,12 @@ export async function detectHarvest(harvestDir, options = {}) {
     ageSec,
     stale: ageSec === null ? true : ageSec > TOKEN_STALE_SEC,
     mitmdump,
-    mitmRunning: mitmUp,
+    // 下面三项与 missing 表达同一批事实，但形式不同：控制面（src/control.ts）只读
+    // 结构化字段，把「缺哪个前置」翻译成线上代码，页面再去查自己的文案字典。
+    // missing 是给人看的操作提示，仅供日志与 /health。
+    harvester: existsSync(harvester) ? harvester : null,
     upstreamProxyUp,
+    mitmRunning: mitmUp,
     missing,
     // 自动刷新需要的前置条件齐备（Copilot 是否在跑由调用方另行判断）。
     canAutoRefresh: missing.length === 0,

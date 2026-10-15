@@ -117,7 +117,7 @@ export function apply(ctx: Context): void {
     profiles: () => profiles,
     // No credential reference: the `authorization: Bearer local-bridge` header
     // in each profile authenticates the request directly against the relay.
-    resolveApiKey: async () => undefined,
+    resolveApiKey: () => Promise.resolve(undefined),
     auth: {
       credentials: credentialStoreFrom(ctx),
       authContext: authContextFrom(ctx),

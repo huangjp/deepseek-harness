@@ -25,11 +25,19 @@
  */
 
 import { mkdirSync } from 'node:fs'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-host-webserver'
 import z from '@deepseek-ai/schemastery'
+import { createLocalBridgeControl, type PreflightFacts } from './control.ts'
+import { internals } from './internals.ts'
+import {
+  LOCAL_BRIDGE_REFRESH_PATH, LOCAL_BRIDGE_STATUS_PATH,
+  type LocalBridgeRefreshPayload, type LocalBridgeStatusPayload,
+} from './shared.ts'
 
 /** Stable Cordis plugin name. */
 export const name = 'local-bridge'
@@ -52,11 +60,6 @@ interface BridgeSpec {
 interface BridgeRuntime {
   start?: (overrides?: Record<string, unknown>) => Promise<{ host: string; port: number }>
   stop?: () => Promise<void>
-}
-
-/** 预检模块的最小接口。 */
-interface PreflightModule {
-  runPreflight: (options: Record<string, unknown>) => Promise<Record<string, unknown>>
 }
 
 /** 预检里单个应用的检测结果（仅取本文件用得到的字段）。 */
@@ -114,15 +117,22 @@ export interface Config {
   }
 }
 
+/**
+ * 两个反代的默认监听端口。schema 默认值与控制面的端口探测读同一份常量，
+ * 否则设置页会去探测一个与反代实际监听不同的端口。
+ */
+const DEFAULT_WORKBUDDY_PORT = 8787
+const DEFAULT_COPILOT_PORT = 8899
+
 export const Config: z<Config> = z.object({
   enabled: z.boolean().default(true),
   host: z.string().default('127.0.0.1'),
-  port: z.number().default(8787),
+  port: z.number().default(DEFAULT_WORKBUDDY_PORT),
   backend: z.string().default('serve'),
   cacheDir: z.string().default(''),
   copilot: z.object({
     enabled: z.boolean().default(true),
-    port: z.number().default(8899),
+    port: z.number().default(DEFAULT_COPILOT_PORT),
     harvestDir: z.string().default(''),
   }),
   deps: z.object({
@@ -136,7 +146,9 @@ export const Config: z<Config> = z.object({
 
 /** 动态导入一个 bridge/ 下的运行时模块（说明符由计算得出，避免被打包器内联）。 */
 async function importRuntime(url: URL): Promise<Record<string, unknown>> {
-  return (await import(url.href)) as unknown as Record<string, unknown>
+  // `import()` 的静态类型是 `any`，这里直接窄化到运行时的模块命名空间；调用方
+  // 各自在边界上校验自己用到的导出（见 `preflightFacts`）。
+  return (await import(url.href)) as Record<string, unknown>
 }
 
 /**
@@ -171,21 +183,170 @@ export function resolveRealPath(filePath: string): string {
 }
 
 /**
+ * 加载预检模块的命名空间。
+ *
+ * 生产路径经计算出的 URL 动态导入；源码级测试可经 `internals` 换成一份替身，
+ * 因为真模块会探测本机、启动 PowerShell，刷新时还会改系统代理。
+ * @param url - `bridge/preflight.mjs` 的 `file://` URL。
+ * @returns 模块命名空间。
+ */
+async function loadPreflightModule(url: URL): Promise<Record<string, unknown>> {
+  return internals.preflight === undefined ? await importRuntime(url) : await internals.preflight()
+}
+
+/** 预检模块的最小接口。 */
+interface PreflightModule {
+  runPreflight: (options: Record<string, unknown>) => Promise<Record<string, unknown>>
+}
+
+/**
+ * 绑定引导预检入口。
+ * @param module - 动态 import 得到的模块命名空间。
+ * @returns 预检入口。
+ * @throws 当模块缺少 `runPreflight` 导出时。
+ */
+function preflightRunner(module: Record<string, unknown>): PreflightModule {
+  const { runPreflight } = module
+  if (typeof runPreflight !== 'function') {
+    throw new Error('local-bridge: bridge/preflight.mjs 缺少 runPreflight 导出')
+  }
+  return { runPreflight: runPreflight as PreflightModule['runPreflight'] }
+}
+
+/**
+ * 控制面读取的 `bridge/preflight.mjs` 导出。
+ *
+ * 该模块是随包分发的纯 JavaScript，经计算出的 URL **动态** import，TypeScript
+ * 看不到它的形状，所以在模块边界上逐项校验，而不是断言一个未经验证的形状。
+ *
+ * @param module - 动态 import 得到的模块命名空间。
+ * @returns 控制面读取的预检接口。
+ * @throws 当模块缺少任一必需导出时。
+ */
+function preflightFacts(module: Record<string, unknown>): PreflightFacts {
+  const { detectHarvest, detectAllApps, detectCa, refreshCopilotToken, REFRESH_LOCK_MS } = module
+  if (typeof detectHarvest !== 'function' || typeof detectAllApps !== 'function'
+    || typeof detectCa !== 'function' || typeof refreshCopilotToken !== 'function'
+    || typeof REFRESH_LOCK_MS !== 'number') {
+    throw new Error('local-bridge: bridge/preflight.mjs 缺少控制面所需的导出')
+  }
+  return {
+    detectHarvest: detectHarvest as PreflightFacts['detectHarvest'],
+    detectAllApps: detectAllApps as PreflightFacts['detectAllApps'],
+    detectCa: detectCa as PreflightFacts['detectCa'],
+    refreshCopilotToken: refreshCopilotToken as PreflightFacts['refreshCopilotToken'],
+    refreshLockMs: REFRESH_LOCK_MS,
+  }
+}
+
+/** 本模块用到的连接信任面；完整的类型归浏览器侧的 connection 包所有。 */
+interface LocalBridgeConnection {
+  requestRejection(request: { readonly headers: IncomingMessage['headers'] }): 401 | 403 | undefined
+}
+
+/** 组合的 connection 服务（类型写在本地：它的包属于浏览器侧）。 */
+function connectionOf(ctx: Context): LocalBridgeConnection {
+  return Reflect.get(ctx, 'connection') as LocalBridgeConnection
+}
+
+/** 一个 JSON 响应（no-store：反代与令牌状态都是实时事实）。 */
+function sendJson(res: ServerResponse, status: number, payload: unknown): void {
+  res.statusCode = status
+  res.setHeader('content-type', 'application/json; charset=utf-8')
+  res.setHeader('cache-control', 'no-store')
+  res.end(JSON.stringify(payload))
+}
+
+/** 405，并声明该路由唯一支持的方法。 */
+function sendMethodNotAllowed(res: ServerResponse, allow: 'GET' | 'POST'): void {
+  res.statusCode = 405
+  res.setHeader('allow', allow)
+  res.end()
+}
+
+/** 设置页控制面路由所需的路径与端口。 */
+interface ControlRouteOptions {
+  /** 收割目录。 */
+  harvestDir: string
+  /** `refresh-token.ps1` 的真实磁盘路径。 */
+  refreshScript: string
+  /** WorkBuddy 反代端口。 */
+  workbuddyPort: number
+  /** Copilot 反代端口。 */
+  copilotPort: number
+  /** 预检模块的 `file://` URL。 */
+  preflightUrl: URL
+}
+
+/**
+ * 注册设置页读取状态、触发刷新所用的两条路由。
+ *
+ * 这两个服务写在这个**子 fiber** 的 inject 里，而不是插件自己的：反代本身与 web
+ * 表面无关（没有 web server 的组合里它仍要照常监听），所以外层不等任何人；子 fiber
+ * 等 `webServer` 与 `connection` 就位后再注册路由。没有信任闸门的组合因此永远不注册
+ * —— 刷新会临时改系统代理并驱动 UI 自动化，绝不能暴露给未经鉴权的调用方。
+ *
+ * @param ctx - the Cordis context.
+ * @param options - 收割目录、刷新脚本与预检模块的位置，以及两个反代端口。
+ */
+function registerControlRoutes(ctx: Context, options: ControlRouteOptions): void {
+  ctx.inject(['webServer', 'connection'], (scope: Context) => {
+    const control = createLocalBridgeControl({
+      loadPreflight: async () => preflightFacts(await loadPreflightModule(options.preflightUrl)),
+      refreshScript: options.refreshScript,
+      harvestDir: options.harvestDir,
+      workbuddyPort: options.workbuddyPort,
+      copilotPort: options.copilotPort,
+      // 预检的拒绝原因是给人看的操作提示，落日志；线上只传代码，文案由页面自己的字典出。
+      log: (message) => { scope.logger.warn(message) },
+    })
+    /** 拒绝一个不可信或未鉴权的请求；已拒绝时返回 true。 */
+    const rejected = (req: IncomingMessage, res: ServerResponse): boolean => {
+      const rejection = connectionOf(scope).requestRejection(req)
+      if (rejection === undefined) return false
+      res.statusCode = rejection
+      res.end()
+      return true
+    }
+
+    scope.effect(() => scope.webServer.register({
+      kind: 'exact',
+      path: LOCAL_BRIDGE_STATUS_PATH,
+      handler: async (req, res) => {
+        if (rejected(req, res)) return
+        if (req.method !== 'GET') {
+          sendMethodNotAllowed(res, 'GET')
+          return
+        }
+        const payload: LocalBridgeStatusPayload = await control.status()
+        sendJson(res, 200, payload)
+      },
+    }), `local-bridge: GET ${LOCAL_BRIDGE_STATUS_PATH}`)
+
+    scope.effect(() => scope.webServer.register({
+      kind: 'exact',
+      path: LOCAL_BRIDGE_REFRESH_PATH,
+      handler: async (req, res) => {
+        if (rejected(req, res)) return
+        if (req.method !== 'POST') {
+          sendMethodNotAllowed(res, 'POST')
+          return
+        }
+        const payload: LocalBridgeRefreshPayload = await control.refresh()
+        sendJson(res, 200, payload)
+      },
+    }), `local-bridge: POST ${LOCAL_BRIDGE_REFRESH_PATH}`)
+  })
+}
+
+/**
  * 启动内置的两个反代服务，并把关闭动作绑到插件 fiber 上。
  * @param ctx - the Cordis context.
  * @param config - resolved plugin config.
  */
 export function apply(ctx: Context, config: Config): void {
-  if (!config.enabled) return
-
   const cacheDir = config.cacheDir || join(tmpdir(), 'dsh-local-bridge')
-  try {
-    mkdirSync(cacheDir, { recursive: true })
-  } catch {
-    // 缓存目录建不出来只影响网关凭据复用，不阻断反代启动。
-  }
-
-  const harvestDir = config.copilot?.harvestDir || join(homedir(), 'copilot-probe')
+  const harvestDir = config.copilot.harvestDir || join(homedir(), 'copilot-probe')
   const preflightUrl = new URL('../bridge/preflight.mjs', import.meta.url)
   // 随包分发的部署文件就在 preflight.mjs 同目录；自举时从这里拷到收割目录。
   // 自举发生在 Electron 主进程内（asar-aware fs 能读），但为了与刷新脚本共用同一份
@@ -194,6 +355,24 @@ export function apply(ctx: Context, config: Config): void {
   // PowerShell 要的是文件系统路径，不是 file:// URL；而且必须是 **ASAR 之外**的真实路径，
   // 否则外部 powershell.exe 打不开它，刷新链路会静默失效。
   const refreshScript = resolveRealPath(fileURLToPath(new URL('../bridge/refresh-token.ps1', import.meta.url)))
+
+  // 控制面不受 enabled 影响：反代关掉时设置页仍要能读到令牌与前置状态，
+  // 用户才判断得出该不该把它打开。
+  registerControlRoutes(ctx, {
+    harvestDir,
+    refreshScript,
+    workbuddyPort: config.port,
+    copilotPort: config.copilot.port,
+    preflightUrl,
+  })
+
+  if (!config.enabled) return
+
+  try {
+    mkdirSync(cacheDir, { recursive: true })
+  } catch {
+    // 缓存目录建不出来只影响网关凭据复用，不阻断反代启动。
+  }
 
   const specs: BridgeSpec[] = [
     {
@@ -208,7 +387,7 @@ export function apply(ctx: Context, config: Config): void {
       },
     },
   ]
-  if (config.copilot?.enabled) {
+  if (config.copilot.enabled) {
     specs.push({
       label: 'Microsoft Copilot 反代',
       url: new URL('../bridge/copilot-bridge.mjs', import.meta.url),
@@ -226,17 +405,17 @@ export function apply(ctx: Context, config: Config): void {
       // ---- 1) 依赖预检：先保证两个配套应用在跑、Copilot 令牌不过期 ----
       let preflight: Record<string, unknown> | null = null
       try {
-        const mod = (await importRuntime(preflightUrl)) as unknown as PreflightModule
+        const mod = preflightRunner(await loadPreflightModule(preflightUrl))
         preflight = await mod.runPreflight({
           harvestDir,
           refreshScript,
           bridgeDir,
-          autoStartDeps: config.deps?.autoStart ?? true,
-          autoRefreshToken: config.deps?.autoRefreshToken ?? true,
-          bootstrap: config.deps?.bootstrap ?? true,
-          autoInstallCa: config.deps?.autoInstallCa ?? true,
-          autoInstallMitm: config.deps?.autoInstallMitm ?? true,
-          log: (message: string) => ctx.logger.info(message),
+          autoStartDeps: config.deps.autoStart,
+          autoRefreshToken: config.deps.autoRefreshToken,
+          bootstrap: config.deps.bootstrap,
+          autoInstallCa: config.deps.autoInstallCa,
+          autoInstallMitm: config.deps.autoInstallMitm,
+          log: (message: string) => { ctx.logger.info(message) },
         })
         const apps = (preflight.apps ?? {}) as Record<string, AppStatus>
         for (const status of Object.values(apps)) {
@@ -247,7 +426,8 @@ export function apply(ctx: Context, config: Config): void {
           }
         }
       } catch (error) {
-        ctx.logger.warn(`依赖预检失败（不影响反代启动）：${(error as Error)?.message ?? String(error)}`)
+        /* v8 ignore next -- a preflight rejects with an Error; a non-Error rejection cannot be staged */
+        ctx.logger.warn(`依赖预检失败（不影响反代启动）：${error instanceof Error ? error.message : String(error)}`)
       }
 
       // 自举结果与 CA 状态要显式说出来 —— 否则用户只会看到「Copilot 反代不通」而不知为何。
@@ -269,11 +449,13 @@ export function apply(ctx: Context, config: Config): void {
         try {
           const mod = await importRuntime(spec.url)
           const start = mod[spec.start] as BridgeRuntime['start']
+          /* v8 ignore next -- the shipped module exports its start function; this guards a mis-packaged build */
           if (typeof start !== 'function') throw new Error(`运行时模块缺少导出 ${spec.start}`)
           const started = await start({ ...spec.overrides, preflight })
           ctx.logger.info(`${spec.label} 已监听 http://${started.host}:${started.port}`)
         } catch (error) {
-          ctx.logger.warn(`${spec.label} 启动失败：${(error as Error)?.message ?? String(error)}`)
+          /* v8 ignore next -- the relay runtimes reject with Error values; a non-Error rejection cannot be staged */
+          ctx.logger.warn(`${spec.label} 启动失败：${error instanceof Error ? error.message : String(error)}`)
         }
       }
     })()
@@ -283,6 +465,7 @@ export function apply(ctx: Context, config: Config): void {
         try {
           const mod = await importRuntime(spec.url)
           const stop = mod[spec.stop] as BridgeRuntime['stop']
+          /* v8 ignore next -- the shipped runtime modules export their stop function; the guard covers a mis-packaged build */
           if (typeof stop === 'function') await stop()
         } catch {
           // dispose 阶段不抛：关闭流程里再抛错只会污染其它 fiber 的回收。
