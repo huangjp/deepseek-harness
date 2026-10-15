@@ -1,6 +1,6 @@
 /** Validate source locale metadata, Node resource exports, and package publication selections. */
 
-import { globSync, readFileSync, realpathSync } from 'node:fs'
+import { existsSync, globSync, readFileSync, realpathSync } from 'node:fs'
 import { basename, dirname, join, matchesGlob, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { readPluginMeta, resolvePluginResource } from '../packages/boot/app-boot/src/package-meta.ts'
@@ -64,6 +64,63 @@ function published(file: string, files: string[]): boolean {
   }
   return files.some(pattern => !pattern.startsWith('!') && covered(pattern))
     && !files.some(pattern => pattern.startsWith('!') && covered(pattern.slice(1)))
+}
+
+/**
+ * Relative module specifiers one JavaScript source names, in both their static
+ * (`import x from './y.mjs'`) and dynamic (`import('./y.mjs')`) forms.
+ *
+ * Comments are stripped first, because shipped sources discuss paths in prose.
+ * Beyond that this reads text, not syntax, and it errs toward recall: a missed
+ * import ships a package that fails only once installed, while an extra one is
+ * a loud, one-line correction. Bare specifiers are another package's problem,
+ * and a computed path such as `new URL('./y.mjs', import.meta.url)` is not a
+ * module specifier and is not what decides whether this file loads.
+ * @param source - the module's text.
+ * @returns the relative specifiers it names.
+ */
+function relativeSpecifiers(source: string): string[] {
+  const code = source
+    .replaceAll(/\/\*[\s\S]*?\*\//gu, ' ')
+    .replaceAll(/\/\/[^\n]*/gu, ' ')
+  const specifiers: string[] = []
+  const patterns = [
+    /\bimport\s+(?:[^'";]*?\bfrom\s+)?['"](\.[^'"]*)['"]/gu,
+    /\bimport\s*\(\s*['"](\.[^'"]*)['"]/gu,
+  ]
+  for (const pattern of patterns) {
+    for (const match of code.matchAll(pattern)) {
+      if (match[1] !== undefined) specifiers.push(match[1])
+    }
+  }
+  return specifiers
+}
+
+/**
+ * Published modules that are shipped as source and import a sibling, relative
+ * to the package directory.
+ *
+ * Built output under `lib/` is deliberately out of scope: this gate runs on a
+ * clean tree where it does not exist, and a bundler decides what that build
+ * reaches. The shipped runtimes (`bridge/*.mjs`) are copied verbatim and import
+ * each other by relative specifier, so an unpublished sibling fails only in the
+ * installed package — the import resolves on every checkout.
+ * @param dir - package directory.
+ * @param files - the manifest's publication selection.
+ * @returns package-relative paths of the imported modules.
+ */
+function sourceImports(dir: string, files: string[]): string[] {
+  const imported = new Set<string>()
+  for (const entry of files) {
+    if (entry.startsWith('!') || entry.includes('*')) continue
+    if (!/\.m?js$/u.test(entry) || entry.startsWith('lib/')) continue
+    const source = join(dir, entry)
+    if (!existsSync(source)) continue
+    for (const specifier of relativeSpecifiers(readFileSync(source, 'utf8'))) {
+      imported.add(relative(dir, resolve(dirname(source), specifier)).replaceAll('\\', '/'))
+    }
+  }
+  return [...imported]
 }
 
 function packageProblems(manifestPath: string): string[] {
@@ -192,6 +249,14 @@ function packageProblems(manifestPath: string): string[] {
       return selected !== undefined && byPath.has(selected)
     })) continue
     problems.push(`${manifestPath}: exports must expose ${document.file} as a plugin locale resource with an en.json discovery baseline`)
+  }
+
+  if (pkg.files !== undefined) {
+    for (const imported of sourceImports(dir, pkg.files)) {
+      if (!published(imported, pkg.files)) {
+        problems.push(`${manifestPath}: files must include ${imported}, which a published module imports`)
+      }
+    }
   }
   return problems
 }

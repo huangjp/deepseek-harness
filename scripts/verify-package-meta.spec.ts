@@ -180,6 +180,69 @@ it('accepts metadata from an unscoped package self-reference', () => {
   expect(packageMetaProblems(root)).toEqual([])
 })
 
+it('rejects a published module that imports an unpublished sibling', () => {
+  manifest({ files: ['lib', 'bridge/entry.mjs'] })
+  file('bridge/entry.mjs', "import { helper } from './helper.mjs'\nimport './side-effect.mjs'\nexport const run = () => helper()")
+  file('bridge/helper.mjs', 'export const helper = () => 1')
+  file('bridge/side-effect.mjs', '')
+  const problems = packageMetaProblems(root).join('\n')
+  expect(problems).toContain('files must include bridge/helper.mjs, which a published module imports')
+  expect(problems).toContain('files must include bridge/side-effect.mjs, which a published module imports')
+})
+
+it('accepts a published module whose imports are all published', () => {
+  manifest({ files: ['lib', 'bridge'] })
+  file('bridge/entry.mjs', "import { helper } from './helper.mjs'\nexport const run = () => helper()")
+  file('bridge/helper.mjs', 'export const helper = () => 1')
+  expect(packageMetaProblems(root)).toEqual([])
+})
+
+it('follows a dynamic import of a sibling too', () => {
+  manifest({ files: ['lib', 'bridge/entry.mjs'] })
+  file('bridge/entry.mjs', "export const load = async () => (await import('./late.mjs')).run()")
+  file('bridge/late.mjs', 'export const run = () => 1')
+  expect(packageMetaProblems(root).join('\n'))
+    .toContain('files must include bridge/late.mjs, which a published module imports')
+})
+
+it.each([
+  ['a bare package specifier', "import { readFileSync } from 'node:fs'"],
+  ['another workspace package', "import { z } from '@deepseek-ai/schemastery'"],
+  ['a computed resource URL', "export const entry = new URL('./bridge/entry.mjs', import.meta.url)"],
+  ['a path named in a comment', "// 与 './not-really.mjs' 同级，见该文件的说明"],
+  ['a path named in a block comment', "/* 见 import './not-really.mjs' */\nexport const run = () => 1"],
+])('does not treat %s as a sibling import', (_label, source) => {
+  manifest({ files: ['lib', 'bridge/entry.mjs'] })
+  file('bridge/entry.mjs', source)
+  file('bridge/not-really.mjs', '')
+  expect(packageMetaProblems(root)).toEqual([])
+})
+
+it('reads a path inside a string as an import, erring toward recall', () => {
+  // A missed import ships a package that fails only once installed; this is the
+  // documented cost of not parsing strings.
+  manifest({ files: ['lib', 'bridge/entry.mjs'] })
+  file('bridge/entry.mjs', "export const hint = \"import './not-really.mjs'\"")
+  file('bridge/not-really.mjs', '')
+  expect(packageMetaProblems(root).join('\n'))
+    .toContain('files must include bridge/not-really.mjs, which a published module imports')
+})
+
+it('follows a multi-line named import', () => {
+  manifest({ files: ['lib', 'bridge/entry.mjs'] })
+  file('bridge/entry.mjs', "import {\n  helper,\n} from './helper.mjs'\nexport const run = () => helper()")
+  file('bridge/helper.mjs', 'export const helper = () => 1')
+  expect(packageMetaProblems(root).join('\n'))
+    .toContain('files must include bridge/helper.mjs, which a published module imports')
+})
+
+it('does not scan built output for imports', () => {
+  // `lib/` does not exist on a clean tree and the bundler decides what it reaches.
+  manifest({ files: ['lib'] })
+  file('lib/index.js', "export const run = async () => (await import('./missing.mjs')).run()")
+  expect(packageMetaProblems(root)).toEqual([])
+})
+
 it('validates root and multiple exported plugins independently', () => {
   manifest({
     exports: {
