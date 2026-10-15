@@ -1,0 +1,154 @@
+{
+ "arguments": [
+  {
+   "source": "officedesktop",
+   "clientCorrelationId": "728e2fc449a110b34f206e9d746b53f8",
+   "sessionId": "728e2fc4-49a1-10b3-4f20-6e9d746b53f8",
+   "optionsSets": [
+    "search_result_progress_messages_with_search_queries",
+    "update_textdoc_response_after_streaming",
+    "deepleo_networking_timeout_10minutes_canmore",
+    "enable_search_result_progress_messages",
+    "cwc_flux_image",
+    "cwc_code_interpreter",
+    "cwc_code_interpreter_amsfix",
+    "enable_msa_user",
+    "cwcgptv",
+    "flux_v3_gptv_enable_upload_multi_image_in_turn_wo_ch",
+    "gptvnorm2048",
+    "pdnascan",
+    "cwc_code_interpreter_citation_fix",
+    "code_interpreter_interactive_charts",
+    "cwc_code_interpreter_interactive_charts_inline_image",
+    "code_interpreter_matplotlib_patching",
+    "cwc_fileupload_odb",
+    "update_memory_plugin",
+    "add_custom_instructions",
+    "cwc_flux_v3",
+    "flux_v3_progress_messages",
+    "enable_batch_token_processing",
+    "enable_gg_gpt",
+    "enable_inferred_memory_read",
+    "cwc_table_context",
+    "flux_v3_references",
+    "flux_v3_references_entities",
+    "flux_v3_references_ci",
+    "add_filestore_filetype",
+    "cwc_code_interpreter_citation_sourceannotations",
+    "cdxcwc_code_interpreter_hallucinated_url_filter",
+    "flux_v3_image_gen_enable_non_watermarked_storage",
+    "flux_v3_image_gen_enable_story",
+    "rich_responses",
+    "enable_strongly_typed_bing_grounding_conversion",
+    "web_search_citations_answer_cards"
+   ],
+   "streamingMode": "ConciseWithPadding",
+   "options": {},
+   "extraExtensionParameters": {},
+   "allowedMessageTypes": [
+    "Chat",
+    "Suggestion",
+    "InternalSearchQuery",
+    "Disengaged",
+    "InternalLoaderMessage",
+    "Progress",
+    "GeneratedCode",
+    "RenderCardRequest",
+    "AdsQuery",
+    "SemanticSerp",
+    "GenerateContentQuery",
+    "GenerateGraphicArt",
+    "SearchQuery",
+    "ConfirmationCard",
+    "AuthError",
+    "DeveloperLogs",
+    "TriggerPlugin",
+    "HintInvocation",
+    "MemoryUpdate",
+    "EndOfRequest",
+    "TriggerConfirmation",
+    "ResumeInvokeAction",
+    "ResumeUserInputRequest",
+    "TriggerUserInputRequest",
+    "EscapeHatch",
+    "TriggerPluginAuth",
+    "ResumePluginAuth",
+    "SideBySide",
+    "ReferencesListComplete",
+    "SwitchRespondingEndpoint"
+   ],
+   "sliceIds": [],
+   "threadLevelGptId": {},
+   "requestId": "728e2fc449a110b34f206e9d746b53f8",
+   "traceId": "728e2fc449a110b34f206e9d746b53f8",
+   "isStartOfSession": false,
+   "clientInfo": {
+    "clientPlatform": "win32",
+    "clientAppName": "Office",
+    "clientEntrypoint": "ChatPanel",
+    "clientSessionId": "728e2fc4-49a1-10b3-4f20-6e9d746b53f8",
+    "ProductCategory": "Chat",
+    "clientAppType": "CopilotApp",
+    "productEntryPoint": "ChatPanel",
+    "deviceOS": "Windows",
+    "deviceType": "Desktop",
+    "clientPlatformVersion": "10"
+   },
+   "message": {
+    "author": "user",
+    "inputMethod": "Keyboard",
+    "text": "你好",
+    "entityAnnotationTypes": [
+     "People",
+     "File",
+     "Event",
+     "Email",
+     "TeamsMessage"
+    ],
+    "requestId": "728e2fc449a110b34f206e9d746b53f8",
+    "locationInfo": {
+     "timeZoneOffset": 8,
+     "timeZone": "Asia/Shanghai"
+    },
+    "locale": "zh-cn",
+    "messageType": "Chat",
+    "experienceType": "Default",
+    "adaptiveCards": [],
+    "clientPreferences": {
+     "executionControls": {
+      "web": {},
+      "work": {}
+     }
+    },
+    "connectedFederatedConnections": [
+     "dummyId"
+    ],
+    "clientInfo": {
+     "clientPlatform": "win32",
+     "clientAppName": "Office",
+     "clientEntrypoint": "ChatPanel",
+     "clientSessionId": "728e2fc4-49a1-10b3-4f20-6e9d746b53f8",
+     "ProductCategory": "Chat",
+     "clientAppType": "CopilotApp",
+     "productEntryPoint": "ChatPanel",
+     "deviceOS": "Windows",
+     "deviceType": "Desktop",
+     "clientPlatformVersion": "10"
+    }
+   },
+   "plugins": [
+    {
+     "Id": "BingWebSearch",
+     "Source": "BuiltIn"
+    }
+   ],
+   "isSbsSupported": true,
+   "tone": "Magic",
+   "renderReferencesBehindEOS": true,
+   "disconnectBehavior": "continue"
+  }
+ ],
+ "invocationId": "0",
+ "target": "chat",
+ "type": 4
+}

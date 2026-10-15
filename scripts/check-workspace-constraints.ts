@@ -208,6 +208,22 @@ const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
   // sandbox-local resolves it through the package's ./runner export. tsdown
   // also shares its generated FFI code through a hashed runtime chunk.
   '@deepseek-ai/dsh-sandbox-windows-acl': ['lib/runner.js', 'lib/types-*.js', 'assets'],
+  // 内置本地模型桥接的本体是零依赖纯 Node 标准库 ESM，由宿主按 URL 在运行时
+  // 加载（不是构建输入、也不走 tsdown），所以以源码形式随包发布。
+  '@deepseek-ai/dsh-host-local-bridge': [
+    'bridge/bridge.mjs',
+    'bridge/backends.mjs',
+    'bridge/weflow.mjs',
+    'bridge/toolcalls.mjs',
+    'bridge/bridge.config.json',
+    'bridge/copilot-bridge.mjs',
+    'bridge/copilot.config.json',
+    'bridge/copilot-protocol-notes.md',
+    'bridge/refresh-token.ps1',
+    'bridge/token-harvester.py',
+    'bridge/chat_template.json',
+    'bridge/preflight.mjs',
+  ],
   '@deepseek-ai/dsh-skill-badge': ['assets'],
   '@deepseek-ai/dsh-skill-office': ['assets'],
   '@deepseek-ai/dsh-subprocess': ['lib/control.js'],

@@ -37,11 +37,71 @@
     # once the web UI owns the choice per session.
     mode: !!js process.env.DSH_TOOLS_MODE
 
+# ── 内置反代的默认模型配置（随安装包分发，用户无需手工配置）──────────────
+#
+# 两个内置反代（见下方 insert 段的 local-bridge）随桌面安装包一起分发。它们对应的
+# provider（dpv41f → 127.0.0.1:8787、slefgpt56 → 127.0.0.1:8899）现在由专用插件
+# `@deepseek-ai/dsh-llm-local-bridge` 以**代码级固定路由**注册（同 deepseek-official 的
+# 模式），不进用户可编辑的 `llm-pi-ai` 设置层 —— 因此「设置 → 模型」页**无法删除或覆盖**
+# 它们，且新装机器开箱即有，无需任何手工配置。
+#
+# 之所以不放进 `llm-pi-ai` 的配置：patch 会替换整行 config，用户只要在那页配过任何
+# 一个自定义 provider，就会把整行覆盖掉，内置反代随之消失。固定路由则完全绕开该命名空间。
+#
+# 占位 `authorization: Bearer local-bridge` 头与 `input: [text, image]` 模态声明都写在插件里
+# （见 packages/llm/llm-local-bridge/src/index.ts）。本地反代不校验密钥，带占位头即可开箱可用；
+# 不声明 image 会被 DSH 在发送前用 MODEL_DOES_NOT_SUPPORT_IMAGES 拦掉附图。
+- insert:
+    # 内置的两个反代 provider 路由（dpv41f → 8787、slefgpt56 → 8899）由本插件以
+    # 代码级固定路由注册，同 deepseek-official 的模式：它们不在用户可编辑的
+    # `llm-pi-ai` 设置层里，所以「设置 → 模型」页既删不掉也覆盖不了，
+    # 而新装机器无需任何配置即可使用。
+    #
+    # 注意必须用 `- insert:` 声明而不是 `- id:` 覆盖：`applyEntryPatches` 只能
+    # 修改**已存在**的条目，用 `- id:` 配置一个从未声明过的插件会被
+    # `patch: entry "llm-local-bridge" not found` 静默丢弃。
+    - id: llm-local-bridge
+      name: '@deepseek-ai/dsh-llm-local-bridge'
+
+# 默认模型指向内置反代（base 层默认是 deepseek-official/deepseek-flash，需要账号）。
+- id: agent-default-model
+  config:
+    provider: dpv41f
+    model: deepseek-v4.1-flash
+
 # ── web-only host rows, the transport layer, and the browser roster ─────────
 
 # `dsh.client` rows are the browser roster the modules node half scans into
 # window.__DSH_BOOT__; the modules row is simultaneously a host row.
 - insert:
+    # 内置本地模型反代（随安装包分发），两个服务各自独立监听：
+    #   - WorkBuddy 模型反代 127.0.0.1:8787（POST /v1/chat/completions、POST /summarize）
+    #   - Microsoft Copilot 反代 127.0.0.1:8899（POST /v1/chat/completions）
+    # 端口被占用时插件只记一条 warning，既不影响另一个反代，也不影响宿主启动。
+    - id: local-bridge
+      name: '@deepseek-ai/dsh-host-local-bridge'
+      config:
+        enabled: true
+        host: 127.0.0.1
+        port: 8787
+        backend: serve
+        copilot:
+          enabled: true
+          port: 8899
+        deps:
+          # 装了没跑时自动拉起 WorkBuddy / Copilot。
+          autoStart: true
+          # Copilot 令牌陈旧且前置条件齐备时自动刷新（会临时切换系统代理约 1 分钟）。
+          autoRefreshToken: true
+          # 启动时把随包分发的部署文件（收割插件 / 刷新脚本 / 请求模板）自举到收割目录。
+          # 安装包带不了 mitmproxy / CA / 已登录的 Copilot，但这步能自动化 ——
+          # 开着它，新机器上装完直接启动即可，不必单独跑部署脚本。
+          bootstrap: true
+          # CA 未装入受信任根证书区时自动导入（会弹一次 Windows 安全警告，无法静默绕过）。
+          autoInstallCa: true
+          # mitmdump 缺失时后台尝试 pip install mitmproxy（不阻塞启动，装完下次生效）。
+          autoInstallMitm: true
+
     - id: desktop-product-telemetry
       name: '@deepseek-ai/dsh-host-product-telemetry-otel'
       disabled: !!js "ctx.get('profileContext')?.name !== 'desktop'"

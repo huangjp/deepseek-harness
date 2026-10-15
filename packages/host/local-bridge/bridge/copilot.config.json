@@ -1,0 +1,18 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8899,
+    "apiKey": "",
+    "cors": "*"
+  },
+
+  "harvest": {
+    "dir": "",
+    "_comment": "留空则用 %USERPROFILE%\\copilot-probe，即 token-harvester.py 的默认输出目录"
+  },
+
+  "session": {
+    "timeoutMs": 180000,
+    "_comment": "单轮对话超时；Copilot 首 token 通常 1-3 秒，但深度检索会久一些"
+  }
+}

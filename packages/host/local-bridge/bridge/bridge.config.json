@@ -1,0 +1,129 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8787,
+    "apiKey": "",
+    "cors": "*"
+  },
+
+  "backend": "serve",
+
+  "serve": {
+    "host": "127.0.0.1",
+    "port": null,
+    "portFallbacks": [],
+    "password": "",
+    "cacheDir": "",
+    "agentName": "terminalTitleGenerator",
+    "agentFallbacks": ["memorySelector", "insightsAnalyzer", "create"],
+    "_imageAgentNote": "带图时改用下面这个 agent。图片只能落盘后由 agent 自己用 Read 工具读，而上面的 agentName/agentFallbacks 全是工具集为空的纯文本任务型 agent，读不到文件（实测模型会回「我没有文件读取工具」）。general-purpose 带 Read；compact 只带 Read，最干净。",
+    "imageAgent": "general-purpose",
+    "imageAgentFallbacks": ["compact", "Explore", "Plan"],
+    "model": "deepseek-v4.1-flash",
+    "maxTurns": 1,
+    "timeoutMs": 180000,
+    "endpointRetryMs": 10000
+  },
+
+  "cli": {
+    "nodePath": "C:/Users/Administrator/.workbuddy-ai/binaries/node/versions/22.22.2-3/node.exe",
+    "binPath": "F:/软件/WorkBuddyAI/resources/app.asar.unpacked/cli/bin/codebuddy",
+    "model": "deepseek-v4.1-flash",
+    "promptTransport": "stdin",
+    "maxConcurrent": 2,
+    "timeoutMs": 180000,
+    "maxTurns": 1,
+    "scratchDir": "",
+    "extraArgs": []
+  },
+
+  "openai": {
+    "baseUrl": "http://127.0.0.1:3000/v1",
+    "apiKey": "",
+    "model": "gpt-5.6-sol",
+    "timeoutMs": 120000
+  },
+
+  "weflow": {
+    "enabled": false,
+    "baseUrl": "http://127.0.0.1:5031",
+    "apiKey": "",
+    "endpoints": {
+      "health": "/",
+      "sessions": "/api/sessions",
+      "messages": "/api/messages"
+    },
+    "query": {
+      "sessionId": "sessionId",
+      "talker": "talker",
+      "startTime": "startTime",
+      "endTime": "endTime",
+      "limit": "limit"
+    }
+  },
+
+  "summary": {
+    "style": "detailed",
+    "language": "zh",
+    "maxMessages": 800,
+    "maxChars": 60000,
+    "systemPrompt": "你是聊天记录总结助手。你只输出结构化总结，不执行任何文件操作、不调用任何工具。",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "headline": { "type": "string", "description": "一句话概括这段对话" },
+        "overview": { "type": "string", "description": "2-4 句整体概述" },
+        "topics": {
+          "type": "array",
+          "description": "讨论到的主要话题",
+          "items": {
+            "type": "object",
+            "properties": {
+              "topic": { "type": "string" },
+              "detail": { "type": "string" }
+            },
+            "required": ["topic", "detail"]
+          }
+        },
+        "keyPoints": {
+          "type": "array",
+          "description": "关键结论或事实",
+          "items": { "type": "string" }
+        },
+        "actionItems": {
+          "type": "array",
+          "description": "待办事项，没有就返回空数组",
+          "items": {
+            "type": "object",
+            "properties": {
+              "owner": { "type": "string" },
+              "task": { "type": "string" },
+              "deadline": { "type": "string" }
+            },
+            "required": ["owner", "task", "deadline"]
+          }
+        },
+        "sentiment": {
+          "type": "object",
+          "properties": {
+            "tone": { "type": "string" },
+            "notes": { "type": "string" }
+          },
+          "required": ["tone", "notes"]
+        },
+        "notableQuotes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "speaker": { "type": "string" },
+              "quote": { "type": "string" }
+            },
+            "required": ["speaker", "quote"]
+          }
+        }
+      },
+      "required": ["headline", "overview", "topics", "keyPoints", "actionItems", "sentiment", "notableQuotes"]
+    }
+  }
+}

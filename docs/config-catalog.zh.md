@@ -1420,6 +1420,63 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-host-frontend-static -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-host-local-bridge -->
+<a id="deepseek-aidsh-host-local-bridge"></a>
+
+## `@deepseek-ai/dsh-host-local-bridge`
+
+- `source`: [`packages/host/local-bridge/src/index.ts:71`](../packages/host/local-bridge/src/index.ts)
+
+```ts config-catalog
+/** Plugin config. */
+export interface Config {
+  /** 是否随宿主启动内置反代。 */
+  enabled: boolean
+  /** 两个反代共用的监听地址；默认只对本机开放。 */
+  host: string
+  /** WorkBuddy 模型反代端口。 */
+  port: number
+  /** WorkBuddy 反代的模型通道：`serve`（客户端网关）/ `cli`（CodeBuddy CLI）/ `openai`（任意 OpenAI 兼容端点）。 */
+  backend: string
+  /** 网关凭据缓存目录；留空则落在系统临时目录（安装目录通常不可写）。 */
+  cacheDir: string
+  /** Microsoft Copilot 反代。 */
+  copilot: {
+    /** 是否启动 Copilot 反代（需先收割到令牌，否则只监听、调用会报 no_token）。 */
+    enabled: boolean
+    /** Copilot 反代端口。 */
+    port: number
+    /** 令牌/模板收割目录；留空则用 `%USERPROFILE%\copilot-probe`。 */
+    harvestDir: string
+  }
+  /** 配套依赖（WorkBuddy AI / Microsoft Copilot）的自愈开关。 */
+  deps: {
+    /** 装了但没在跑时，是否自动把它们拉起来。 */
+    autoStart: boolean
+    /**
+     * Copilot 令牌陈旧且前置条件齐备时，是否自动触发 `refresh-token.ps1`。
+     * 注意：该脚本会**临时切换系统代理**（约 1 分钟，`finally` 里还原），
+     * 并用 UI 自动化让 Copilot 建一次连接 —— 介意的话把它关掉。
+     */
+    autoRefreshToken: boolean
+    /**
+     * 启动时把随包分发的部署文件（收割插件、刷新脚本、请求模板）自举到收割目录。
+     * 安装包带不了 mitmproxy / CA / 已登录的 Copilot，但这步能自动化 ——
+     * 开着它，新机器上装完直接启动即可，不必单独跑部署脚本。
+     */
+    bootstrap: boolean
+    /**
+     * mitmproxy CA 未装入受信任根证书区时，是否自动导入。
+     * 注意：会弹出**一次** Windows 安全警告 —— 这是导入根证书的系统强制确认，无法静默绕过。
+     */
+    autoInstallCa: boolean
+    /** mitmdump 缺失时，是否在后台尝试 `pip install mitmproxy`（不阻塞启动，装完下次生效）。 */
+    autoInstallMitm: boolean
+  }
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-host-local-bridge -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-host-open-in-app -->
 <a id="deepseek-aidsh-host-open-in-app"></a>
 
@@ -4386,6 +4443,7 @@ export interface Config {
 | `@deepseek-ai/dsh-host-directory-picker-native` | — | [`packages/host/directory-picker-native/src/index.ts`](../packages/host/directory-picker-native/src/index.ts) |
 | `@deepseek-ai/dsh-host-plugin-inventory` | `loader` | [`packages/host/plugin-inventory/src/index.ts`](../packages/host/plugin-inventory/src/index.ts) |
 | `@deepseek-ai/dsh-llm` | — | [`packages/llm/llm/src/index.ts`](../packages/llm/llm/src/index.ts) |
+| `@deepseek-ai/dsh-llm-local-bridge` | `llm` | [`packages/llm/llm-local-bridge/src/index.ts`](../packages/llm/llm-local-bridge/src/index.ts) |
 | `@deepseek-ai/dsh-lsp` | — | [`packages/lsp/lsp/src/index.ts`](../packages/lsp/lsp/src/index.ts) |
 | `@deepseek-ai/dsh-mcp-resources` | `tools` | [`packages/mcp/mcp-resources/src/index.ts`](../packages/mcp/mcp-resources/src/index.ts) |
 | `@deepseek-ai/dsh-otel` | — | [`packages/telemetry/otel/src/index.ts`](../packages/telemetry/otel/src/index.ts) |

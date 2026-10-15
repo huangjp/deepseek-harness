@@ -70,7 +70,13 @@ export function createElectronBuilderConfig(
   let dshDestination
   let windowsCode = []
   const unpack = ['**/*.{node,dylib,dll,so,exe}', '**/*.so.*', '**/spawn-helper', '**/@vscode/ripgrep-*/bin/rg',
-    `**/node_modules/@deepseek-ai/libreoffice-kit-${resolvedPlatform}-${resolvedArch}/**/*`]
+    `**/node_modules/@deepseek-ai/libreoffice-kit-${resolvedPlatform}-${resolvedArch}/**/*`,
+    // local-bridge 的 bridge/ 里有必须由**外部进程**读取的文件：powershell.exe 用
+    // Get-Content 读 refresh-token.ps1、mitmdump 用 --scripts 加载 token-harvester.py。
+    // 这些进程不认识 ASAR，打进包内就只能拿到一个打不开的伪路径，
+    // 于是自动刷新看起来启动成功（spawn 返回值）却永远产不出 token.json。
+    // 整棵 bridge/ 都解包，好让 bridgeDir 与 refreshScript 指向同一份真实文件。
+    '**/node_modules/@deepseek-ai/dsh-host-local-bridge/bridge/**']
   const windowsSigner = packagesWindows && !unsigned
     ? createWindowsTokenSigner({
         certificateFile: env.DSH_DESKTOP_WINDOWS_CER_FILE,

@@ -1,0 +1,46 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/llm/llm-local-bridge/README.md
+/:
+  en: 33e8cc27166d9f90
+  zh: 5639ce7ad3410cd0
+/deepseek-ai-dsh-llm-local-bridge:
+  en: 94a4d57cd3c3ab63
+  zh: d30ca75910ecfa9f
+/deepseek-ai-dsh-llm-local-bridge/summary:
+  en: c81f54519de38768
+  zh: 9882adf523f76364
+/deepseek-ai-dsh-llm-local-bridge/table-of-contents:
+  en: b563e4ec4727d0de
+  zh: c3fb1f227529c67d
+/deepseek-ai-dsh-llm-local-bridge/use-this-package:
+  en: 3eec6a9f30a4225e
+  zh: 1961e867053e2750
+/deepseek-ai-dsh-llm-local-bridge/understand-the-implementation:
+  en: 228b5fc48ec2596e
+  zh: 03dd6059c8175ad4
+/deepseek-ai-dsh-llm-local-bridge/further-exploration:
+  en: fb15b687d4f67821
+  zh: 32eae3f464cdf456
+/deepseek-ai-dsh-llm-local-bridge/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-llm-local-bridge/model-experience/relay-request-through-the-built-in-route:
+  en: b0b79589db628ebb
+  zh: d3808c912c9275ad
+/deepseek-ai-dsh-llm-local-bridge/model-experience/relay-request-through-the-built-in-route/what-the-model-sees:
+  en: 7fcbd344f246229c
+  zh: 76e0714c00943eed
+/deepseek-ai-dsh-llm-local-bridge/model-experience/relay-request-through-the-built-in-route/token-effect:
+  en: b7127ff16b5f6164
+  zh: 10937c5a5827dda5
+/deepseek-ai-dsh-llm-local-bridge/model-experience/relay-request-through-the-built-in-route/kv-cache-effect:
+  en: bdb11d4fa3235a9b
+  zh: 489a3e3ed554dac1
+/deepseek-ai-dsh-llm-local-bridge/known-limitations-and-deferred-work:
+  en: 77359d742eb342b2
+  zh: ef8423e59f4cb8de
+/deepseek-ai-dsh-llm-local-bridge/known-limitations-and-deferred-work/dev-note:
+  en: 0725f3dc323fc4ea
+  zh: 27c734ce365247b5
