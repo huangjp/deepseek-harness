@@ -24,8 +24,11 @@
   en: 73fead29a647af5d
   zh: ae6d6092c2e1e60c
 /deepseek-ai-dsh-host-local-bridge/understand-the-implementation:
-  en: 7b8805c29ea7a58a
-  zh: 269526d44986510d
+  en: 9a8a61b501564940
+  zh: f3c476b4cb380aa8
+/deepseek-ai-dsh-host-local-bridge/understand-the-implementation/tool-calls-over-a-text-only-upstream:
+  en: 6651c1e9a913e6e5
+  zh: ae49e2ce7afe1393
 /deepseek-ai-dsh-host-local-bridge/further-exploration:
   en: c260b247d1afe8e6
   zh: 9873adf9af78617c
@@ -36,8 +39,8 @@
   en: ca75c51c89c2c9b0
   zh: ca75c51c89c2c9b0
 /deepseek-ai-dsh-host-local-bridge/known-limitations-and-deferred-work:
-  en: a23bf715b4fb0585
-  zh: a1a2fcaa8abf4020
+  en: 040568b34fdd9a14
+  zh: 268705dacf60a2fa
 /deepseek-ai-dsh-host-local-bridge/known-limitations-and-deferred-work/dev-note:
   en: 3f179b447b9d5c27
   zh: 3f179b447b9d5c27

@@ -83,6 +83,16 @@ kind: "package-reference"
 
 真正执行刷新的是 `bridge/refresh-token.ps1`：它拉起本地拦截代理，把系统代理指向它，驱动 Copilot 窗口建立一次连接，从该连接的握手里收割访问令牌，并在 `finally` 中还原代理。一份备份文件让被强杀的那一轮在下次运行时可以补还原。
 
+### Tool calls over a text-only upstream
+
+两个上游都不提供 function calling。WorkBuddy 网关背后是一个自带工具白名单的 agent，它无视调用方给的 tools —— 让它去调一个，它会伸手去够自己的那套然后报错；Copilot 的 `chatHub` 帧只承载一条纯文本 prompt，根本没有工具字段。所以两个反代都用同一份模块（`bridge/toolprompt.mjs`）把工具调用搭在文本上：
+
+1. 请求里的 `tools` 被渲染进提示词：一份清单，外加一种意图格式 —— 模型回答 `{"bridge_tool_calls":[{"name":…,"arguments":{…}}]}`。
+2. 回复再被解析回 OpenAI 的 `tool_calls`，`finish_reason: "tool_calls"`。非法 JSON 会被修复（括号不配对、尾逗号、参数误放到 wrapper 层）并带修复提示重试一次；重试后仍像调用却解析不出来的，变成一条明确的错误，而不是冒充最终回答 —— 下游 agent 会把它当成"任务已完成"。
+3. 之后的提示词里会回放此前的工具轮次：助手表达过的意图连同参数，每条结果连同它的 `tool_call_id`，多轮工具调用因此不会丢上下文。
+
+两个反代不同的只有"提示词怎么送到上游"，所以它们仍是各自独立的模块。Copilot 反代保留普通回答的流式：开头看起来像工具调用的回复先扣住，等能判定再说，其余照常边到边发。WorkBuddy 反代在带工具时整段缓冲，因为它的上游本来就不流式。
+
 <a id="further-exploration"></a>
 ## Further Exploration
 
@@ -106,6 +116,7 @@ None; this package neither assembles nor sends a provider request.
 - **触发方不等待刷新。** 宿主启动的是一个分离进程，只回报「已启动」。需要结果的那一方 —— 反代在放行请求之前 —— 靠轮询收割令牌的时间戳把它读回来，并有一个期限；设置页显示的进度则来自锁文件与同一个时间戳。
 - **`deps.autoRefreshToken` 默认开启，且其副作用不是静默的。** 它会把系统代理改向约一分钟，并驱动 Copilot 窗口发送一条消息；证书导入还会弹出一次无法压制的 Windows 安全确认。
 - **反代不做就绪探测。** 端口被监听并不代表背后的应用可用；上游未登录要到第一个请求才会暴露。
+- **工具调用取决于模型是否遵守格式。** 桥接渲染出工具清单与意图格式，再解析回复；模型若按自己理解的函数调用作答，出来的是一段文字而不是调用。工具调用也是整份到达而不是流式片段，因为必须先看到完整 JSON 才能解析。
 
 ### Dev Note
 

@@ -83,6 +83,16 @@ Two decisions are load-bearing:
 
 `bridge/refresh-token.ps1` performs the refresh: it raises a local interception proxy, points the system proxy at it, drives the Copilot window to open a connection, harvests the access token from that connection's handshake, and restores the proxy in a `finally` block. A backup file makes a killed attempt recoverable at the next run.
 
+### Tool calls over a text-only upstream
+
+Neither upstream offers function calling. The WorkBuddy gateway is an agent with its own tool allowlist that ignores the caller's tools — asking it to call one makes it reach for its own and fail — and the Copilot `chatHub` frame carries one plain-text prompt with no tool field. Both relays therefore bridge tools through text, in one shared module (`bridge/toolprompt.mjs`):
+
+1. The request's `tools` are rendered into the prompt as a list plus an intent format: the model answers `{"bridge_tool_calls":[{"name":…,"arguments":{…}}]}`.
+2. The reply is parsed back into OpenAI `tool_calls` with `finish_reason: "tool_calls"`. Malformed JSON is repaired (unbalanced brackets, trailing commas, arguments misplaced at the wrapper level) and retried once with a repair prompt; a reply that still looks like a call but cannot be parsed becomes an explicit error rather than being passed off as a final answer, because a downstream agent would treat it as task completion.
+3. Prior tool turns are replayed into the next prompt — the assistant's expressed intent with its arguments, and each result with its `tool_call_id` — so a multi-turn tool loop keeps its context.
+
+Only how the prompt reaches the upstream differs between the two relays, which is why each stays a separate module. The Copilot relay keeps streaming ordinary answers: a reply whose opening looks like a tool call is held back until it can be decided, and everything else is sent as it arrives. The WorkBuddy relay buffers whenever tools are offered, because its upstream does not stream in the first place.
+
 <a id="further-exploration"></a>
 ## Further Exploration
 
@@ -106,6 +116,7 @@ None; this package neither assembles nor sends a provider request.
 - **A refresh is not awaited by the trigger.** The host starts a detached process and reports only that it started. The caller that needs the result — the relay, before serving a request — reads it back by polling the harvested token's timestamp, bounded by a deadline; progress the settings page shows comes from the lock file and that same timestamp.
 - **`deps.autoRefreshToken` is on by default and its side effects are not silent.** It changes the system proxy for about a minute, and drives the Copilot window to send one message; the certificate import shows one Windows security prompt that cannot be suppressed.
 - **The relays are not probed for readiness.** A listener that binds proves nothing about the application behind it; the first request is what discovers an unauthenticated upstream.
+- **Tool calls depend on the model following the format.** The bridge renders a tool list and an intent format, then parses the reply; a model that answers in its own notion of a function call produces prose instead of a call. Tool calls also arrive whole rather than as streamed fragments, because the JSON has to be seen before it can be parsed.
 
 ### Dev Note
 

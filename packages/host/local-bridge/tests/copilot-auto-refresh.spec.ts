@@ -73,13 +73,27 @@ async function boot(
 }
 
 /** POST 一条最小对话，取回响应正文。 */
-async function chat(base: string): Promise<{ status: number; body: string }> {
+async function chat(base: string, extra: Record<string, unknown> = {}): Promise<{ status: number; body: string }> {
   const response = await fetch(`${base}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ model: 'copilot', messages: [{ role: 'user', content: 'hi' }] }),
+    body: JSON.stringify({
+      model: 'copilot',
+      messages: [{ role: 'user', content: 'hi' }],
+      ...extra,
+    }),
   })
   return { status: response.status, body: await response.text() }
+}
+
+/** 一份 OpenAI 风格的工具定义。 */
+const READ_TOOL = {
+  type: 'function',
+  function: {
+    name: 'read',
+    description: '读取文件',
+    parameters: { type: 'object', properties: { path: { type: 'string' } } },
+  },
 }
 
 describe('Copilot 反代运行时自动刷新令牌', () => {
@@ -150,5 +164,54 @@ describe('Copilot 反代运行时自动刷新令牌', () => {
     const { body } = await chat(`http://127.0.0.1:${port}`)
     // 没有刷新能力就照旧用陈旧令牌建连，提示照出。
     expect(body).toContain('很可能已失效')
+  })
+})
+
+/**
+ * 工具清单必须能进到这条通道里。
+ *
+ * 本通道没有原生 function calling，`tools` 只能渲染成提示词里的文本协议 —— 这一段
+ * 证明请求带着工具时能一路走到上游（提示词组装、协议渲染都不抛），而不是在本地就
+ * 失败。上游在这里是一个没人监听的端口，所以判据是"失败来自上游"。
+ * 工具往返本身的判定与帧格式由 `toolprompt.spec.ts` 与 `bridge-tool-calls.spec.ts`
+ * 覆盖：后者的 MockBackend 能在无网络、无凭证的条件下走完整条真实链路。
+ */
+describe('Copilot 反代的工具清单', () => {
+  it('非流式带工具时照常走到上游，工具分支不自己抛错', async () => {
+    const { base } = await boot(60, async () => ({ started: true, refusal: null, logFile: null }))
+
+    const { status, body } = await chat(base, { tools: [READ_TOOL] })
+
+    expect(status).toBe(502)
+    expect(body).toContain('连接 substrate 失败')
+  })
+
+  it('流式带工具时同样走到上游，并把失败按 SSE 帧下发', async () => {
+    const { base } = await boot(60, async () => ({ started: true, refusal: null, logFile: null }))
+
+    const { body } = await chat(base, { tools: [READ_TOOL], stream: true })
+
+    // 流式下的失败必须走帧：客户端可能只解析 choices，纯 HTTP 错误体会被吞掉。
+    expect(body).toContain('[调用失败]')
+    expect(body).toContain('[DONE]')
+  })
+
+  it('带工具的请求在历史里回放工具轮次时也不报错', async () => {
+    const { base } = await boot(60, async () => ({ started: true, refusal: null, logFile: null }))
+
+    const { status } = await chat(base, {
+      tools: [READ_TOOL],
+      messages: [
+        { role: 'user', content: '读 a.txt' },
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'read', arguments: '{"path":"a.txt"}' } }],
+        },
+        { role: 'tool', tool_call_id: 'call_1', content: '文件内容' },
+      ],
+    })
+
+    expect(status).toBe(502)
   })
 })

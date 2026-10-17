@@ -17,6 +17,10 @@ import { randomUUID, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createTokenGate } from './token-gate.mjs';
+import {
+  buildToolInstruction, completeWithToolCalls, createToolCallGate, EXTERNAL_TOOLING_NOTICE,
+  resolveToolOutcome, toolCallFailureText, toolTurnText, TOOL_CALL_REPAIR_REMINDER,
+} from './toolprompt.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -533,7 +537,10 @@ function messagesToPrompt(messages = []) {
       }
     }
     if (m.role === 'system') { if (content) sys.push(content); continue; }
-    if (m.role === 'tool') { convo.push(`【工具结果】${content}`); continue; }
+    // 工具轮次必须回放：只压正文的话，助手那条消息的内容经常是空的，整轮就消失了，
+    // 模型看不到自己上一轮要过什么、也看不到结果对应哪一次调用。
+    const turn = toolTurnText(m, content);
+    if (turn !== null) { convo.push(turn); continue; }
     if (!content) continue;
     convo.push(`${m.role === 'assistant' ? '助手' : '用户'}: ${content}`);
   }
@@ -593,7 +600,15 @@ async function handleChatCompletions(req, res) {
   if (!userPrompt.trim()) {
     throw Object.assign(new Error('messages 为空'), { httpStatus: 400, code: 'invalid_request' });
   }
-  const prompt = systemPrompt ? `${systemPrompt}\n\n${userPrompt}` : userPrompt;
+  // 工具协议：本通道没有原生 function calling，`tools` 只能渲染成提示词里的清单与格式
+  // 约定，模型的意图再解析回 OpenAI tool_calls。声明置顶，因为它是"最高优先级"的那条。
+  const toolInstruction = buildToolInstruction(body.tools, body.tool_choice);
+  const hasTools = Boolean(toolInstruction);
+  const systemParts = [hasTools ? EXTERNAL_TOOLING_NOTICE : '', systemPrompt, toolInstruction];
+  const system = systemParts.filter(Boolean).join('\n\n');
+  /** 把（可能被重试改写的）system 段与对话正文拼成这一条 prompt。 */
+  const compose = (systemText) => [systemText, userPrompt].filter(Boolean).join('\n\n');
+  const prompt = compose(system);
 
   const model = body.model || 'copilot';
   const id = `chatcmpl-${Date.now().toString(36)}${randomBytes(4).toString('hex')}`;
@@ -606,11 +621,30 @@ async function handleChatCompletions(req, res) {
   if (gate) await gate.enter();
   try {
     if (!body.stream) {
-      let text = '';
-      const r = await runChat({ prompt, signal: ctl.signal, onDelta: (d) => { text += d; } });
+      if (!hasTools) {
+        const r = await runChat({ prompt, signal: ctl.signal });
+        return sendJson(res, 200, {
+          id, object: 'chat.completion', created, model,
+          choices: [{ index: 0, message: { role: 'assistant', content: r.text }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        });
+      }
+      const out = await completeWithToolCalls({
+        systemPrompt: system,
+        hasTools: true,
+        log,
+        invoke: systemText => runChat({ prompt: compose(systemText), signal: ctl.signal }),
+      });
+      const { calls, content, broken } = out.outcome;
       return sendJson(res, 200, {
         id, object: 'chat.completion', created, model,
-        choices: [{ index: 0, message: { role: 'assistant', content: r.text || text }, finish_reason: 'stop' }],
+        choices: [{
+          index: 0,
+          message: calls
+            ? { role: 'assistant', content: '', tool_calls: calls }
+            : { role: 'assistant', content: broken ? toolCallFailureText(out.text) : content },
+          finish_reason: calls ? 'tool_calls' : 'stop',
+        }],
         usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
       });
     }
@@ -637,8 +671,48 @@ async function handleChatCompletions(req, res) {
 
     try {
       frame({ role: 'assistant', content: '' });
-      await runChat({ prompt, signal: ctl.signal, onDelta: (t) => frame({ content: t }) });
-      frame({}, 'stop');
+      if (!hasTools) {
+        await runChat({ prompt, signal: ctl.signal, onDelta: (t) => frame({ content: t }) });
+        frame({}, 'stop');
+      } else {
+        // 带工具时不能把工具调用 JSON 当正文流给客户端，但普通回答仍应逐段下发 ——
+        // 所以用闸门按开头判定：像工具调用就整段扣住，否则一路直发。
+        const streaming = createToolCallGate();
+        const first = await runChat({
+          prompt,
+          signal: ctl.signal,
+          onDelta: (t) => {
+            const text = streaming.push(t);
+            if (text) frame({ content: text });
+          },
+        });
+        let outcome = resolveToolOutcome({ text: first.text, hasTools });
+        let finalText = first.text;
+        if (outcome.broken) {
+          // 第一次的 JSON 写坏了：带修复提示重试一次，这次不流式（不能回吐半截）。
+          log('[warn] 工具调用解析失败，疑似 JSON 非法，重试一次');
+          const retry = await runChat({
+            prompt: compose(`${system}\n\n${TOOL_CALL_REPAIR_REMINDER}`),
+            signal: ctl.signal,
+          });
+          finalText = retry.text;
+          outcome = resolveToolOutcome({ text: finalText, hasTools });
+        }
+        const { calls, content, broken } = outcome;
+        // 扣住的文本只有"确认是正文"时才放出去；工具调用与解析失败都要丢掉它。
+        const held = streaming.settle(calls !== null || broken);
+        if (calls) {
+          frame({ tool_calls: calls.map((c, i) => ({ index: i, ...c })) });
+          frame({}, 'tool_calls');
+        } else if (broken) {
+          log(`[warn] 重试后仍无法解析工具调用，下发错误帧。原始输出前 300 字：${String(finalText || '').slice(0, 300)}`);
+          frame({ content: toolCallFailureText(finalText) });
+          frame({}, 'stop');
+        } else {
+          if (held || content) frame({ content: held || content });
+          frame({}, 'stop');
+        }
+      }
       usageIfNeeded();
       res.write('data: [DONE]\n\n');
       res.end();

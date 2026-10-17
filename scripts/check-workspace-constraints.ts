@@ -215,6 +215,7 @@ const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
     'bridge/backends.mjs',
     'bridge/weflow.mjs',
     'bridge/toolcalls.mjs',
+    'bridge/toolprompt.mjs',
     'bridge/bridge.config.json',
     'bridge/copilot-bridge.mjs',
     'bridge/token-gate.mjs',

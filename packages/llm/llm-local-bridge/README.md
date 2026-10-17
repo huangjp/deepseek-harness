@@ -84,6 +84,7 @@ Conversion preserves logical request order, while image handles and offload plac
 - The endpoints are compiled in. A deployment that runs the relays on other ports, or a relay that requires real authentication, needs a code change rather than a setting.
 - The `slefgpt56` catalog declares `image` input because the calling side does not restrict it. The Copilot relay's SignalR `chatHub` frame currently carries no attachment field, so an image sent through that route is rejected by the relay with an explicit `400 images_unsupported` rather than silently dropped.
 - Declaring a model id does not prove the relay serves it: no availability probe runs at boot. A request to an unserved id fails at the relay.
+- **Tool calls are emulated, not native.** Neither upstream offers function calling, so the relay renders the tool list into the prompt and parses the reply back into `tool_calls`; a model that ignores the format returns prose instead of a call, and tool calls arrive whole rather than as streamed fragments. Both routes still accept `tools` and answer `finish_reason: "tool_calls"` like any other route.
 
 ### Dev Note
 

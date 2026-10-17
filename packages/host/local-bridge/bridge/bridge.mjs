@@ -18,7 +18,9 @@ import {
   WeFlowClient, normalizeMessages, trimMessages,
   buildSummaryPrompt, buildSchemaInstruction, parseJsonLoose,
 } from './weflow.mjs';
-import { parseToolCalls, looksLikeToolCallAttempt } from './toolcalls.mjs';
+import {
+  buildToolInstruction, completeWithToolCalls, toolCallFailureText, toolTurnText,
+} from './toolprompt.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -260,17 +262,12 @@ function messagesToPrompt(messages = []) {
       if (content) systemParts.push(content);
       continue;
     }
-    if (m.role === 'tool') {
-      // 措辞刻意避开"调用工具"字样：见 buildToolInstruction 顶部注释，那会诱发
-      // agent 层的原生 function calling，进而抛 Tool xxx not found。
-      convo.push(`【外部执行结果${m.tool_call_id ? ` ${m.tool_call_id}` : ''}】${content}`);
-      continue;
-    }
-    if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) {
-      const desc = m.tool_calls
-        .map((tc) => `${tc?.function?.name || '?'}(${tc?.function?.arguments || '{}'})`)
-        .join('、');
-      convo.push(`助手${content ? `: ${content}\n` : ': '}（上一轮表达的 bridge_tool_calls 意图：${desc}）`);
+    // 工具轮次（外部执行结果 / 助手表达过的调用意图）必须回放，否则多轮工具调用会丢
+    // 上下文。措辞刻意避开"调用工具"字样：见 toolprompt.mjs 顶部注释，那会诱发
+    // agent 层的原生 function calling，进而抛 Tool xxx not found。
+    const turn = toolTurnText(m, content);
+    if (turn !== null) {
+      convo.push(turn);
       continue;
     }
     if (!content) continue;
@@ -279,61 +276,15 @@ function messagesToPrompt(messages = []) {
   return { systemPrompt: systemParts.join('\n\n'), prompt: convo.join('\n\n'), images };
 }
 
-/**
- * 把 OpenAI tools 定义渲染成提示词，让模型"知道"可以调用哪些工具。
- *
- * 背景（重要，别踩坑）：
- *   /api/v1/llm/completions 背后不是"纯模型"，而是 AgentService.runOneTimeWithOverrides()，
- *   它会加载一个完整的 agent（默认 create），该 agent 自带原生工具集，且模型 provider
- *   支持原生 function calling。overrides 只能覆盖 systemPrompt/temperature/maxTokens/
- *   model/maxTurns 等，**覆盖不了 agent.tools**。
- *
- *   后果：一旦提示词里出现"你可以调用工具""必须调用工具"这类措辞，模型会发起**原生**
- *   工具调用，agent 运行时随即去自己的工具白名单里查找 —— 找不到就抛
- *   `Tool xxx not found in agent create.`；找得到（或反复尝试）则耗尽轮次抛
- *   `Max turns (N) exceeded`。两种都是线上真实报错。
- *
- *   所以这里必须做两件事：
- *   1) 开头用最高优先级声明"本通道没有任何工具/函数调用能力"，压制模型的原生调用冲动；
- *   2) 工具调用意图改用自定义键名 bridge_tool_calls（不是 tool_calls），
- *      避免与 agent 的 JSON 工具解析器撞车。
- */
-function buildToolInstruction(tools, toolChoice) {
-  if (!Array.isArray(tools) || tools.length === 0) return '';
-  const specs = tools
-    .map((t) => ({
-      name: t?.function?.name,
-      description: t?.function?.description || '',
-      parameters: t?.function?.parameters || { type: 'object', properties: {} },
-    }))
-    .filter((t) => t.name);
-  if (!specs.length) return '';
-
-  const lines = [
-    '【可用工具清单】（由外部调用方持有并执行，你无法直接执行，只能表达意图）',
-    JSON.stringify(specs, null, 2),
-    '',
-    '【工具调用意图的表达格式】',
-    '当你判断需要某个工具时，输出如下 JSON（可以多行缩进，便于你保持括号配对）：',
-    '   {"bridge_tool_calls":[{"name":"工具名","arguments":{参数对象}}]}',
-    '注意：',
-    '  1. 键名必须是 bridge_tool_calls，**不要用 tool_calls**。',
-    '  2. 除这段 JSON 外不要输出任何文字、解释、前后缀或 Markdown 代码围栏。',
-    '  3. 需要多个工具时，在 bridge_tool_calls 数组里放多个对象。',
-    '  4. arguments 必须是满足该工具 parameters 约束的 JSON **对象**（不是字符串）。',
-    '  5. 不需要工具时，用自然语言正常回答，不要输出上述 JSON。',
-    '  6. 收到"工具执行结果"后，基于结果继续推进；仍需工具就继续按上述格式表达。',
-    '  7. **输出的 JSON 必须能被 JSON.parse 解析**：字符串内的双引号要转义为 \\"，',
-    '     括号必须成对且嵌套正确；arguments 里如果要写代码/函数字符串，把它当成普通字符串',
-    '     处理并转义引号。输出前请逐层核对一遍括号是否闭合。',
-  ];
-  if (toolChoice === 'required') {
-    lines.push('  7. 本次必须以上述 bridge_tool_calls 格式表达一次工具调用意图，不允许只回复文字。');
-  } else if (toolChoice === 'none') {
-    lines.push('  7. 本次不允许表达任何工具调用意图，只用自然语言回答。');
-  }
-  return lines.join('\n');
-}
+// 工具协议（清单渲染、意图格式、解析重试、历史回放）在 ./toolprompt.mjs，与 Copilot
+// 通道共用一份实现 —— 两条通道面对的是同一个文本协议、同一类模型生成缺陷。
+//
+// 本通道特殊之处只有一点：`/api/v1/llm/completions` 背后不是"纯模型"，而是
+// AgentService.runOneTimeWithOverrides() 加载的完整 agent，它自带原生工具集且 provider
+// 支持原生 function calling，而 overrides **覆盖不了 agent.tools**。所以提示词里一旦
+// 出现"你可以调用工具"这类措辞，模型会发起原生调用，agent 去自己的白名单里查找 ——
+// 找不到就抛 `Tool xxx not found in agent create.`，找得到则耗尽轮次抛
+// `Max turns (N) exceeded`。这就是下面 BASE_INSTRUCTION 必须无条件置顶的原因。
 
 /**
  * 无条件注入的基础声明。
@@ -375,38 +326,21 @@ const IMAGE_INSTRUCTION = [
 // 工具调用的解析（含 JSON 修复）在 ./toolcalls.mjs：模型输出的 bridge_tool_calls
 // 经常括号不配对，必须修复后重试解析，否则半截 JSON 会被当正文吐回下游。
 
-/** 解析失败且文本确实在表达工具调用时，追加这段提示重试一次。 */
-const JSON_REPAIR_REMINDER = [
-  '【重要】上一次的输出不是合法 JSON（括号或逗号不匹配），本次请求已失败。请重新输出，并严格遵守：',
-  '  1. 只输出一个 JSON 对象，不要有注释、尾逗号或 Markdown 代码围栏；',
-  '  2. 字符串内的双引号必须转义为 \\"，反斜杠转义为 \\\\；',
-  '  3. 括号必须成对、嵌套正确，输出前逐层核对一遍；',
-  '  4. arguments 必须是 JSON 对象，不是字符串。',
-].join('\n');
-
 /**
- * 带工具调用的一次（必要时两次）模型调用。
+ * 带工具调用的一次（必要时两次）模型调用，共用 `toolprompt.mjs` 的重试与判定。
  *
  * 关键：解析失败**不能**直接把文本当"最终回答"下发 —— 下游 agent 会以为任务已完成，
- * 于是出现"模型说改好了、其实什么都没执行"。这里先重试一次；仍失败则交给调用方
- * 下发显式错误帧。
+ * 于是出现"模型说改好了、其实什么都没执行"。
+ * @param {object} options 本次调用。
+ * @returns {Promise<{outcome: object, text: string, usage: object|undefined}>}
  */
-async function completeWithToolCalls({ prompt, systemPrompt, model, signal, images }) {
-  const first = await invokeModel({ prompt, systemPrompt, model, signal, images });
-  let calls = parseToolCalls(first.text);
-  if (calls) return { calls, text: first.text, usage: first.usage };
-  if (!looksLikeToolCallAttempt(first.text)) return { calls: null, text: first.text, usage: first.usage };
-
-  log(`[warn] 工具调用解析失败，疑似 JSON 非法（输出 ${String(first.text || '').length} 字），重试一次`);
-  const retry = await invokeModel({
-    prompt,
-    systemPrompt: `${systemPrompt}\n\n${JSON_REPAIR_REMINDER}`,
-    model,
-    signal,
-    images,
+function chatWithTools({ prompt, systemPrompt, model, signal, images }) {
+  return completeWithToolCalls({
+    systemPrompt,
+    hasTools: true,
+    log,
+    invoke: sys => invokeModel({ prompt, systemPrompt: sys, model, signal, images }),
   });
-  calls = parseToolCalls(retry.text);
-  return { calls, text: retry.text, usage: retry.usage || first.usage, retried: true };
 }
 
 /**
@@ -547,17 +481,15 @@ async function handleChatCompletions(req, res) {
   if (!body.stream) {
     let r;
     if (hasTools) {
-      r = await completeWithToolCalls({ prompt, systemPrompt, model, signal: ctl.signal, images });
+      const out = await chatWithTools({ prompt, systemPrompt, model, signal: ctl.signal, images });
+      r = { ...out.outcome, text: out.text, usage: out.usage };
     } else {
       const x = await invokeModel({ prompt, systemPrompt, model, signal: ctl.signal, images });
-      r = { calls: null, text: x.text, usage: x.usage };
+      r = { calls: null, content: x.text, broken: false, text: x.text, usage: x.usage };
     }
     // 写坏了但确实在表达工具调用 → 明确报错，不冒充正常回答
-    const broken = hasTools && !r.calls && looksLikeToolCallAttempt(r.text);
-    if (broken) log(`[warn] 重试后仍无法解析工具调用（非流式），下发错误文本`);
-    const content = broken
-      ? `[bridge] 模型输出的工具调用 JSON 非法，本次未执行任何工具（已重试 1 次）。原始输出片段：\n${String(r.text || '').slice(0, 300)}`
-      : r.text;
+    if (r.broken) log('[warn] 重试后仍无法解析工具调用（非流式），下发错误文本');
+    const content = r.broken ? toolCallFailureText(r.text) : r.content;
     return sendJson(res, 200, {
       id,
       object: 'chat.completion',
@@ -612,21 +544,21 @@ async function handleChatCompletions(req, res) {
     } else {
       // 带工具：必须先收全文再判定，否则可能把工具调用 JSON 当正文吐给客户端。
       // 本地模型服务本身也不支持真流式，这里没有额外损失。
-      const { calls, text } = await completeWithToolCalls({ prompt, systemPrompt, model, signal: ctl.signal, images });
+      const out = await chatWithTools({ prompt, systemPrompt, model, signal: ctl.signal, images });
+      const { calls, content, broken } = out.outcome;
       if (calls) {
         frame({ role: 'assistant', content: '' });
         frame({ tool_calls: calls.map((c, i) => ({ index: i, ...c })) });
         frame({}, 'tool_calls');
-      } else if (looksLikeToolCallAttempt(text)) {
+      } else if (broken) {
         // 解析失败但明显在表达工具调用：宁可显式报错，也不能让半截 JSON 冒充
         // "最终回答"骗过下游 agent（那会表现为"模型说改好了、其实没执行"）。
-        const preview = String(text || '').slice(0, 300);
-        log(`[warn] 重试后仍无法解析工具调用，下发错误帧。原始输出前 300 字：${preview}`);
+        log(`[warn] 重试后仍无法解析工具调用，下发错误帧。原始输出前 300 字：${String(out.text || '').slice(0, 300)}`);
         frame({ role: 'assistant', content: '' });
-        frame({ content: `[bridge] 模型输出的工具调用 JSON 非法，本次未执行任何工具（已重试 1 次）。请重试；若反复出现，说明该模型不适合当前文本桥通道。\n\n原始输出片段：\n${preview}` });
+        frame({ content: toolCallFailureText(out.text) });
         frame({}, 'stop');
       } else {
-        frame({ role: 'assistant', content: text });
+        frame({ role: 'assistant', content });
         frame({}, 'stop');
       }
     }

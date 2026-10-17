@@ -1156,6 +1156,9 @@ export class MockBackend {
     // 破坏版：模拟线上真实故障形态 —— 模型输出的 bridge_tool_calls JSON 括号多余、
     // 且把参数误放到 wrapper 层。用于回归"解析修复链路"。
     this.malformed = cfg.malformed ?? process.env.BRIDGE_MOCK_MALFORMED === '1';
+    // 不可修复版：`{"name":` 后面什么都没有，补括号也凑不出合法 JSON —— 用来验证
+    // "解析彻底失败时绝不能把半截 JSON 当最终回答下发"这条错误路径。
+    this.unparseable = cfg.unparseable ?? process.env.BRIDGE_MOCK_UNPARSEABLE === '1';
   }
 
   check() {
@@ -1169,9 +1172,11 @@ export class MockBackend {
     // 标记与输出键名都跟随 bridge.mjs 的新协议（bridge_tool_calls）。
     if (/【可用工具清单】|【工具调用能力】/.test(full)) {
       const name = (full.match(/"name"\s*:\s*"([^"]+)"/) || [])[1] || 'mock_tool';
-      const text = this.malformed
-        ? `我先表达工具调用意图：\n{"bridge_tool_calls":[{"name":"${name}","arguments":{"mock":true,"source":"MockBackend"}}],"summarize":"mock 破坏版"}}]}`
-        : JSON.stringify({ bridge_tool_calls: [{ name, arguments: { mock: true, source: 'MockBackend' } }] });
+      const text = this.unparseable
+        ? `我先表达工具调用意图：\n{"bridge_tool_calls":[{"name":`
+        : this.malformed
+          ? `我先表达工具调用意图：\n{"bridge_tool_calls":[{"name":"${name}","arguments":{"mock":true,"source":"MockBackend"}}],"summarize":"mock 破坏版"}}]}`
+          : JSON.stringify({ bridge_tool_calls: [{ name, arguments: { mock: true, source: 'MockBackend' } }] });
       onDelta?.(text);
       await new Promise((r) => setTimeout(r, this.delayMs / 5));
       return { text, usage: null, sessionId: 'mock', costUsd: 0, durationMs: this.delayMs, raw: null };
