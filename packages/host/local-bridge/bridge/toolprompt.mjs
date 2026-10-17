@@ -185,8 +185,11 @@ export async function completeWithToolCalls({ invoke, systemPrompt, hasTools, lo
  *
  * 工具调用必须收全文才能解析，但普通回答应当照常逐段下发 —— 带工具时无条件缓冲会
  * 让每条回答都失去流式。约定里模型要么整段输出工具调用 JSON，要么正常说话，所以
- * 只要看开头就能分开：开头（忽略空白）是 `{` 或代码围栏就当工具调用，扣住不发；
- * 否则立刻判定为正文，之后一路直发。
+ * 只要看开头就能分开：开头（忽略空白）是 `{`、代码围栏，或是模型自带的调用标记
+ * （`<｜DSML｜…`）就当工具调用，扣住不发；否则立刻判定为正文，之后一路直发。
+ *
+ * 标记开头的判定要能容忍"还没收全"：首段可能只有一个 `<`，这时不能急着判成正文，
+ * 否则 `<｜DSML｜…` 的前半截已经流出去了。只有确认后面不是标记才放行。
  * @returns {{push: (delta: string) => string, settle: (isCall: boolean) => string}}
  *   `push` 返回此刻可以立即下发的文本（可能为空）；`settle` 在收尾时返回仍扣着的
  *   文本 —— 判定为工具调用时丢弃，否则作为正文补齐。
@@ -202,6 +205,12 @@ export function createToolCallGate() {
       if (mode === 'toolish') return '';
       if (/^\s*$/u.test(held)) return '';
       if (/^\s*[`{]/u.test(held)) {
+        mode = 'toolish';
+        return '';
+      }
+      // 可能是原生标记的开头：先扣住，等下一个增量再判。
+      if (/^\s*<\s*$/u.test(held)) return '';
+      if (/^\s*<\s*[｜|]/u.test(held)) {
         mode = 'toolish';
         return '';
       }

@@ -159,9 +159,108 @@ function toToolCalls(obj) {
   return calls.length ? calls : null;
 }
 
+/**
+ * 模型自带的工具调用标记（DeepSeek DSML 家族）。
+ *
+ * 我们让模型输出 `bridge_tool_calls` JSON，但**训练时就带原生工具调用格式**的模型
+ * 常常无视这条约定，直接吐它自己的标记：
+ *   <｜DSML｜tool_calls>
+ *   <｜DSML｜invoke name="pwsh">
+ *   <｜DSML｜parameter name="command" string="true">…</｜DSML｜parameter>
+ *   </｜DSML｜invoke>
+ *   </｜DSML｜tool_calls>
+ * 不认它，整段标记就会被当成正文流给用户 —— 表现就是"模型贴了一坨尖括号，工具没执行"。
+ *
+ * 标记的分隔符是全角竖线 `｜`，但经过一层中转常变成半角 `|` 或叠成多个，所以全部按
+ * `+` 容忍；参数的类型写在属性里（`string="true"` 等），值按类型还原。
+ */
+const DSML_MARK = String.raw`<\s*[｜|]+\s*DSML\s*[｜|]+\s*`;
+
+/** 任意 DSML 闭合标签（`</｜DSML｜parameter>` 这类）。 */
+const DSML_CLOSE = new RegExp(String.raw`<\s*/\s*[｜|]+\s*DSML\s*[｜|]+\s*[A-Za-z_]*\s*>`, 'i');
+
+/**
+ * 读一个 `name="value"` 属性。
+ * @param {string} attrs 标签属性串。
+ * @param {string} name 属性名。
+ * @returns {string|undefined} 属性值。
+ */
+function dsmlAttribute(attrs, name) {
+  const match = new RegExp(`${name}\\s*=\\s*"([^"]*)"`, 'i').exec(attrs);
+  return match?.[1];
+}
+
+/**
+ * 按 DSML 的类型属性还原一个参数值。
+ * @param {string} attrs 参数标签的属性串。
+ * @param {string} raw 标签之间的原始文本。
+ * @returns {unknown} 还原后的值。
+ */
+function dsmlValue(attrs, raw) {
+  const text = raw.trim();
+  const typed = (name) => new RegExp(`\\b${name}\\s*=\\s*"true"`, 'i').test(attrs);
+  if (typed('null')) return null;
+  if (typed('boolean')) return text === 'true';
+  if (typed('integer') || typed('number')) {
+    const value = Number(text);
+    return Number.isFinite(value) ? value : text;
+  }
+  if (typed('array') || typed('object')) {
+    try { return JSON.parse(text); } catch { return text; }
+  }
+  if (typed('string')) return text;
+  // 没有类型属性时按 JSON 试一次，失败就当字符串 —— 模型不加属性时两种都见过。
+  try { return JSON.parse(text); } catch { return text; }
+}
+
+/**
+ * 解析模型自带的 DSML 工具调用标记。
+ * @param {string} text 模型输出。
+ * @returns {Array<object>|null} OpenAI 风格 tool_calls；没有标记则 null。
+ */
+export function parseDsmlToolCalls(text) {
+  const s = String(text ?? '');
+  if (!/[｜|]\s*DSML\s*[｜|]/i.test(s)) return null;
+  // 每次新建：模块级带 g 的正则会被 matchAll 之外的用法污染 lastIndex。
+  const opens = [...s.matchAll(new RegExp(`${DSML_MARK}invoke\\b([^>]*)>`, 'gi'))];
+  if (opens.length === 0) return null;
+
+  const calls = [];
+  for (const [index, open] of opens.entries()) {
+    const name = dsmlAttribute(open[1] ?? '', 'name');
+    if (!name) continue;
+    // 一个 invoke 的作用域到下一个 invoke（或文本末尾）。缺闭合标签也照样能切。
+    const from = (open.index ?? 0) + open[0].length;
+    const to = opens[index + 1]?.index ?? s.length;
+    const body = s.slice(from, to);
+    const args = {};
+    const params = [...body.matchAll(new RegExp(`${DSML_MARK}parameter\\b([^>]*)>`, 'gi'))];
+    for (const [order, param] of params.entries()) {
+      const key = dsmlAttribute(param[1] ?? '', 'name');
+      if (!key) continue;
+      const valueFrom = (param.index ?? 0) + param[0].length;
+      const valueTo = params[order + 1]?.index ?? body.length;
+      let raw = body.slice(valueFrom, valueTo);
+      // 最后一个参数的取值会一路吃到 invoke 的闭合标签，在第一个闭合标签处截断。
+      const cut = raw.search(DSML_CLOSE);
+      if (cut >= 0) raw = raw.slice(0, cut);
+      args[key] = dsmlValue(param[1] ?? '', raw);
+    }
+    calls.push({
+      id: `call_${Date.now().toString(36)}${index}${Math.random().toString(36).slice(2, 6)}`,
+      type: 'function',
+      function: { name, arguments: JSON.stringify(args) },
+    });
+  }
+  return calls.length ? calls : null;
+}
+
 /** 从模型输出里解析工具调用；不是工具调用则返回 null。 */
 export function parseToolCalls(text) {
   if (!text) return null;
+  // 原生标记优先：出现它时文本里不会同时有我们约定的 JSON。
+  const native = parseDsmlToolCalls(text);
+  if (native) return native;
   let s = String(text).trim();
   const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence) s = fence[1].trim();
@@ -190,5 +289,5 @@ export function parseToolCalls(text) {
 
 /** 文本看起来像是在表达工具调用（用于区分"合法的文字回答"和"写坏了的工具调用"）。 */
 export function looksLikeToolCallAttempt(text) {
-  return /bridge_tool_calls|"arguments"\s*:|"tool_calls"\s*:/.test(String(text || ''));
+  return /bridge_tool_calls|"arguments"\s*:|"tool_calls"\s*:|[｜|]\s*DSML\s*[｜|]/i.test(String(text || ''));
 }

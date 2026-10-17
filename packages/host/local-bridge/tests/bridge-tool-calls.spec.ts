@@ -73,7 +73,9 @@ function tool(name: string) {
  * @param options - 模型那一侧要模拟的故障形态。
  * @returns 一个发送对话请求的函数。
  */
-async function boot(options: { malformed?: boolean; unparseable?: boolean } = {}): Promise<{
+async function boot(
+  options: { malformed?: boolean; unparseable?: boolean; dsml?: boolean } = {},
+): Promise<{
   post: (body: Record<string, unknown>) => Promise<Response>
 }> {
   const cacheDir = await mkdtemp(join(tmpdir(), 'dsh-bridge-tools-'))
@@ -85,6 +87,7 @@ async function boot(options: { malformed?: boolean; unparseable?: boolean } = {}
       delayMs: 20,
       malformed: options.malformed ?? false,
       unparseable: options.unparseable ?? false,
+      dsml: options.dsml ?? false,
     },
     serve: { cacheDir },
   })
@@ -209,6 +212,36 @@ describe('WorkBuddy 反代的工具调用往返', () => {
     expect(contentOf(frames)).toContain('未执行任何工具')
     expect(finishesOf(frames)).toContain('stop')
     expect(finishesOf(frames)).not.toContain('tool_calls')
+  })
+
+  it('模型吐出自带的 DSML 标记时，还原成 tool_calls 而不是当正文', async () => {
+    // 训练时带原生调用格式的模型常常无视我们约定的 JSON，直接输出 DSML 标记。
+    // 认不出它，整段尖括号就会被当成正文流给用户 —— 线上报回来的就是这个形态。
+    const bridge = await boot({ dsml: true })
+    const response = await bridge.post({ tools: [tool('read')], messages: [{ role: 'user', content: '读 a.txt' }] })
+
+    const payload = await response.json() as CompletionBody
+    const choice = payload.choices[0]
+    expect(choice?.finish_reason).toBe('tool_calls')
+    expect(choice?.message.tool_calls?.[0]?.function.name).toBe('read')
+    expect(JSON.parse(choice?.message.tool_calls?.[0]?.function.arguments ?? '{}'))
+      .toEqual({ mock: true, source: 'MockBackend' })
+    // 标记一个字符都不该漏进正文。
+    expect(choice?.message.content).toBe('')
+  })
+
+  it('流式下同样还原，标记不会漏进 SSE 正文帧', async () => {
+    const bridge = await boot({ dsml: true })
+    const response = await bridge.post({
+      tools: [tool('read')],
+      stream: true,
+      messages: [{ role: 'user', content: '读 a.txt' }],
+    })
+
+    const frames = framesOf(await response.text())
+    expect(contentOf(frames)).not.toContain('DSML')
+    expect(frames.flatMap(frame => frame.choices[0]?.delta?.tool_calls ?? [])).toHaveLength(1)
+    expect(finishesOf(frames)).toContain('tool_calls')
   })
 
   it('没有任何可用工具名时退回普通回答', async () => {

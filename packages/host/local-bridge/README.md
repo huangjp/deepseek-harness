@@ -89,7 +89,8 @@ Neither upstream offers function calling. The WorkBuddy gateway is an agent with
 
 1. The request's `tools` are rendered into the prompt as a list plus an intent format: the model answers `{"bridge_tool_calls":[{"name":…,"arguments":{…}}]}`.
 2. The reply is parsed back into OpenAI `tool_calls` with `finish_reason: "tool_calls"`. Malformed JSON is repaired (unbalanced brackets, trailing commas, arguments misplaced at the wrapper level) and retried once with a repair prompt; a reply that still looks like a call but cannot be parsed becomes an explicit error rather than being passed off as a final answer, because a downstream agent would treat it as task completion.
-3. Prior tool turns are replayed into the next prompt — the assistant's expressed intent with its arguments, and each result with its `tool_call_id` — so a multi-turn tool loop keeps its context.
+3. A model trained with its own tool-call markup may ignore that format and emit what it was trained on — DeepSeek's `<｜DSML｜tool_calls>` family is the one seen in practice. Its `invoke`/`parameter` blocks are converted the same way, because otherwise the markup is streamed to the user as text and no tool runs. The delimiters are matched tolerantly: a relay hop mangles the fullwidth bar into a halfwidth one or doubles it, and a missing close tag still parses.
+4. Prior tool turns are replayed into the next prompt — the assistant's expressed intent with its arguments, and each result with its `tool_call_id` — so a multi-turn tool loop keeps its context.
 
 Only how the prompt reaches the upstream differs between the two relays, which is why each stays a separate module. The Copilot relay keeps streaming ordinary answers: a reply whose opening looks like a tool call is held back until it can be decided, and everything else is sent as it arrives. The WorkBuddy relay buffers whenever tools are offered, because its upstream does not stream in the first place.
 
@@ -116,7 +117,7 @@ None; this package neither assembles nor sends a provider request.
 - **A refresh is not awaited by the trigger.** The host starts a detached process and reports only that it started. The caller that needs the result — the relay, before serving a request — reads it back by polling the harvested token's timestamp, bounded by a deadline; progress the settings page shows comes from the lock file and that same timestamp.
 - **`deps.autoRefreshToken` is on by default and its side effects are not silent.** It changes the system proxy for about a minute, and drives the Copilot window to send one message; the certificate import shows one Windows security prompt that cannot be suppressed.
 - **The relays are not probed for readiness.** A listener that binds proves nothing about the application behind it; the first request is what discovers an unauthenticated upstream.
-- **Tool calls depend on the model following the format.** The bridge renders a tool list and an intent format, then parses the reply; a model that answers in its own notion of a function call produces prose instead of a call. Tool calls also arrive whole rather than as streamed fragments, because the JSON has to be seen before it can be parsed.
+- **Tool calls depend on recognising what the model emitted.** The bridge renders a tool list and accepts three shapes back: the `bridge_tool_calls` JSON it asks for, repairable variants of it, and the model's own DSML marker family. A model that invents a fourth shape produces prose instead of a call. Tool calls also arrive whole rather than as streamed fragments, because the payload has to be seen before it can be parsed.
 
 ### Dev Note
 

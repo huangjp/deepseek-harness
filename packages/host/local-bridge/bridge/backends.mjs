@@ -1159,6 +1159,9 @@ export class MockBackend {
     // 不可修复版：`{"name":` 后面什么都没有，补括号也凑不出合法 JSON —— 用来验证
     // "解析彻底失败时绝不能把半截 JSON 当最终回答下发"这条错误路径。
     this.unparseable = cfg.unparseable ?? process.env.BRIDGE_MOCK_UNPARSEABLE === '1';
+    // 原生标记版：模型无视我们的 JSON 约定，直接吐它训练时用的 DSML 标记。认不出这种
+    // 输出时，整段尖括号会被当正文流给用户 —— 这是线上真实报过的形态。
+    this.dsml = cfg.dsml ?? process.env.BRIDGE_MOCK_DSML === '1';
   }
 
   check() {
@@ -1174,9 +1177,18 @@ export class MockBackend {
       const name = (full.match(/"name"\s*:\s*"([^"]+)"/) || [])[1] || 'mock_tool';
       const text = this.unparseable
         ? `我先表达工具调用意图：\n{"bridge_tool_calls":[{"name":`
-        : this.malformed
-          ? `我先表达工具调用意图：\n{"bridge_tool_calls":[{"name":"${name}","arguments":{"mock":true,"source":"MockBackend"}}],"summarize":"mock 破坏版"}}]}`
-          : JSON.stringify({ bridge_tool_calls: [{ name, arguments: { mock: true, source: 'MockBackend' } }] });
+        : this.dsml
+          ? [
+            '<｜DSML｜tool_calls>',
+            `<｜DSML｜invoke name="${name}">`,
+            '<｜DSML｜parameter name="mock" boolean="true">true</｜DSML｜parameter>',
+            '<｜DSML｜parameter name="source" string="true">MockBackend</｜DSML｜parameter>',
+            '</｜DSML｜invoke>',
+            '</｜DSML｜tool_calls>',
+          ].join('\n')
+          : this.malformed
+            ? `我先表达工具调用意图：\n{"bridge_tool_calls":[{"name":"${name}","arguments":{"mock":true,"source":"MockBackend"}}],"summarize":"mock 破坏版"}}]}`
+            : JSON.stringify({ bridge_tool_calls: [{ name, arguments: { mock: true, source: 'MockBackend' } }] });
       onDelta?.(text);
       await new Promise((r) => setTimeout(r, this.delayMs / 5));
       return { text, usage: null, sessionId: 'mock', costUsd: 0, durationMs: this.delayMs, raw: null };

@@ -262,6 +262,41 @@ describe('createToolCallGate', () => {
     expect(gate.settle(true)).toBe('')
   })
 
+  it('原生标记开头时扣住，不让尖括号先流出去', () => {
+    // 模型自带的调用标记以 `<｜DSML｜…` 开头：首段可能只有一个 `<`，这时不能判成正文。
+    const gate = createToolCallGate()
+    expect(gate.push('<')).toBe('')
+    expect(gate.push('｜DSML｜invoke name="pwsh">')).toBe('')
+    expect(gate.push('<｜DSML｜parameter name="a" string="true">v</｜DSML｜parameter>')).toBe('')
+    expect(gate.settle(true)).toBe('')
+  })
+
+  it('半角竖线的标记开头也扣住', () => {
+    const gate = createToolCallGate()
+    expect(gate.push('<|DSML|invoke name="t">')).toBe('')
+    expect(gate.settle(true)).toBe('')
+  })
+
+  it('尖括号后不是标记时立刻放行', () => {
+    // HTML 之类的回答不该被标记判定拖住。
+    const gate = createToolCallGate()
+    expect(gate.push('<')).toBe('')
+    expect(gate.push('div>hi')).toBe('<div>hi')
+    expect(gate.push('</div>')).toBe('</div>')
+  })
+
+  it('正文中间出现的尖括号不受影响', () => {
+    const gate = createToolCallGate()
+    expect(gate.push('a ')).toBe('a ')
+    expect(gate.push('< b')).toBe('< b')
+  })
+
+  it('只收到一个尖括号就结束时把它交出来', () => {
+    const gate = createToolCallGate()
+    expect(gate.push('<')).toBe('')
+    expect(gate.settle(false)).toBe('<')
+  })
+
   it('已经判定为正文后，后面出现的 { 也照常直发', () => {
     // 代码类回答里到处是花括号，不能因此重新扣住。
     const gate = createToolCallGate()
