@@ -225,10 +225,11 @@ describe('completeWithToolCalls', () => {
 
 describe('toolCallFailureText', () => {
   it('带上原始输出片段，便于判断是哪个模型不适合本通道', () => {
-    const text = toolCallFailureText('x'.repeat(500))
+    const text = toolCallFailureText('x'.repeat(900))
     expect(text).toContain('未执行任何工具')
-    expect(text).toContain('x'.repeat(300))
-    expect(text).not.toContain('x'.repeat(301))
+    // 预览要足够长才看得见触发点：300 字实测不够。
+    expect(text).toContain('x'.repeat(600))
+    expect(text).not.toContain('x'.repeat(601))
   })
 
   it('空输出不炸', () => {

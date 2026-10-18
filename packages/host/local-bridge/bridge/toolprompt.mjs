@@ -148,13 +148,16 @@ export function resolveToolOutcome({ text, hasTools }) {
 
 /**
  * 解析失败时下发给调用方的错误文本。
+ *
+ * 预览取 600 字：这条错误的存在意义就是"让人看得出模型到底吐了什么"，而 300 字
+ * 实测不够 —— 一次排错回答正好在片段之外触发了判据，报告过来只剩一段正常文字。
  * @param {string} text 模型最后那次原始输出。
  * @returns {string} 错误文本（含原始输出片段，便于排查是哪个模型不适合本通道）。
  */
 export function toolCallFailureText(text) {
   return '[bridge] 模型输出的工具调用 JSON 非法，本次未执行任何工具（已重试 1 次）。'
     + '请重试；若反复出现，说明该模型不适合当前文本桥通道。'
-    + `\n\n原始输出片段：\n${String(text || '').slice(0, 300)}`;
+    + `\n\n原始输出片段：\n${String(text || '').slice(0, 600)}`;
 }
 
 /**
