@@ -66,13 +66,21 @@ describe('工具轮次回放', () => {
   it('助手带 tool_calls 时连同正文一起回放', () => {
     const calls = [{ type: 'function', function: { name: 'read', arguments: '{"path":"a"}' } }]
     expect(toolCallTurnText('我看一下', calls)).toBe(
-      '助手: 我看一下\n（上一轮表达的 bridge_tool_calls 意图：read({"path":"a"})）',
+      '助手: 我看一下\n（上一轮表达的工具调用意图：read({"path":"a"})）',
     )
   })
 
   it('助手正文为空时不留空档', () => {
     const calls = [{ type: 'function', function: { name: 'read', arguments: '{}' } }]
-    expect(toolCallTurnText('', calls)).toBe('助手: （上一轮表达的 bridge_tool_calls 意图：read({})）')
+    expect(toolCallTurnText('', calls)).toBe('助手: （上一轮表达的工具调用意图：read({})）')
+  })
+
+  it('回放文本里不出现调用键名', () => {
+    // 这段文本是我们自己塞进提示词的：写进 bridge_tool_calls，模型复述它时就会被
+    // "看起来像工具调用"的判据命中，把一句正常回答替换成错误。
+    const calls = [{ type: 'function', function: { name: 'read', arguments: '{}' } }]
+    expect(toolCallTurnText('', calls)).not.toContain('bridge_tool_calls')
+    expect(toolCallTurnText('正文', calls)).not.toContain('bridge_tool_calls')
   })
 
   it('调用缺少字段时用占位符，不抛错', () => {
@@ -103,7 +111,7 @@ describe('toolTurnText', () => {
 
   it('助手带 tool_calls 走调用格式，即使正文为空', () => {
     const message = { role: 'assistant', content: '', tool_calls: [{ function: { name: 'x', arguments: '{}' } }] }
-    expect(toolTurnText(message, '')).toContain('bridge_tool_calls 意图')
+    expect(toolTurnText(message, '')).toContain('工具调用意图')
   })
 
   it('助手没有 tool_calls 时不算工具轮次', () => {

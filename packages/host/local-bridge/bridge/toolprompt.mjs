@@ -76,6 +76,9 @@ export function buildToolInstruction(tools, toolChoice) {
  *
  * 不回放这一段，多轮工具调用就断了：模型看不到自己上一轮要过什么，会重复要同一个
  * 工具，或者把已经拿到的结果当成还没发生。
+ *
+ * 措辞刻意不写 `bridge_tool_calls` 这个键名：那段文本是我们自己塞进去的，模型一旦
+ * 复述它，就会被"看起来像工具调用"的判据命中，把一句正常回答替换成错误。
  * @param {string} content 该条助手消息的正文（可能为空）。
  * @param {Array<object>} toolCalls OpenAI 风格的 tool_calls。
  * @returns {string} 一行对话文本。
@@ -84,7 +87,7 @@ export function toolCallTurnText(content, toolCalls) {
   const desc = toolCalls
     .map((tc) => `${tc?.function?.name || '?'}(${tc?.function?.arguments || '{}'})`)
     .join('、');
-  return `助手${content ? `: ${content}\n` : ': '}（上一轮表达的 bridge_tool_calls 意图：${desc}）`;
+  return `助手${content ? `: ${content}\n` : ': '}（上一轮表达的工具调用意图：${desc}）`;
 }
 
 /**

@@ -287,7 +287,20 @@ export function parseToolCalls(text) {
   return null;
 }
 
-/** 文本看起来像是在表达工具调用（用于区分"合法的文字回答"和"写坏了的工具调用"）。 */
+/**
+ * 文本看起来像是在表达工具调用（用于区分"合法的文字回答"和"写坏了的工具调用"）。
+ *
+ * 只认**结构**，不认"提到过这个词"。曾经的判据是"出现 bridge_tool_calls 就算"，
+ * 结果两件事都会把一个正确答案判成坏掉的调用、并把它替换成一句错误：
+ *   - 我们注入的历史回放里本来就写着这个词，模型引用或复述它就会中招；
+ *   - 回答里贴一段含 `"arguments":` 的 JSON，也会中招。
+ * 所以这里要求的是调用**载荷的形状**：键名处在 JSON 位置、调用对象带相邻的
+ * name/arguments、或者模型自带的 DSML 标记。
+ */
 export function looksLikeToolCallAttempt(text) {
-  return /bridge_tool_calls|"arguments"\s*:|"tool_calls"\s*:|[｜|]\s*DSML\s*[｜|]/i.test(String(text || ''));
+  const s = String(text || '');
+  return /"bridge_tool_calls"\s*:/.test(s)
+    || /"tool_calls"\s*:\s*\[/.test(s)
+    || /"name"\s*:\s*"[^"]*"\s*,\s*"arguments"\s*:/.test(s)
+    || /[｜|]\s*DSML\s*[｜|]/i.test(s);
 }

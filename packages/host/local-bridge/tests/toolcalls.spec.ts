@@ -196,8 +196,33 @@ describe('looksLikeToolCallAttempt', () => {
 
   it('认约定的键名与 arguments', () => {
     expect(looksLikeToolCallAttempt('{"bridge_tool_calls":[')).toBe(true)
-    expect(looksLikeToolCallAttempt('{"arguments":')).toBe(true)
-    expect(looksLikeToolCallAttempt('{"tool_calls":')).toBe(true)
+    expect(looksLikeToolCallAttempt('{"tool_calls":[{"name":"a"}]}')).toBe(true)
+    expect(looksLikeToolCallAttempt('{"name":"a","arguments":')).toBe(true)
+  })
+
+  it('复述我们自己的历史回放不算调用', () => {
+    // 线上真实误杀：模型把提示词里的回放原样吐回来，旧判据只看到 "bridge_tool_calls"
+    // 这个词就判成坏掉的调用，把一句正常回答替换成错误。
+    const echoed = [
+      '（上一轮表达的 bridge_tool_calls 意图：job_list({})）',
+      '',
+      '【外部执行结果 call_mvd81a3z0v6d3】pwsh-2 [pwsh] running — 启动服务',
+    ].join('\n')
+    expect(looksLikeToolCallAttempt(echoed)).toBe(false)
+  })
+
+  it('正文里提到这个词不算调用', () => {
+    expect(looksLikeToolCallAttempt('桥接期望模型输出 bridge_tool_calls 这段 JSON。')).toBe(false)
+  })
+
+  it('正文里贴一段带 arguments 的 JSON 不算调用', () => {
+    // 排错类回答常常要贴请求体；只看有没有 "arguments": 会把它们全判成坏调用。
+    const answer = [
+      '问题找到了 —— API 服务根本没在跑，不是登录逻辑的问题。',
+      '前端把 /api/auth/login 反代到 8210，那边没人监听，所以 500。',
+      '请求体长这样：{"arguments": {"path": "/api/auth/login"}}',
+    ].join('\n')
+    expect(looksLikeToolCallAttempt(answer)).toBe(false)
   })
 
   it('普通回答不算', () => {
