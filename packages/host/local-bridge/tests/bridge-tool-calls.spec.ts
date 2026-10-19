@@ -74,7 +74,7 @@ function tool(name: string) {
  * @returns 一个发送对话请求的函数。
  */
 async function boot(
-  options: { malformed?: boolean; unparseable?: boolean; dsml?: boolean } = {},
+  options: { malformed?: boolean; unparseable?: boolean; dsml?: boolean; echo?: boolean } = {},
 ): Promise<{
   post: (body: Record<string, unknown>) => Promise<Response>
 }> {
@@ -88,6 +88,7 @@ async function boot(
       malformed: options.malformed ?? false,
       unparseable: options.unparseable ?? false,
       dsml: options.dsml ?? false,
+      echo: options.echo ?? false,
     },
     serve: { cacheDir },
   })
@@ -255,5 +256,46 @@ describe('WorkBuddy 反代的工具调用往返', () => {
     const payload = await response.json() as CompletionBody
     expect(payload.choices[0]?.finish_reason).toBe('stop')
     expect(payload.choices[0]?.message.content).toContain('（mock）可用')
+  })
+})
+
+/**
+ * 提示词组装本身要能在端到端上看出来。
+ *
+ * `echo` 模式把上游收到的提示词原样回吐，于是"我们到底给模型发了什么"变成可断言的
+ * 事实 —— 这段组装没有别的可观察出口。主要盯两件事：多轮的工具轮次有没有回放，
+ * 以及转录稿末尾有没有划界（不划界模型会顺着记录续写，把上一轮的内容再吐一遍）。
+ */
+describe('WorkBuddy 反代的提示词组装', () => {
+  it('多轮时回放工具轮次，并在末尾划界', async () => {
+    const bridge = await boot({ echo: true })
+    const response = await bridge.post({
+      messages: [
+        { role: 'user', content: '读 a.txt' },
+        {
+          role: 'assistant',
+          content: '我读一下',
+          tool_calls: [{ id: 'c1', type: 'function', function: { name: 'read', arguments: '{"path":"a.txt"}' } }],
+        },
+        { role: 'tool', tool_call_id: 'c1', content: '文件内容' },
+      ],
+    })
+
+    const payload = await response.json() as CompletionBody
+    const sent = payload.choices[0]?.message.content ?? ''
+    // 工具轮次回放：助手表达过的意图连同参数，结果连同它的调用 id。
+    expect(sent).toContain('我读一下')
+    expect(sent).toContain('工具调用意图：read({"path":"a.txt"})')
+    expect(sent).toContain('【外部执行结果 c1】文件内容')
+    // 划界：告诉模型这是记录、不要续写。
+    expect(sent).toContain('不要复述')
+  })
+
+  it('单轮请求不加多余的划界', async () => {
+    const bridge = await boot({ echo: true })
+    const response = await bridge.post({ messages: [{ role: 'user', content: '你好' }] })
+
+    const payload = await response.json() as CompletionBody
+    expect(payload.choices[0]?.message.content ?? '').not.toContain('不要复述')
   })
 })

@@ -19,7 +19,7 @@ import {
   buildSummaryPrompt, buildSchemaInstruction, parseJsonLoose,
 } from './weflow.mjs';
 import {
-  buildToolInstruction, completeWithToolCalls, toolCallFailureText, toolTurnText,
+  buildToolInstruction, completeWithToolCalls, toolCallFailureText, toolTurnText, TRANSCRIPT_TRAILER,
 } from './toolprompt.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -460,7 +460,11 @@ async function handleChatCompletions(req, res) {
   if (!rawPrompt.trim() && !images.length) {
     throw Object.assign(new Error('messages 为空'), { httpStatus: 400, code: 'invalid_request' });
   }
-  const prompt = rawPrompt.trim() ? rawPrompt : '（用户只发了图片，没有文字。请先看图，再说明你看到了什么。）';
+  // 多轮时在转录稿末尾划界：模型否则会顺着 `用户: / 助手: / 【外部执行结果…】` 的格式
+  // 继续写下去，把上一轮的话和工具输出再吐一遍（线上表现像"内容重复了"）。
+  const hasHistory = Array.isArray(body.messages) && body.messages.length > 1;
+  const turnPrompt = rawPrompt.trim() ? rawPrompt : '（用户只发了图片，没有文字。请先看图，再说明你看到了什么。）';
+  const prompt = hasHistory ? `${turnPrompt}\n\n${TRANSCRIPT_TRAILER}` : turnPrompt;
 
   // BASE_INSTRUCTION 必须无条件置顶：
   //   - 压制 agent 的原生工具调用（不带 tools 的请求同样需要，否则会自主调用工具）；

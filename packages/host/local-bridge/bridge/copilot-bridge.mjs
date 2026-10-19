@@ -19,7 +19,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createTokenGate } from './token-gate.mjs';
 import {
   buildToolInstruction, completeWithToolCalls, createToolCallGate, EXTERNAL_TOOLING_NOTICE,
-  resolveToolOutcome, toolCallFailureText, toolTurnText, TOOL_CALL_REPAIR_REMINDER,
+  resolveToolOutcome, toolCallFailureText, toolTurnText, TOOL_CALL_REPAIR_REMINDER, TRANSCRIPT_TRAILER,
 } from './toolprompt.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -606,8 +606,12 @@ async function handleChatCompletions(req, res) {
   const hasTools = Boolean(toolInstruction);
   const systemParts = [hasTools ? EXTERNAL_TOOLING_NOTICE : '', systemPrompt, toolInstruction];
   const system = systemParts.filter(Boolean).join('\n\n');
+  // 多轮时在转录稿末尾划界：模型否则会顺着 `用户: / 助手: / 【外部执行结果…】` 的格式
+  // 继续写下去，把上一轮的话和工具输出再吐一遍（线上表现像"内容重复了"）。
+  const hasHistory = Array.isArray(body.messages) && body.messages.length > 1;
+  const turnPrompt = hasHistory ? `${userPrompt}\n\n${TRANSCRIPT_TRAILER}` : userPrompt;
   /** 把（可能被重试改写的）system 段与对话正文拼成这一条 prompt。 */
-  const compose = (systemText) => [systemText, userPrompt].filter(Boolean).join('\n\n');
+  const compose = (systemText) => [systemText, turnPrompt].filter(Boolean).join('\n\n');
   const prompt = compose(system);
 
   const model = body.model || 'copilot';

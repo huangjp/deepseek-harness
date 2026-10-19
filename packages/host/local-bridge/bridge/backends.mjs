@@ -1162,6 +1162,8 @@ export class MockBackend {
     // 原生标记版：模型无视我们的 JSON 约定，直接吐它训练时用的 DSML 标记。认不出这种
     // 输出时，整段尖括号会被当正文流给用户 —— 这是线上真实报过的形态。
     this.dsml = cfg.dsml ?? process.env.BRIDGE_MOCK_DSML === '1';
+    // 原样回吐提示词：用来在端到端测试里检查提示词组装（没有别的可观察出口）。
+    this.echo = cfg.echo ?? process.env.BRIDGE_MOCK_ECHO === '1';
   }
 
   check() {
@@ -1171,6 +1173,12 @@ export class MockBackend {
   async complete({ prompt, systemPrompt, onDelta }) {
     // 工具说明在 systemPrompt 里，两处都要看
     const full = `${systemPrompt || ''}\n${prompt || ''}`;
+    // 原样回吐提示词：端到端测试靠它检查"我们究竟给上游发了什么"（提示词组装本身
+    // 没有别的可观察出口）。放在工具分支之前，否则带工具的请求会先命中那一条。
+    if (this.echo) {
+      onDelta?.(full);
+      return { text: full, usage: null, sessionId: 'mock', costUsd: 0, durationMs: 0, raw: null };
+    }
     // 带工具说明时，模拟一次工具调用，便于验证 tool_calls 还原链路。
     // 标记与输出键名都跟随 bridge.mjs 的新协议（bridge_tool_calls）。
     if (/【可用工具清单】|【工具调用能力】/.test(full)) {
