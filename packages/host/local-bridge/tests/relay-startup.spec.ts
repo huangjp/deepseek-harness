@@ -162,6 +162,12 @@ interface BootOptions {
   logs?: string[]
   /** Whether the composition turns runtime token auto-refresh on. */
   autoRefresh?: boolean
+  /**
+   * Whether the composition lets the relay refresh while running. Off by default
+   * because one refresh redirects the whole machine's system proxy for about a
+   * minute, which interrupts any other outbound traffic.
+   */
+  autoRefreshWhileRunning?: boolean
 }
 
 /**
@@ -196,6 +202,7 @@ async function boot(options: BootOptions): Promise<string> {
     '    deps:',
     '      autoStart: false',
     `      autoRefreshToken: ${options.autoRefresh === true ? 'true' : 'false'}`,
+    `      autoRefreshWhileRunning: ${options.autoRefreshWhileRunning === true ? 'true' : 'false'}`,
     '      bootstrap: false',
     '      autoInstallCa: false',
     '      autoInstallMitm: false',
@@ -415,7 +422,7 @@ describe('local-bridge relay lifecycle', () => {
         workbuddy: await freePort(),
         copilot,
         harvestDir: harvestRoot,
-        autoRefresh: true,
+        autoRefreshWhileRunning: true,
         module: preflightModule({
           control: {
             detectHarvest: () => Promise.resolve({
@@ -459,4 +466,22 @@ describe('local-bridge relay lifecycle', () => {
       else process.env['COPILOT_BRIDGE_CONFIG'] = saved
     }
   }, 60_000)
+
+  /**
+   * 默认**不**给反代运行中刷新的能力。
+   *
+   * 一次刷新会把整台机器的系统代理指向拦截代理约一分钟（实测 57 秒），期间任何非微软
+   * 域名的出境流量都会失败 —— 另一个反代通道就是这么被打断的。所以这条能力必须显式开启，
+   * 默认关闭。
+   */
+  it('默认不给反代运行中刷新的能力', async () => {
+    const copilot = await freePort()
+    await boot({ workbuddy: await freePort(), copilot, module: preflightModule() })
+    await expect.poll(() => listening(copilot), { timeout: 15_000 }).toBe(true)
+
+    const payload = await (await fetch(`http://127.0.0.1:${copilot}/health`)).json() as {
+      refresh: { auto: boolean }
+    }
+    expect(payload.refresh.auto).toBe(false)
+  })
 })

@@ -37,7 +37,8 @@ kind: "package-reference"
 | `copilot.port` | `8899` | Copilot 反代端口 |
 | `copilot.harvestDir` | `%USERPROFILE%\copilot-probe` | 收割到的令牌、请求模板与刷新转录 |
 | `deps.autoStart` | `true` | 已安装但未运行的配套应用是否自动拉起 |
-| `deps.autoRefreshToken` | `true` | 是否自动刷新令牌：启动时陈旧就刷，运行中在请求即将带着过期令牌出门之前也刷 |
+| `deps.autoRefreshToken` | `true` | 启动时令牌陈旧是否自动刷新 |
+| `deps.autoRefreshWhileRunning` | `false` | 是否允许反代在**运行期间**换掉陈旧令牌。默认关：一次刷新会把整台机器的系统代理指向拦截代理约一分钟，期间任何其它出境流量（包括另一个反代）都会失败 |
 | `deps.bootstrap` | `true` | 启动时是否把随包的收割文件拷进收割目录 |
 | `deps.autoInstallCa` | `true` | 拦截证书尚未受信任时是否自动导入 |
 | `deps.autoInstallMitm` | `true` | 缺少拦截代理时是否后台执行 `pip install mitmproxy` |

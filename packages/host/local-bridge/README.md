@@ -37,7 +37,8 @@ Mount this plugin in a composition that ships the bundled relays; the desktop ap
 | `copilot.port` | `8899` | Copilot relay port |
 | `copilot.harvestDir` | `%USERPROFILE%\copilot-probe` | Harvested token, request template, and refresh transcripts |
 | `deps.autoStart` | `true` | Start a companion application that is installed but not running |
-| `deps.autoRefreshToken` | `true` | Refresh the token automatically: at boot when it is stale, and during use before a request would go out with one about to expire |
+| `deps.autoRefreshToken` | `true` | Refresh the token at boot when it is stale |
+| `deps.autoRefreshWhileRunning` | `false` | Let the relay replace a stale token during use. Off by default: one refresh redirects the whole machine's system proxy at the interception proxy for about a minute, so any other outbound traffic — including the other relay — fails while it runs |
 | `deps.bootstrap` | `true` | Copy the shipped harvest files into the harvest directory at boot |
 | `deps.autoInstallCa` | `true` | Import the interception certificate when it is not trusted yet |
 | `deps.autoInstallMitm` | `true` | Start a background `pip install mitmproxy` when the proxy is missing |
