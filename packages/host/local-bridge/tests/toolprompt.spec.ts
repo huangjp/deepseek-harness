@@ -95,18 +95,26 @@ describe('工具轮次回放', () => {
     expect(toolCallTurnText('', calls)).toContain('a({})、b({})')
   })
 
-  it('执行结果带上调用 id，才配得上对应的那一次调用', () => {
-    expect(toolResultTurnText('call_1', '结果')).toBe('【外部执行结果 call_1】结果')
+  it('执行结果带上调用 id，并用开始/结束成对包住', () => {
+    // 成对包住是必要的：工具输出本身多行，里面可能含有像对话的文本；只给前缀时模型
+    // 分不清哪句是结果、哪句是新内容，线上表现就是回答里混进半截输出。
+    expect(toolResultTurnText('call_1', '结果')).toBe(
+      '【外部执行结果 call_1 开始】\n结果\n【外部执行结果 call_1 结束】',
+    )
   })
 
   it('没有 id 时也能回放', () => {
-    expect(toolResultTurnText(undefined, '结果')).toBe('【外部执行结果】结果')
+    expect(toolResultTurnText(undefined, '结果')).toBe(
+      '【外部执行结果 开始】\n结果\n【外部执行结果 结束】',
+    )
   })
 })
 
 describe('toolTurnText', () => {
   it('工具结果消息走结果格式', () => {
-    expect(toolTurnText({ role: 'tool', tool_call_id: 'c1' }, 'ok')).toBe('【外部执行结果 c1】ok')
+    expect(toolTurnText({ role: 'tool', tool_call_id: 'c1' }, 'ok')).toBe(
+      '【外部执行结果 c1 开始】\nok\n【外部执行结果 c1 结束】',
+    )
   })
 
   it('助手带 tool_calls 走调用格式，即使正文为空', () => {

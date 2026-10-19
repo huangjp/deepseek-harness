@@ -111,12 +111,21 @@ export function toolCallTurnText(content, toolCalls) {
  *
  * 带上 tool_call_id：不带的话模型无法把结果对上它要过的那一次调用，多工具并发时
  * 尤其会把结果张冠李戴。措辞同样避开"调用工具"字样。
+ *
+ * 正文用"开始/结束"成对包住：工具输出本身是多行的，里面完全可能含有像对话的文本
+ * （脚本输出、被读取的源码、甚至我们自己的回放格式）。只给一个前缀时，模型分不清
+ * 哪一句是结果、哪一句是新内容，线上表现就是回答里混进半截输出、看起来像"内容重复"。
  * @param {string} [toolCallId] 该结果对应的调用 id。
  * @param {string} content 结果正文。
- * @returns {string} 一行对话文本。
+ * @returns {string} 成对包住的对话文本。
  */
 export function toolResultTurnText(toolCallId, content) {
-  return `【外部执行结果${toolCallId ? ` ${toolCallId}` : ''}】${content}`;
+  const id = toolCallId ? ` ${toolCallId}` : '';
+  return [
+    `【外部执行结果${id} 开始】`,
+    content,
+    `【外部执行结果${id} 结束】`,
+  ].join('\n');
 }
 
 /**

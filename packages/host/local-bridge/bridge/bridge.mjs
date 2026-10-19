@@ -453,6 +453,25 @@ function handleModels(req, res) {
   });
 }
 
+/**
+ * 上游用量 → OpenAI 的 usage。
+ *
+ * 两种键名都认：上游网关回的可能不是 Anthropic 风格的 `input_tokens`/`output_tokens`
+ * （`ServeBackend` 原样透传 `json.usage`）。只认一种的后果就是用量恒为 0 —— 界面上
+ * 显示「用量 0 tok」，上下文预算也跟着失真。
+ * @param {object|null|undefined} usage 上游返回的用量。
+ * @returns {{prompt_tokens: number, completion_tokens: number, total_tokens: number}}
+ */
+function usageOf(usage) {
+  const prompt = usage?.input_tokens ?? usage?.prompt_tokens ?? 0;
+  const completion = usage?.output_tokens ?? usage?.completion_tokens ?? 0;
+  return {
+    prompt_tokens: prompt,
+    completion_tokens: completion,
+    total_tokens: prompt + completion,
+  };
+}
+
 async function handleChatCompletions(req, res) {
   const body = await readJsonBody(req);
   const { prompt: rawPrompt, systemPrompt: baseSystem, images } = messagesToPrompt(body.messages);
@@ -477,6 +496,10 @@ async function handleChatCompletions(req, res) {
   const hasTools = Boolean(toolInstruction);
 
   const model = body.model || activeModel();
+  // 组装结果的尺寸要落日志：上游是否把提示词截断、模型到底看到多少字，事后只能靠
+  // 这两个数字判断 —— 否则"输出重复/缺失"只能猜。
+  log(`[req] msgs=${String(body.messages?.length ?? 0)} tools=${String(body.tools?.length ?? 0)}`
+    + ` 历史=${hasHistory ? '有' : '无'} prompt=${String(prompt.length)}字 system=${String(systemPrompt.length)}字`);
   const id = `chatcmpl-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   const created = Math.floor(Date.now() / 1000);
   const ctl = new AbortController();
@@ -494,6 +517,8 @@ async function handleChatCompletions(req, res) {
     // 写坏了但确实在表达工具调用 → 明确报错，不冒充正常回答
     if (r.broken) log('[warn] 重试后仍无法解析工具调用（非流式），下发错误文本');
     const content = r.broken ? toolCallFailureText(r.text) : r.content;
+    log(`[res] 工具调用=${r.calls ? String(r.calls.length) : '0'} 输出=${String(r.text ?? '').length}字`
+      + ` usage=${JSON.stringify(r.usage ?? null)}`);
     return sendJson(res, 200, {
       id,
       object: 'chat.completion',
@@ -506,11 +531,7 @@ async function handleChatCompletions(req, res) {
           : { role: 'assistant', content },
         finish_reason: r.calls ? 'tool_calls' : 'stop',
       }],
-      usage: {
-        prompt_tokens: r.usage?.input_tokens ?? 0,
-        completion_tokens: r.usage?.output_tokens ?? 0,
-        total_tokens: (r.usage?.input_tokens ?? 0) + (r.usage?.output_tokens ?? 0),
-      },
+      usage: usageOf(r.usage),
     });
   }
 
