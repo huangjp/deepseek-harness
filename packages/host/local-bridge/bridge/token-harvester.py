@@ -41,17 +41,26 @@ def log(msg):
 
 
 def _load_existing():
-    """把上一次收割到的 template 先读进内存。
+    """把上一次收割到的成果先读进内存。
 
-    没有这一步会有一个隐蔽的破坏性 bug：token 刷新成功、但模板没抓到（例如
-    帧解析失败）时，flush() 会把 state 整体写回文件，template 就变成 null，
-    把上一次的好模板覆盖掉。模板变化很慢，保留旧的完全够用。
+    没有这一步会有两个同类的破坏性 bug：
+
+    1. 令牌刷新成功、但模板没抓到（例如帧解析失败）时，flush() 会把 state 整体写回
+       文件，template 就变成 null，把上一次的好模板覆盖掉。模板变化很慢，保留旧的
+       完全够用。
+    2. **只有模板、没有令牌**的那次 flush 会把 access_token / harvestedAt / params
+       一起抹掉 —— 整份令牌文件退化成初始状态。之后反代读不到令牌、刷新脚本按
+       `now - 0` 算出天文数字的"令牌年龄"，刷新自己也会因为基线变成 0 而误判。
+       实测就是这么坏掉的（2026-10-19）。
+
+    所以凡是"上一次已经拿到、这一次不一定能拿到"的字段，都要先继承下来；真正收割到
+    新令牌时，下面的 request() 会覆盖它们。
     """
     try:
         with open(OUT_FILE, encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict):
-            for key in ("template", "templateAt"):
+            for key in ("template", "templateAt", "access_token", "harvestedAt", "params"):
                 if data.get(key):
                     state[key] = data[key]
     except Exception:
@@ -98,6 +107,17 @@ def request(flow):
     except Exception:
         return
     if "Chathub" not in url or "access_token=" not in url:
+        # 诊断：把被放行却没认出来的 WS 升级按"主机+路径"记一行，不带任何查询值。
+        # 收割忽然停止时，这行是唯一能区分"应用没重新建连"和"端点/参数改了"的证据。
+        try:
+            upgraded = flow.request.headers.get("upgrade", "")
+            if "websocket" in upgraded.lower():
+                u0 = urlparse(url)
+                has_token = "access_token=" in url
+                log(f"ws skipped: host={u0.netloc} path={u0.path[:120]} "
+                    f"chathub={'Chathub' in url} has_token={has_token}")
+        except Exception:
+            pass
         return
 
     u = urlparse(url)

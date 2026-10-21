@@ -192,14 +192,26 @@ if (Test-Path $ProxyBackup) {
 $before = Get-ProxySnapshot
 $beforeAge = -1
 $beforeStamp = 0
+$tokenUnusable = $false
 if (Test-Path $TokenFile) {
     try {
         $t = Get-Content $TokenFile -Raw | ConvertFrom-Json
-        $beforeStamp = [double]$t.harvestedAt
-        $beforeAge = [int]([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - $t.harvestedAt)
-    } catch { }
+        # 只认"真的有一份令牌"的文件：缺 access_token/harvestedAt 时（例如被一次没收割到
+        # 令牌的保存覆盖过），$t.harvestedAt 为 $null，`now - $null` 会算成当前 unix 时间戳，
+        # 于是打印出十几亿秒的"令牌年龄"，而基线又变成 0 —— 两个数字都会误导排查。
+        if ($t.access_token -and [double]$t.harvestedAt -gt 0) {
+            $beforeStamp = [double]$t.harvestedAt
+            $beforeAge = [int]([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - $beforeStamp)
+        } else {
+            $tokenUnusable = $true
+        }
+    } catch { $tokenUnusable = $true }
 }
 Write-Host "当前令牌年龄：$(if ($beforeAge -ge 0) { "$beforeAge 秒" } else { '无令牌' })"
+if ($tokenUnusable) {
+    Write-Host "  token.json 存在但没有可用的 access_token/harvestedAt —— 上一次保存把令牌写空了。" -ForegroundColor Yellow
+    Write-Host "  （本工具不会再犯；这一份需要靠本次收割重建。）" -ForegroundColor DarkGray
+}
 
 # ---- 1. 起 mitmdump（挂了就不再起）----
 if (-not (Test-MitmPort)) {
