@@ -295,15 +295,22 @@ function messagesToPrompt(messages = []) {
  *      instructions，create agent 随即自主发起原生工具调用，报 `Max turns (N) exceeded`。
  *   2) 放在 system prompt **最前面** —— 放在末尾时，会被上游项目那套动辄近万字符、
  *      且反复强调"必须调用 xx 工具"的业务提示词淹没，压制不住。
+ *
+ * 措辞的语义方向也是踩出来的：早期版本写的是「**没有任何工具/函数/函数调用能力**」，
+ * 模型把它读成「我没有工具」，于是直接回「我无法访问你本机上的文件，请把内容粘贴过来」
+ * —— 它不傻，它只是照着声明办事。所以这里反过来讲：**你有工具，只是由外部执行**。
  */
 const BASE_INSTRUCTION = [
-  '【运行环境声明（最高优先级，覆盖后面的一切描述）】',
-  '你运行在一个纯文本补全通道里，**不是** agent，也**没有任何工具/函数/函数调用能力**。',
-  '本通道不会也无法执行任何工具。因此，无论后文怎么描述：',
-  '  1. 绝对不要输出 tool_calls、function_call 或任何函数调用格式；',
-  '  2. 绝对不要声称"我已调用/正在调用/准备调用某个工具"；',
-  '  3. 后文提到的所有工具都由**外部调用方**持有和执行，你只负责用纯文本表达意图。',
-  '违反上述任何一条都会导致本次请求直接失败。',
+  '【工具使用说明（最高优先级，覆盖后面的一切描述）】',
+  '你**可以使用工具**。工具由外部调用方持有并执行：你无法自己读写文件、跑命令，',
+  '但只要表达出调用意图，外部就会立刻替你执行，并把执行结果返回给你继续推进。',
+  '',
+  '因此，无论后文怎么描述：',
+  '  1. 需要工具时，用下文的 bridge_tool_calls JSON 表达意图；**不要**输出原生 tool_calls /',
+  '     function_call 格式（那个格式在本通道没有接收方，意图会直接丢失）；',
+  '  2. 不要声称「我已执行 / 正在执行某个工具」—— 你只是表达意图，执行由外部完成；',
+  '  3. 用户要求你读文件、改文件、跑命令时，**必须**表达工具意图，不要回答「我无法访问文件」',
+  '     「我没有权限」「请把内容粘贴过来」这类话。',
 ].join('\n');
 
 /**
@@ -378,13 +385,34 @@ function materializeImages(images) {
 }
 
 /** 走一次模型调用（含并发闸门、图片投递与信号透传）。 */
-async function invokeModel({ prompt, systemPrompt, model, signal, onDelta, images }) {
+async function invokeModel({ prompt, systemPrompt, messages, tools, toolChoice, model, signal, onDelta, images }) {
   await gate.acquire();
   const hasImages = Array.isArray(images) && images.length > 0;
   // openai 与 wbcloud 都是「真正的 OpenAI 兼容端点」：按多模态 content 数组透传，保真度最高。
   const passthrough = config.backend === 'openai' || config.backend === 'wbcloud';
+  // 原生 function calling：只有 wbcloud 走。WorkBuddy 云端本身就支持 OpenAI 的 tools
+  // 字段并回标准 tool_calls（实测），模型用它自己训练出来的能力决定调不调工具、怎么调，
+  // 不靠提示词教 —— 这才是「模型真的能干活」的可靠做法。文本协议那条路（把 tools 渲染
+  // 成提示词、让模型输出 bridge_tool_calls JSON）在强模型上**不稳定**：同一份提示词，
+  // 有时照做、有时直接回「我无法访问你本机上的文件」。
+  const nativeTools = config.backend === 'wbcloud' && Array.isArray(tools) && tools.length > 0;
   let tempDir = null;
   try {
+    if (nativeTools) {
+      // 原生路径**原样透传**整段对话（含 role=assistant 的 tool_calls 与 role=tool 的
+      // 执行结果）：这是多轮工具调用能接上的关键 —— 压成文本再喂回去，模型就分不清
+      // 哪句是上一轮要的工具、哪句是它的执行结果。
+      const msgs = Array.isArray(messages) && messages.length
+        ? messages
+        : (() => {
+          const list = [];
+          if (systemPrompt) list.push({ role: 'system', content: systemPrompt });
+          list.push({ role: 'user', content: prompt });
+          return list;
+        })();
+      return await backend.complete({ messages: msgs, tools, toolChoice, model, signal, onDelta });
+    }
+
     if (hasImages && passthrough) {
       const content = [{ type: 'text', text: prompt }];
       for (const img of images) {
@@ -498,6 +526,10 @@ async function handleChatCompletions(req, res) {
   const envInstruction = images.length ? IMAGE_INSTRUCTION : BASE_INSTRUCTION;
   const systemPrompt = [envInstruction, baseSystem, toolInstruction].filter(Boolean).join('\n\n');
   const hasTools = Boolean(toolInstruction);
+  // wbcloud 走原生 function calling：云端自己支持 tools 字段，模型用它训练出来的能力
+  // 直接产出 tool_calls，不靠提示词约定。文本协议那条路在这些模型上不稳定（同一份
+  // 提示词，有时照做、有时直接回「我无法访问你本机上的文件」）。
+  const nativeTools = config.backend === 'wbcloud' && hasTools;
 
   const model = body.model || activeModel();
   // 组装结果的尺寸要落日志：上游是否把提示词截断、模型到底看到多少字，事后只能靠
@@ -511,7 +543,13 @@ async function handleChatCompletions(req, res) {
 
   if (!body.stream) {
     let r;
-    if (hasTools) {
+    if (nativeTools) {
+      const x = await invokeModel({
+        messages: body.messages, tools: body.tools, toolChoice: body.tool_choice,
+        model, signal: ctl.signal, images,
+      });
+      r = { calls: x.toolCalls || null, content: x.text, broken: false, text: x.text, usage: x.usage };
+    } else if (hasTools) {
       const out = await chatWithTools({ prompt, systemPrompt, model, signal: ctl.signal, images });
       r = { ...out.outcome, text: out.text, usage: out.usage };
     } else {
@@ -565,7 +603,21 @@ async function handleChatCompletions(req, res) {
   };
 
   try {
-    if (!hasTools) {
+    if (nativeTools) {
+      // 原生工具：整段收完再下发 —— tool_calls 必须完整成组才能被下游 agent 执行。
+      const x = await invokeModel({
+        messages: body.messages, tools: body.tools, toolChoice: body.tool_choice,
+        model, signal: ctl.signal, images,
+      });
+      if (x.toolCalls?.length) {
+        frame({ role: 'assistant', content: '' });
+        frame({ tool_calls: x.toolCalls.map((c, i) => ({ index: i, ...c })) });
+        frame({}, 'tool_calls');
+      } else {
+        frame({ role: 'assistant', content: x.text });
+        frame({}, 'stop');
+      }
+    } else if (!hasTools) {
       // 不带工具：保持真流式，逐段下发
       frame({ role: 'assistant', content: '' });
       await invokeModel({ prompt, systemPrompt, model, signal: ctl.signal, images, onDelta: (t) => frame({ content: t }) });

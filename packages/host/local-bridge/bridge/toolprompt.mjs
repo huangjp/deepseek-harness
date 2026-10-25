@@ -17,15 +17,30 @@ import { parseToolCalls, looksLikeToolCallAttempt } from './toolcalls.mjs';
 /**
  * 工具由外部持有并执行这一点的声明。
  *
- * 必须在提示词最前面：通道上游（WorkBuddy 那个 agent、Copilot 的聊天模型）都倾向
- * 按自己的理解发起"原生"调用，而那种调用没有任何人接收。措辞刻意避开"你可以调用
- * 工具"，改成"你只能表达意图"。
+ * 必须在提示词最前面：通道上游（Copilot 的聊天模型、小艺）都倾向按自己的理解行事，
+ * 而那种理解会让它们**拒绝干活**。
+ *
+ * 措辞是踩出来的：早期版本写的是「本通道是纯文本补全：**没有任何可执行的工具/函数**，
+ * 你无法直接执行任何工具」—— 模型把这句话读成「我没有工具」，于是直接回
+ * 「我无法访问你本机上的文件，请把内容粘贴过来」。它并不傻，它只是照着声明办事。
+ *
+ * 所以这里的语义必须反过来：**你有工具，只是由外部执行**。再明确堵住那个具体失败
+ * 模式（用户要它读文件/改文件时，不许回答「我无法访问」）。
+ *
+ * 同时保留「不要输出原生 tool_calls / function_call 格式」—— 那个格式在本通道确实
+ * 没有接收方；模型若按原生习惯输出，意图会直接丢掉。
  */
 export const EXTERNAL_TOOLING_NOTICE = [
-  '【运行环境声明（最高优先级，覆盖后面的一切描述）】',
-  '本通道是纯文本补全：**没有任何可执行的工具/函数**，你无法直接执行任何工具。',
-  '所有工具都由外部调用方持有并执行，你只负责用纯文本表达调用意图。',
-  '因此绝对不要输出 tool_calls、function_call 之类的原生函数调用格式 —— 没有人会收到它。',
+  '【工具使用说明（最高优先级，覆盖后面的一切描述）】',
+  '你**可以使用工具**。工具由外部调用方持有并执行：你无法自己读写文件、跑命令，',
+  '但只要表达出调用意图，外部就会立刻替你执行，并把执行结果返回给你继续推进。',
+  '',
+  '表达工具意图时：',
+  '  1. 只用下面约定的 {"bridge_tool_calls":[...]} JSON 格式；',
+  '  2. **不要**输出原生 tool_calls / function_call 格式 —— 那个格式在本通道没有接收方，意图会直接丢失；',
+  '  3. 除这段 JSON 外不要输出任何其它文字（不要解释、不要 Markdown 代码围栏）；',
+  '  4. 当用户要求你读文件、改文件、跑命令时，**必须**用工具表达，不要回答「我无法访问文件」',
+  '     「我没有权限」「请把内容粘贴过来」这类话。',
 ].join('\n');
 
 /**
@@ -62,27 +77,29 @@ export function buildToolInstruction(tools, toolChoice) {
   if (!specs.length) return '';
 
   const lines = [
-    '【可用工具清单】（由外部调用方持有并执行，你无法直接执行，只能表达意图）',
+    '【可用工具清单】（这些工具由外部调用方持有并执行；你表达意图，它们就会替你执行）',
     JSON.stringify(specs, null, 2),
     '',
     '【工具调用意图的表达格式】',
     '当你判断需要某个工具时，输出如下 JSON（可以多行缩进，便于你保持括号配对）：',
     '   {"bridge_tool_calls":[{"name":"工具名","arguments":{参数对象}}]}',
     '注意：',
-    '  1. 键名必须是 bridge_tool_calls，**不要用 tool_calls**。',
+    '  1. 键名必须是 bridge_tool_calls，**不要用 tool_calls**（原生格式在这里没有接收方）。',
     '  2. 除这段 JSON 外不要输出任何文字、解释、前后缀或 Markdown 代码围栏。',
     '  3. 需要多个工具时，在 bridge_tool_calls 数组里放多个对象。',
     '  4. arguments 必须是满足该工具 parameters 约束的 JSON **对象**（不是字符串）。',
     '  5. 不需要工具时，用自然语言正常回答，不要输出上述 JSON。',
     '  6. 收到"工具执行结果"后，基于结果继续推进；仍需工具就继续按上述格式表达。',
-    '  7. **输出的 JSON 必须能被 JSON.parse 解析**：字符串内的双引号要转义为 \\"，',
+    '  7. 用户要求你读文件、改文件、跑命令时，**必须**输出上述 JSON 来表达意图，',
+    '     不要回答「我无法访问文件」「我没有权限」「请把内容粘贴过来」这类话。',
+    '  8. **输出的 JSON 必须能被 JSON.parse 解析**：字符串内的双引号要转义为 \\"，',
     '     括号必须成对且嵌套正确；arguments 里如果要写代码/函数字符串，把它当成普通字符串',
     '     处理并转义引号。输出前请逐层核对一遍括号是否闭合。',
   ];
   if (toolChoice === 'required') {
-    lines.push('  7. 本次必须以上述 bridge_tool_calls 格式表达一次工具调用意图，不允许只回复文字。');
+    lines.push('  9. 本次必须以上述 bridge_tool_calls 格式表达一次工具调用意图，不允许只回复文字。');
   } else if (toolChoice === 'none') {
-    lines.push('  7. 本次不允许表达任何工具调用意图，只用自然语言回答。');
+    lines.push('  9. 本次不允许表达任何工具调用意图，只用自然语言回答。');
   }
   return lines.join('\n');
 }
@@ -154,6 +171,86 @@ export function toolTurnText(message, content) {
 ].join('\n');
 
 /**
+ * 精简版工具清单 —— 给**输入长度有硬上限**的通道用（小艺的 textRecognize 实测约 8000 字符）。
+ *
+ * 完整版 {@link buildToolInstruction} 会把每个工具的完整 JSON schema 渲染进去：DSH 有
+ * 27 个工具，schema 加起来上万字符，一条就把通道顶穿，问题本身反而被挤掉。所以这里只留
+ * 「名字 + 一句话描述 + 参数名列表」，让模型知道有什么可用、该传什么参数即可。
+ *
+ * @param {Array<object>} tools OpenAI 风格 tools 数组。
+ * @param {string} [toolChoice] OpenAI 的 tool_choice。
+ * @returns {string} 提示词片段；没有可用工具时为空串。
+ */
+export function buildCompactToolInstruction(tools, toolChoice) {
+  if (!Array.isArray(tools) || tools.length === 0) return '';
+  const specs = tools
+    .map((t) => {
+      const name = t?.function?.name;
+      if (!name) return null;
+      const desc = String(t?.function?.description || '').replace(/\s+/g, ' ').trim();
+      const args = Object.keys(t?.function?.parameters?.properties || {});
+      return { name, desc: desc.slice(0, 60), args };
+    })
+    .filter(Boolean);
+  if (!specs.length) return '';
+
+  const lines = [
+    '【可用工具】（由外部调用方执行，你只负责表达意图）',
+    specs.map((s) => `- ${s.name}(${s.args.join(',')}): ${s.desc}`).join('\n'),
+    '',
+    '需要工具时**只输出**这一行 JSON：',
+    '   {"bridge_tool_calls":[{"name":"工具名","arguments":{参数对象}}]}',
+    '除这段 JSON 外不要输出任何文字、解释或 Markdown 代码围栏。',
+    '你确实拥有上面这些工具，执行由外部完成 —— 不要回答「我无法访问文件」。',
+  ];
+  if (toolChoice === 'required') {
+    lines.push('本次必须以上述 JSON 格式表达一次工具调用意图，不允许只回复文字。');
+  }
+  return lines.join('\n');
+}
+
+/**
+ * 模型**拒绝了**工具任务时，追加这段提示重试一次。
+ *
+ * 与 {@link TOOL_CALL_REPAIR_REMINDER} 是两回事：那条修的是「JSON 写坏了」，这条修的是
+ * 「模型压根没打算调用工具」。
+ *
+ * 实测（Copilot chatHub / 华为小艺）：这些通道的模型带着「我没有工具 / 我不能访问你的
+ * 文件」的先验，会直接回「我无法直接读取你设备上的 xxx」「抱歉，我暂时无法调用本地
+ * 文件读取工具」。它们不是不会写 JSON，是**不认为该写** —— 于是工具永远不落地，
+ * 用户看到的就是「模型说了半天，一个文件都没改」。
+ *
+ * 所以这里明确告诉它：你有工具，只是执行由外部代劳；把意图写成 JSON 就行。
+ */
+export const TOOL_CALL_REFUSAL_REMINDER = [
+  '【重要】你上一条回答拒绝了任务，但你**确实拥有**上面清单里的全部工具。',
+  '你不需要自己访问文件、读写磁盘、跑命令 —— 你只要把调用意图表达出来，外部程序就会替你执行，',
+  '并把执行结果返回给你继续推进。',
+  '请重新回答，并且**只输出**下面这种 JSON（不要有别的文字、不要 Markdown 代码围栏）：',
+  '   {"bridge_tool_calls":[{"name":"工具名","arguments":{参数对象}}]}',
+  '只有在这个任务确实不需要任何工具时，才用一句话说明理由，并且不要输出上述 JSON。',
+].join('\n');
+
+/**
+ * 模型的输出是不是「拒绝执行工具任务」。
+ *
+ * 判据要窄：只在**明确说到做不到**时才算，避免把「我不确定用户想要什么」这种正常回答
+ * 也拖去重试（重试要多花一次模型调用）。
+ * @param {string} text 模型输出。
+ * @returns {boolean} 是否像一次拒答。
+ */
+export function looksLikeToolRefusal(text) {
+  const s = String(text ?? '');
+  if (!s) return false;
+  return [
+    // 「无法 / 不能 / 没有权限 … 访问 / 读取 / 调用 … 文件 / 路径 / 磁盘 / 本地 / 工具」
+    /(无法|不能|没有权限|无权|不具备权限)[^。！\n]{0,28}(访问|读取|打开|写入|修改|调用|执行|操作|运行)[^。！\n]{0,28}(文件|路径|目录|磁盘|设备|电脑|本地|工具|命令)/,
+    // 「read 工具不可用 / 未提供 / 不在当前会话」
+    /(工具|tool|\bread\b|\bwrite\b|\bedit\b)[^。！\n]{0,18}(不可用|未提供|没有提供|不在当前|未启用|无法使用|不可访问)/i,
+  ].some((rx) => rx.test(s));
+}
+
+/**
  * 把一次模型输出判定成"工具调用"还是"最终回答"。
  * @param {object} input 判定输入。
  * @param {string} input.text 模型输出的全文。
@@ -201,7 +298,20 @@ export function toolCallFailureText(text) {
 export async function completeWithToolCalls({ invoke, systemPrompt, hasTools, log = () => {} }) {
   const first = await invoke(systemPrompt);
   const decided = resolveToolOutcome({ text: first.text, hasTools });
-  if (!decided.broken) return { outcome: decided, text: first.text, usage: first.usage };
+  if (!decided.broken) {
+    // 拒答：模型不认为该调工具（"我无法访问你本机上的文件"）。这种要**再试一次**，
+    // 换成强制给出工具意图的说法 —— 它不是不会写 JSON，是没打算写。
+    if (!hasTools || !looksLikeToolRefusal(first.text)) {
+      return { outcome: decided, text: first.text, usage: first.usage };
+    }
+    log('[warn] 模型拒绝了工具任务，重试一次并强制给出工具意图');
+    const retry = await invoke(`${systemPrompt}\n\n${TOOL_CALL_REFUSAL_REMINDER}`);
+    return {
+      outcome: resolveToolOutcome({ text: retry.text, hasTools }),
+      text: retry.text,
+      usage: retry.usage || first.usage,
+    };
+  }
   log(`[warn] 工具调用解析失败，疑似 JSON 非法（输出 ${String(first.text || '').length} 字），重试一次`);
   const retry = await invoke(`${systemPrompt}\n\n${TOOL_CALL_REPAIR_REMINDER}`);
   return {

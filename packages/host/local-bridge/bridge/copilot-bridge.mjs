@@ -19,7 +19,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createTokenGate } from './token-gate.mjs';
 import {
   buildToolInstruction, completeWithToolCalls, createToolCallGate, EXTERNAL_TOOLING_NOTICE,
-  resolveToolOutcome, toolCallFailureText, toolTurnText, TOOL_CALL_REPAIR_REMINDER, TRANSCRIPT_TRAILER,
+  looksLikeToolRefusal, resolveToolOutcome, toolCallFailureText, toolTurnText, TOOL_CALL_REFUSAL_REMINDER,
+  TOOL_CALL_REPAIR_REMINDER, TRANSCRIPT_TRAILER,
 } from './toolprompt.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -692,7 +693,16 @@ async function handleChatCompletions(req, res) {
         });
         let outcome = resolveToolOutcome({ text: first.text, hasTools });
         let finalText = first.text;
-        if (outcome.broken) {
+        if (!outcome.broken && hasTools && looksLikeToolRefusal(finalText)) {
+          // 拒答：模型不认为该调工具（"我无法访问你本机上的文件"）。换一种说法让它重来。
+          log('[warn] 模型拒绝了工具任务，重试一次并强制给出工具意图');
+          const retry = await runChat({
+            prompt: compose(`${system}\n\n${TOOL_CALL_REFUSAL_REMINDER}`),
+            signal: ctl.signal,
+          });
+          finalText = retry.text;
+          outcome = resolveToolOutcome({ text: finalText, hasTools });
+        } else if (outcome.broken) {
           // 第一次的 JSON 写坏了：带修复提示重试一次，这次不流式（不能回吐半截）。
           log('[warn] 工具调用解析失败，疑似 JSON 非法，重试一次');
           const retry = await runChat({

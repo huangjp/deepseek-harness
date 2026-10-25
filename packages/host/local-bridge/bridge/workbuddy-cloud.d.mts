@@ -27,6 +27,12 @@ export interface WorkBuddyCloudConfig {
 export interface WorkBuddyCloudResult {
   /** 模型输出的正文。 */
   text: string
+  /** 原生 function calling 解析出来的调用；没有则 null。 */
+  toolCalls: Array<{
+    id: string
+    type: string
+    function: { name: string; arguments: string }
+  }> | null
   /** 用量；云端没给就是 null。 */
   usage: Record<string, unknown> | null
   /** 云端直连没有会话概念，恒为 null。 */
@@ -49,6 +55,10 @@ export interface WorkBuddyCloudCall {
   systemPrompt?: string
   /** 没有 messages 时用它拼出 user 轮。 */
   prompt?: string
+  /** OpenAI 形态的 tools；给了就走**原生** function calling。 */
+  tools?: Array<Record<string, unknown>>
+  /** OpenAI 的 tool_choice。 */
+  toolChoice?: string
   /** 模型名；留空则用配置里的默认模型。 */
   model?: string
   /** 超时（毫秒）。 */
@@ -90,6 +100,12 @@ export declare class WorkBuddyCloudBackend {
 
   /** 构造渠道头。 */
   buildHeaders(options: { token: string; uid: string; model: string }): Record<string, string>
+
+  /** 发请求。 */
+  post(body: unknown, headers: Record<string, string>, signal?: AbortSignal): Promise<Response>
+
+  /** 拿一份可用 token（内存缓存优先，否则重新收割）。 */
+  ensureToken(force?: boolean): Promise<{ ok: boolean; token: string; uid: string; expiresAt: number }>
 
   /** 把云端的错误响应映射成带诊断信息的异常。 */
   mapError(status: number, raw: string): Error & { code?: string; httpStatus?: number; retriable?: boolean }

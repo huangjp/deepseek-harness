@@ -29,6 +29,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { parseToolCalls } from './toolcalls.mjs';
+import {
+  buildCompactToolInstruction, EXTERNAL_TOOLING_NOTICE, looksLikeToolRefusal, TOOL_CALL_REFUSAL_REMINDER,
+} from './toolprompt.mjs';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const WS_URL = 'wss://xiaoyi.huawei.com/hivoice/v6/voice/ws';
@@ -514,6 +519,20 @@ const MAX_PROMPT_CHARS = 4000;
 const MAX_SYSTEM_CHARS = 200;
 
 /**
+ * 单个工具执行结果的保留上限。
+ *
+ * 工具结果（读一个文件就是几千字）必须截断，否则一条结果就能把整个提示词顶穿
+ * 上限，后面的轮次全丢。小艺本来就给不了多少上下文，截断比超限更可用。
+ */
+const MAX_TOOL_RESULT_CHARS = 1200;
+
+/** 截断到上限并加省略号。 */
+function truncate(text, max) {
+  const s = String(text ?? '');
+  return s.length > max ? `${s.slice(0, Math.max(0, max - 1))}…` : s;
+}
+
+/**
  * DSH 注入到 user 轮里的内部噪声 —— 不是用户说的话。
  *
  * 这些块（工作区说明、skill 清单、runtime context 快照、切模型提示）都是 harness
@@ -537,46 +556,81 @@ function isInternalChatter(text) {
  * 把 OpenAI 的 messages 收敛成一段给小艺的文本。
  *
  * 规则：
- * - 只取**最后一条**不是 DSH 内部噪声的用户输入（整条 user 都算噪声时退回最后一条原始输入）；
- * - assistant 历史一律丢弃（通道是单轮的，带上只会让它答错轮次）；
+ * - **当前问题**取最后一条不是 DSH 内部噪声的用户输入；
+ * - **工具轮次**（助手表达的调用意图 + 工具执行结果）原样回放 —— agent 多轮要能
+ *   接上，就得让小艺看见上一轮要了什么工具、工具返回了什么。只回放**当前问题之后**
+ *   的那些轮次：更早的轮次已经结算完了，对当前问题没有帮助，还占预算；
+ * - assistant 的普通正文不放（通道是单轮的，带上只会让它答错轮次）；
  * - system 提示词短于 {@link MAX_SYSTEM_CHARS} 才保留，且保留时仍按「（要求：…）」包裹；
- * - 最终长度硬顶在 {@link MAX_PROMPT_CHARS} 以内，超出部分截断并加省略号。
+ * - 总长硬顶在 {@link MAX_PROMPT_CHARS} 以内。
  *
- * @param {Array<{role?: string, content?: unknown}>} [messages] OpenAI 格式的对话。
+ * @param {Array<{role?: string, content?: unknown, tool_calls?: unknown, tool_call_id?: string}>} [messages]
+ *   OpenAI 格式的对话。
  * @returns {string} 交给小艺的提示词；没有可用用户输入时返回空串。
  */
 export function buildPrompt(messages) {
   const systems = [];
-  const users = [];
+  const turns = [];
   for (const m of messages || []) {
     let content = m.content;
     if (Array.isArray(content)) content = content.map((c) => (c && c.text) || '').join('');
     content = String(content || '').trim();
-    if (!content) continue;
-    if (m.role === 'system') systems.push(content);
-    else if (m.role !== 'assistant') users.push(content);
+    if (m.role === 'system') {
+      if (content) systems.push(content);
+      continue;
+    }
+    if (m.role === 'tool') {
+      if (content) {
+        const id = m.tool_call_id ? ` ${m.tool_call_id}` : '';
+        turns.push({ kind: 'tool', text: `【外部执行结果${id} 开始】\n${content}\n【外部执行结果 结束】` });
+      }
+      continue;
+    }
+    if (m.role === 'assistant') {
+      const calls = Array.isArray(m.tool_calls) ? m.tool_calls : null;
+      if (calls && calls.length) {
+        const desc = calls
+          .map((tc) => `${tc?.function?.name || '?'}(${tc?.function?.arguments || '{}'})`)
+          .join('、');
+        turns.push({ kind: 'toolcall', text: `助手（上一轮表达的工具调用意图：${desc}）` });
+      }
+      continue;
+    }
+    if (content) turns.push({ kind: 'user', text: content });
   }
-  if (!users.length) return '';
 
-  // 取最后一条「不是 harness 内部噪声」的用户输入；全被过滤时退回最后一条原始输入，
-  // 宁可答得勉强，也不要因为 harness 插了几段说明就把请求判成空。
-  let question = users[users.length - 1];
-  for (let i = users.length - 1; i >= 0; i--) {
-    if (!isInternalChatter(users[i])) {
-      question = users[i];
-      break;
+  // 当前问题 = 最后一条「不是 harness 内部噪声」的用户输入；全被过滤时退回最后一条
+  // 原始输入 —— 宁可答得勉强，也不要因为 harness 插了几段说明就把请求判成空。
+  let idx = -1;
+  for (let i = turns.length - 1; i >= 0; i--) {
+    if (turns[i].kind === 'user' && !isInternalChatter(turns[i].text)) { idx = i; break; }
+  }
+  if (idx < 0) {
+    for (let i = turns.length - 1; i >= 0; i--) {
+      if (turns[i].kind === 'user') { idx = i; break; }
     }
   }
+  if (idx < 0) return '';
 
   const systemText = systems.join('；');
   const prefix = systemText && systemText.length <= MAX_SYSTEM_CHARS
     ? `（要求：${systemText}）\n\n`
     : '';
-  const room = Math.max(0, MAX_PROMPT_CHARS - prefix.length);
-  const body = question.length > room
-    ? `${question.slice(0, Math.max(0, room - 1))}…`
-    : question;
-  return `${prefix}${body}`;
+  const budget = Math.max(0, MAX_PROMPT_CHARS - prefix.length);
+
+  const question = turns[idx].text;
+  const parts = [question.length > budget ? `${question.slice(0, Math.max(0, budget - 1))}…` : question];
+  let used = parts[0].length;
+  for (const t of turns.slice(idx + 1)) {
+    // 当前问题之后的 user 轮必然是 harness 噪声（idx 已经是最后一条真实用户输入），
+    // 只回放工具轮次。
+    if (t.kind === 'user') continue;
+    const text = t.kind === 'tool' ? truncate(t.text, MAX_TOOL_RESULT_CHARS) : t.text;
+    if (used + text.length + 2 > budget) break;
+    parts.push(text);
+    used += text.length + 2;
+  }
+  return prefix + parts.join('\n\n');
 }
 
 // ---------------------------------------------------------------- HTTP 辅助
@@ -650,10 +704,18 @@ async function handleChatCompletions(req, res) {
   }
 
   const model = body.model || 'xiaoyi-chat';
-  const prompt = buildPrompt(body.messages);
-  if (!prompt) {
+  const basePrompt = buildPrompt(body.messages);
+  if (!basePrompt) {
     return sendError(res, Object.assign(new Error('messages 为空'), { httpStatus: 400, code: 'bad_request' }));
   }
+  // 工具清单用**精简版**：完整 JSON schema 有一万多字符，一条就把这条通道（约 8000
+  // 字符）顶穿，问题本身反而被挤掉。声明与清单必须置顶 —— 这条通道是单轮的，
+  // 后面接的就是用户当前那句话。
+  const toolInstruction = buildCompactToolInstruction(body.tools, body.tool_choice);
+  const hasTools = Boolean(toolInstruction);
+  const prompt = toolInstruction
+    ? `${EXTERNAL_TOOLING_NOTICE}\n\n${toolInstruction}\n\n${basePrompt}`
+    : basePrompt;
   const timeoutMs = chatCfg.timeoutMs || 180000;
   const id = `chatcmpl-${crypto.randomBytes(12).toString('hex')}`;
   const created = Math.floor(Date.now() / 1000);
@@ -661,10 +723,10 @@ async function handleChatCompletions(req, res) {
   // token 失效时自动重收一次再试。实测华为边缘节点对无效凭据可能回 400 / 401 / 403 / 407，
   // 都算「凭证可能过期」；429 是限流，重收也没用，不在此列。
   const STALE_STATUS = new Set([400, 401, 403, 407]);
-  const run = async (jar, onDelta) => {
+  const run = async (jar, onDelta, promptText) => {
     let buf = '';
     let reasoning = '';
-    for await (const [kind, delta] of streamChat(prompt, jar, { timeoutMs })) {
+    for await (const [kind, delta] of streamChat(promptText, jar, { timeoutMs })) {
       if (kind === 'reasoning') reasoning += delta;
       else buf += delta;
       onDelta?.(kind, delta);
@@ -672,16 +734,33 @@ async function handleChatCompletions(req, res) {
     return { content: buf, reasoning };
   };
 
-  const withRetry = async (onDelta) => {
+  const withRetry = async (onDelta, promptText = prompt) => {
     let jar = await ensureAuth();
     try {
-      return await run(jar, onDelta);
+      return await run(jar, onDelta, promptText);
     } catch (e) {
       if (!STALE_STATUS.has(e.status)) throw e;
       log(`[xiaoyi] 令牌被拒（HTTP ${e.status}），重新收割后重试`);
       jar = await ensureAuth(true);
-      return await run(jar, onDelta);
+      return await run(jar, onDelta, promptText);
     }
+  };
+
+  /**
+   * 跑一轮并把输出判成「工具调用」还是「最终回答」。
+   *
+   * 拒答要再试一次：这条通道的模型带着「我没有工具 / 我不能访问你的文件」的先验，
+   * 会直接回「抱歉，我暂时无法调用本地文件读取工具」。它不是不会写 JSON，是不认为该写。
+   */
+  const decide = async () => {
+    let out = await withRetry(null);
+    let calls = hasTools ? parseToolCalls(out.content) : null;
+    if (hasTools && !calls && looksLikeToolRefusal(out.content)) {
+      log('[xiaoyi] 模型拒绝了工具任务，重试一次并强制给出工具意图');
+      out = await withRetry(null, `${prompt}\n\n${TOOL_CALL_REFUSAL_REMINDER}`);
+      calls = parseToolCalls(out.content);
+    }
+    return { out, calls };
   };
 
   if (body.stream) {
@@ -697,6 +776,26 @@ async function handleChatCompletions(req, res) {
     })}\n\n`;
 
     res.write(chunk({ role: 'assistant', content: '' }));
+    if (hasTools) {
+      // 带工具：必须收全文再判定 —— 工具调用 JSON 不能半截吐给客户端。
+      let out = null;
+      try {
+        out = await withRetry(null);
+      } catch (e) {
+        log('[xiaoyi] 流式失败:', e.message);
+        res.write(chunk({ content: `\n\n[错误] ${e.message}` }));
+      }
+      const calls = out ? parseToolCalls(out.content) : null;
+      if (calls) {
+        res.write(chunk({ tool_calls: calls.map((c, i) => ({ index: i, ...c })) }));
+        res.write(chunk({}, 'tool_calls'));
+      } else {
+        res.write(chunk({ content: out?.content ?? '' }));
+        res.write(chunk({}, 'stop'));
+      }
+      res.write('data: [DONE]\n\n');
+      return res.end();
+    }
     try {
       await withRetry((kind, delta) => {
         res.write(chunk(kind === 'reasoning' ? { reasoning_content: delta } : { content: delta }));
@@ -710,12 +809,14 @@ async function handleChatCompletions(req, res) {
     return res.end();
   }
 
-  const out = await withRetry(null);
-  const message = { role: 'assistant', content: out.content };
-  if (out.reasoning) message.reasoning_content = out.reasoning;
+  const { out, calls } = await decide();
+  const message = calls
+    ? { role: 'assistant', content: '', tool_calls: calls }
+    : { role: 'assistant', content: out.content };
+  if (!calls && out.reasoning) message.reasoning_content = out.reasoning;
   sendJson(res, 200, {
     id, object: 'chat.completion', created, model,
-    choices: [{ index: 0, message, finish_reason: 'stop' }],
+    choices: [{ index: 0, message, finish_reason: calls ? 'tool_calls' : 'stop' }],
     usage: {
       prompt_tokens: Math.max(1, Math.round(prompt.length / 2)),
       completion_tokens: Math.max(1, Math.round(out.content.length / 2)),

@@ -281,9 +281,11 @@ export class WorkBuddyCloudBackend {
    * @param {number} [options.timeoutMs]
    * @param {AbortSignal} [options.signal]
    * @param {(chunk: string) => void} [options.onDelta]
-   * @returns {Promise<{text: string, usage: object|null, sessionId: string|null, costUsd: null, durationMs: number, raw: object}>}
+   * @param {Array<object>} [options.tools] OpenAI 形态的 tools；给了就走**原生** function calling。
+   * @param {string} [options.toolChoice]
+   * @returns {Promise<{text: string, toolCalls: Array<object>|null, usage: object|null, sessionId: string|null, costUsd: null, durationMs: number, raw: object}>}
    */
-  async complete({ messages, systemPrompt, prompt, model, timeoutMs, signal, onDelta } = {}) {
+  async complete({ messages, systemPrompt, prompt, tools, toolChoice, model, timeoutMs, signal, onDelta } = {}) {
     const started = Date.now();
     const useModel = model || this.model;
     const msgs = WorkBuddyCloudBackend.normalizeMessages({ messages, systemPrompt, prompt });
@@ -298,6 +300,14 @@ export class WorkBuddyCloudBackend {
       max_tokens: this.cfg.maxTokens ?? 32000,
       temperature: this.cfg.temperature ?? 1,
     };
+    // 云端原生支持 function calling（实测会回标准 delta.tool_calls）。走原生时**不要**再
+    // 往提示词里塞「请输出 bridge_tool_calls」那套文本协议 —— 两套并存会让模型一半概率
+    // 去输出纯文本、一半概率去输出原生 tool_calls，而解析器只认其中一种。
+    const nativeTools = Array.isArray(tools) && tools.length > 0;
+    if (nativeTools) {
+      body.tools = tools;
+      if (toolChoice) body.tool_choice = toolChoice;
+    }
 
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), timeoutMs ?? this.timeoutMs);
@@ -308,6 +318,9 @@ export class WorkBuddyCloudBackend {
     let reasoning = '';
     let usage = null;
     let last = null;
+    // 原生 tool_calls 是**分片**下发的：第一个分片带 id 与 function.name，后续分片只带
+    // arguments 的一小段。按 index 归并，arguments 直接拼接。
+    const toolAcc = new Map();
     try {
       const cred = await this.ensureToken();
       let res = await this.post(body, this.buildHeaders({ token: cred.token, uid: cred.uid, model: useModel }), ctl.signal);
@@ -327,10 +340,28 @@ export class WorkBuddyCloudBackend {
           onDelta?.(chunk.content);
         }
         if (chunk.usage) usage = chunk.usage;
+        for (const tc of chunk.toolCalls || []) {
+          const index = Number.isInteger(tc?.index) ? tc.index : toolAcc.size;
+          const cur = toolAcc.get(index) || { id: '', type: 'function', function: { name: '', arguments: '' } };
+          if (tc.id) cur.id = tc.id;
+          if (tc.type) cur.type = tc.type;
+          if (tc.function?.name) cur.function.name += tc.function.name;
+          if (tc.function?.arguments) cur.function.arguments += tc.function.arguments;
+          toolAcc.set(index, cur);
+        }
       });
       last = parsed;
+      const toolCalls = [...toolAcc.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([, c]) => ({
+          id: c.id || `call_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+          type: c.type || 'function',
+          function: { name: c.function.name, arguments: c.function.arguments || '{}' },
+        }))
+        .filter((c) => c.function.name);
       return {
         text,
+        toolCalls: toolCalls.length ? toolCalls : null,
         usage: usage || null,
         sessionId: null,
         costUsd: null,
@@ -432,6 +463,7 @@ export class WorkBuddyCloudBackend {
         onChunk({
           content: typeof delta.content === 'string' ? delta.content : '',
           reasoning: typeof delta.reasoning_content === 'string' ? delta.reasoning_content : '',
+          toolCalls: Array.isArray(delta.tool_calls) ? delta.tool_calls : null,
           usage: obj.usage || null,
         });
       }

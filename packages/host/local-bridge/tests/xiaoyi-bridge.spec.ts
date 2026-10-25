@@ -171,4 +171,41 @@ describe('buildPrompt', () => {
     expect(buildPrompt([{ role: 'system', content: '只有系统提示' }])).toBe('')
     expect(buildPrompt([{ role: 'assistant', content: '只有助手回话' }])).toBe('')
   })
+
+  it('replays the tool turns that follow the current question', () => {
+    const prompt = buildPrompt([
+      { role: 'user', content: '读一下 package.json' },
+      { role: 'assistant', content: '', tool_calls: [
+        { id: 'call_1', type: 'function', function: { name: 'read', arguments: '{"path":"package.json"}' } },
+      ] },
+      { role: 'tool', tool_call_id: 'call_1', content: '{"name":"deepseek-harness"}' },
+    ])
+    // agent 多轮要接上：小艺必须看见上一轮要了什么工具、工具返回了什么。
+    expect(prompt).toContain('读一下 package.json')
+    expect(prompt).toContain('read(')
+    expect(prompt).toContain('【外部执行结果 call_1 开始】')
+    expect(prompt).toContain('deepseek-harness')
+  })
+
+  it('drops the harness noise that follows the question but keeps the tool turns', () => {
+    const prompt = buildPrompt([
+      { role: 'user', content: '真实问题' },
+      { role: 'user', content: '<system-reminder>\nworkspace instructions' },
+      { role: 'assistant', content: '', tool_calls: [
+        { id: 'call_1', type: 'function', function: { name: 'read', arguments: '{}' } },
+      ] },
+      { role: 'tool', tool_call_id: 'call_1', content: '结果' },
+    ])
+    expect(prompt).not.toContain('system-reminder')
+    expect(prompt).toContain('【外部执行结果 call_1 开始】')
+  })
+
+  it('truncates an oversized tool result so the prompt stays within the ceiling', () => {
+    const prompt = buildPrompt([
+      { role: 'user', content: '读文件' },
+      { role: 'tool', tool_call_id: 'call_1', content: 'x'.repeat(5000) },
+    ])
+    expect(prompt.length).toBeLessThanOrEqual(4000)
+    expect(prompt).toContain('…')
+  })
 })

@@ -124,3 +124,45 @@ describe('WorkBuddyCloudBackend.consumeSse', () => {
     expect(reasoning).toBe('想…')
   })
 })
+
+describe('WorkBuddyCloudBackend.complete with native tools', () => {
+  /** 装一个假的云端：只回放给定的 SSE 帧，并记录发出去的请求体。 */
+  function fakeCloud(sse: string) {
+    const b = new WorkBuddyCloudBackend({})
+    b.ensureToken = async () => ({ ok: true, token: 'T', uid: 'U', expiresAt: 0 })
+    const sent: Record<string, unknown>[] = []
+    b.post = async (body: unknown) => {
+      sent.push(body as Record<string, unknown>)
+      return new Response(new Blob([sse]).stream())
+    }
+    return { b, sent }
+  }
+
+  it('sends the tools through and returns the native tool_calls', async () => {
+    const sse = [
+      'data: {"choices":[{"delta":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":""},"index":0}]}}]}',
+      'data: {"choices":[{"delta":{"tool_calls":[{"function":{"name":"","arguments":"{\\"path\\":"},"index":0}]}}]}',
+      'data: {"choices":[{"delta":{"tool_calls":[{"function":{"name":"","arguments":"\\"a\\"}"},"index":0}]}}]}',
+      'data: [DONE]',
+    ].join('\n\n')
+    const { b, sent } = fakeCloud(sse)
+    const tools = [{ type: 'function', function: { name: 'read', description: 'd', parameters: {} } }]
+    const out = await b.complete({
+      messages: [{ role: 'user', content: 'x' }],
+      tools,
+      model: 'm',
+    })
+    // 请求体必须带 tools —— 云端靠它走原生 function calling。
+    expect(sent[0]?.tools).toEqual(tools)
+    expect(out.toolCalls).toEqual([
+      { id: 'call_1', type: 'function', function: { name: 'read', arguments: '{"path":"a"}' } },
+    ])
+  })
+
+  it('omits tools when the caller passes none, so the text protocol stays in charge', async () => {
+    const { b, sent } = fakeCloud('data: [DONE]\n\n')
+    const out = await b.complete({ messages: [{ role: 'user', content: 'x' }], model: 'm' })
+    expect(sent[0]?.tools).toBeUndefined()
+    expect(out.toolCalls).toBeNull()
+  })
+})
