@@ -1,7 +1,7 @@
 /** Build one release target with matching Electron and dsh architecture. */
 
 import { spawn } from 'node:child_process'
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { parseArgs } from 'node:util'
 import { join, resolve } from 'node:path'
 import {
@@ -281,6 +281,49 @@ export function desktopElectronBuilderArguments(
   ]
 }
 
+/**
+ * Clear the previous electron-builder output directory.
+ *
+ * electron-builder copies the Electron distribution into that directory and
+ * then replaces the `resources/app.asar` the previous run left there. That
+ * file can still be held: packaging from inside MiniMax Code leaks the
+ * bundled Electron's handle on `resources/default_app.asar` into the host
+ * process, and the same tree then holds the previous output as well. The
+ * recursive delete fails, and electron-builder reports a bare `EBUSY` stack.
+ * Clearing first turns that into a message naming what is held and what to
+ * do about it.
+ *
+ * @param outputRoot - the electron-builder output directory for this run.
+ * @param target - the validated release target.
+ */
+export function clearPreviousElectronOutput(outputRoot: string, target: DesktopPackageTarget): void {
+  const appOutDir = join(outputRoot, target.platform === 'darwin'
+    ? (target.arch === 'arm64' ? 'mac-arm64' : 'mac')
+    : 'win-unpacked')
+  if (!existsSync(appOutDir)) return
+  try {
+    rmSync(appOutDir, { recursive: true, force: true })
+    return
+  } catch {
+    // One held entry fails the whole recursive delete; clear the rest one by one.
+  }
+  const held: string[] = []
+  for (const entry of readdirSync(appOutDir, { withFileTypes: true })) {
+    try {
+      rmSync(join(appOutDir, entry.name), { recursive: true, force: true })
+    } catch {
+      held.push(join(appOutDir, entry.name))
+    }
+  }
+  if (held.length === 0) return
+  throw new Error(
+    `desktop package: 上一次的输出目录还有 ${held.length} 项删不掉,它们被一个还在运行的进程占着:\n`
+    + `  ${held.join('\n  ')}\n`
+    + '关掉占用它的程序再重试。在 MiniMax Code 里打包时,捆绑 electron 的文件句柄会泄漏到宿主进程,'
+    + '所以要么在独立终端里运行打包,要么先重启宿主再重试。',
+  )
+}
+
 function runPnpm(
   args: readonly string[],
   env: NodeJS.ProcessEnv = process.env,
@@ -473,6 +516,12 @@ export async function packageTarget(
   await execute(['run', 'prepare:dsh', ...(signPrimaryRuntime ? ['--defer-runtime-smoke'] : [])], downloadEnv)
   if (signPrimaryRuntime) await execute(['run', 'sign:primary-runtime', '--dsh'], electronBuilderEnv)
   if (invocation.prepareOnly) return
+  // electron-builder replaces the `resources/app.asar` the previous run left
+  // in its output directory, so that directory has to be clear before it runs.
+  clearPreviousElectronOutput(
+    invocation.unsigned ? buildPaths.unsignedArtifacts : buildPaths.artifacts,
+    target,
+  )
   if (target.platform === 'darwin' && !invocation.directory) {
     await execute([
       ...desktopElectronBuilderArguments(target, true),
