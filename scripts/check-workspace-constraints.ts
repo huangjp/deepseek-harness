@@ -225,6 +225,11 @@ const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
     'bridge/token-harvester.py',
     'bridge/chat_template.json',
     'bridge/preflight.mjs',
+    // 小艺反代：同样是零依赖纯 ESM + 一个由外部 python 进程读取的收割脚本。
+    'bridge/xiaoyi-bridge.mjs',
+    'bridge/xiaoyi.config.json',
+    'bridge/xiaoyi-harvest.py',
+    'bridge/xiaoyi-protocol-notes.md',
   ],
   '@deepseek-ai/dsh-skill-badge': ['assets'],
   '@deepseek-ai/dsh-skill-office': ['assets'],

@@ -41,6 +41,10 @@
     "bridge/token-harvester.py",
     "bridge/chat_template.json",
     "bridge/preflight.mjs",
+    "bridge/xiaoyi-bridge.mjs",
+    "bridge/xiaoyi.config.json",
+    "bridge/xiaoyi-harvest.py",
+    "bridge/xiaoyi-protocol-notes.md",
     "lib/types/**/*.js",
     "lib/types/**/*.d.ts"
   ],

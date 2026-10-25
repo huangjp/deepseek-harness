@@ -154,6 +154,12 @@ interface BootOptions {
   workbuddy: number
   /** Copilot relay port, or undefined to leave the Copilot relay disabled. */
   copilot?: number
+  /** Celia relay port, or undefined to leave the Celia relay disabled. */
+  xiaoyi?: number
+  /** Interpreter the Celia harvester runs under; absent leaves the relay to detect one. */
+  xiaoyiPython?: string
+  /** Credential cache the Celia relay reads; absent leaves the relay to pick one. */
+  xiaoyiCacheFile?: string
   /** Copilot harvest directory; absent writes an empty one into the config. */
   harvestDir?: string
   /** Module namespace to serve; absent loads the shipped `bridge/preflight.mjs`. */
@@ -186,6 +192,15 @@ async function boot(options: BootOptions): Promise<string> {
       `      port: ${String(options.copilot)}`,
       `      harvestDir: '${options.harvestDir ?? ''}'`,
     ]
+  const xiaoyi = options.xiaoyi === undefined
+    ? ['    xiaoyi:', '      enabled: false', '      port: 8123']
+    : [
+      '    xiaoyi:',
+      '      enabled: true',
+      `      port: ${String(options.xiaoyi)}`,
+      ...(options.xiaoyiPython === undefined ? [] : [`      python: '${options.xiaoyiPython}'`]),
+      ...(options.xiaoyiCacheFile === undefined ? [] : [`      cacheFile: '${options.xiaoyiCacheFile}'`]),
+    ]
   await writeFile(configPath, [
     "- name: '@deepseek-ai/dsh-host-webserver'",
     '  config:',
@@ -199,6 +214,7 @@ async function boot(options: BootOptions): Promise<string> {
     '    backend: serve',
     `    cacheDir: '${join(root, 'cache')}'`,
     ...copilot,
+    ...xiaoyi,
     '    deps:',
     '      autoStart: false',
     `      autoRefreshToken: ${options.autoRefresh === true ? 'true' : 'false'}`,
@@ -283,6 +299,33 @@ describe('local-bridge relay lifecycle', () => {
     await boot({ workbuddy: await freePort(), module: preflightModule(), logs })
     await expect.poll(() => logs.join('\n'), { timeout: 15_000 }).toContain('WorkBuddy 模型反代 已监听')
     expect(logs.join('\n')).not.toContain('Microsoft Copilot 反代 已监听')
+  })
+
+  it('starts the Celia relay when the composition enables it', async () => {
+    const logs: string[] = []
+    const xiaoyi = await freePort()
+    await boot({ workbuddy: await freePort(), xiaoyi, module: preflightModule(), logs })
+    // The Celia relay binds without harvesting: the cookie is read from the
+    // companion application's memory on the first request, not at boot.
+    await expect.poll(() => listening(xiaoyi), { timeout: 15_000 }).toBe(true)
+    await expect.poll(() => logs.join('\n'), { timeout: 15_000 }).toContain('小艺反代 已监听')
+  })
+
+  it('hands the Celia relay the interpreter and cache file the composition names', async () => {
+    const xiaoyi = await freePort()
+    const cacheFile = join(tmpdir(), 'dsh-local-bridge-celia-fixture', 'auth.json')
+    await boot({
+      workbuddy: await freePort(),
+      xiaoyi,
+      xiaoyiPython: 'C:/Python313/python.exe',
+      xiaoyiCacheFile: cacheFile,
+      module: preflightModule(),
+    })
+    // The overrides are resolved while the composition builds the relay's
+    // configuration, so naming the interpreter and the cache file is what puts
+    // those branches on the taken side. The relay still binds: a cache file
+    // that does not exist yet only means the first request harvests.
+    await expect.poll(() => listening(xiaoyi), { timeout: 15_000 }).toBe(true)
   })
 
   it('summarizes the deployment files the preflight wrote', async () => {

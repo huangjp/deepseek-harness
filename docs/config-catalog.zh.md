@@ -1425,7 +1425,7 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-host-local-bridge`
 
-- `source`: [`packages/host/local-bridge/src/index.ts:74`](../packages/host/local-bridge/src/index.ts)
+- `source`: [`packages/host/local-bridge/src/index.ts:76`](../packages/host/local-bridge/src/index.ts)
 
 ```ts config-catalog
 /** Plugin config. */
@@ -1449,14 +1449,31 @@ export interface Config {
     /** 令牌/模板收割目录；留空则用 `%USERPROFILE%\copilot-probe`。 */
     harvestDir: string
   }
+  /** 华为「AI空间」小艺反代。 */
+  xiaoyi: {
+    /** 是否启动小艺反代（需 AI空间 开着对话页，否则只监听、调用会报 no_cookies）。 */
+    enabled: boolean
+    /** 小艺反代端口。 */
+    port: number
+    /** 运行 `xiaoyi-harvest.py` 的解释器；留空则自动在 LOCALAPPDATA\Programs\Python 与 PATH 里找。 */
+    python: string
+    /** 凭证缓存文件；留空则用 `%LOCALAPPDATA%\xiaoyi-bridge\auth.json`。 */
+    cacheFile: string
+  }
   /** 配套依赖（WorkBuddy AI / Microsoft Copilot）的自愈开关。 */
   deps: {
     /** 装了但没在跑时，是否自动把它们拉起来。 */
     autoStart: boolean
     /**
-     * Copilot 令牌陈旧且前置条件齐备时，是否在**启动时**自动触发 `refresh-token.ps1`。
-     * 注意：该脚本会**临时切换系统代理**（约 1 分钟，`finally` 里还原），
-     * 并用 UI 自动化让 Copilot 建一次连接 —— 介意的话把它关掉。
+     * 令牌陈旧且前置条件齐备时，是否在**启动时**自动触发 `refresh-token.ps1`（默认关）。
+     *
+     * 这个开关默认 false。脚本的做法是**直接改写系统代理注册表**（`ProxyEnable` /
+     * `ProxyServer`）指向拦截代理约一分钟，再还原快照 —— 它绕开了用户自己的代理客户端，
+     * 所以那一分钟里整台机器的出境流量都压到拦截代理上，而拦截代理只放行微软的域名。
+     * 更麻烦的是它会让代理客户端"系统代理归谁管"的状态错位：实测把 FlClash 的内核弄停了，
+     * 系统代理仍指着已经没人监听的端口，于是所有节点全部 Timeout。
+     *
+     * 要刷新请用设置页的「刷新令牌」按钮 —— 那是用户主动发起、看得见结果的。
      */
     autoRefreshToken: boolean
     /**

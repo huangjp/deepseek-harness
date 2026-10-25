@@ -1,5 +1,5 @@
 ---
-description: "dsh web 客户端的「本地模型服务」设置页：两个内置反代的监听状态、Copilot 令牌年龄、刷新前置条件，以及手动刷新令牌。"
+description: "dsh web 客户端的「本地模型服务」设置页：内置反代的监听状态、Copilot 令牌年龄、小艺会话凭据年龄、刷新前置条件，以及手动刷新令牌。"
 kind: "package-reference"
 ---
 
@@ -7,46 +7,47 @@ kind: "package-reference"
 
 [English](README.md) | 中文
 
-## Summary
+## 概述
 
 `@deepseek-ai/dsh-client-ui-settings-local-bridge` 是 dsh web 客户端的「本地模型服务」页。它读取 `@deepseek-ai/dsh-host-local-bridge` 提供的三条路由，展示两个内置反代：各自是否在监听、背后的桌面应用是否在运行、收割到的 Copilot 访问令牌有多旧，以及一次刷新还差哪些条件。一个需确认的动作会请求宿主刷新该令牌，页面随后持续报告这次尝试的进度，直到出现更新的令牌，并在下方显示这次尝试写下的转录。本页不写任何设置命名空间。
 
-## Table of Contents
+## 目录
 
-- [Use this package](#use-this-package)
-- [Understand the implementation](#understand-the-implementation)
-- [Further Exploration](#further-exploration)
-- [Model Experience](#model-experience)
-- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+- [使用本包](#use-this-package)
+- [理解实现](#understand-the-implementation)
+- [进一步探索](#further-exploration)
+- [模型体验](#model-experience)
+- [已知限制与延期工作](#known-limitations-and-deferred-work)
 
 -----
 
 <a id="use-this-package"></a>
-## Use this package
+## 使用本包
 
 在同时挂载了 `@deepseek-ai/dsh-host-local-bridge` 的组合里挂载本插件；桌面端的 `web-app` bundle 两个都挂。本页注册一个 `settings.section` 条目，排在「模型」页之后 —— 它报告的路由正是那一页列出的路由。
 
 本页对机器只读，其状态留在各自属主处：这里不写任何设置命名空间，所有事实都由宿主回答。
 
-### What the page shows
+### 页面展示的内容
 
 | Area | Reads |
 |---|---|
-| Each relay | Its loopback port, whether a connect succeeds, and whether the application behind it is running, installed-but-stopped, or absent |
+| Each relay | Its loopback port, whether a connect succeeds, and — for the two relays with a desktop application behind them — whether that application is running, installed-but-stopped, or absent |
 | The Copilot token | When it was harvested, that age in the active language, and whether it is past the platform's one-hour lifetime |
+| The Celia session cookie | Whether it was harvested, that age in the active language, and which cookie names the harvest did not produce |
 | Refresh requirements | Four checks — the interception proxy, the harvest script, the upstream proxy, and the interception certificate — each with its remedy while unmet |
 | The refresh action | One confirmed gesture, its progress while the host harvests, and its outcome once the token lands |
 | The refresh log | Both transcripts the last attempt wrote, each under its own heading and path, with one action that copies them together |
 
 只有在宿主会接受时才提供该动作：Windows 上、Copilot 应用在运行、全部前置条件满足、且没有已在进行的尝试。宿主仍然返回的拒绝，会连它给出的原因一起报告。
 
-### Reading the refresh log
+### 读取刷新日志
 
 没有产出令牌的刷新，原因只留在转录里 —— 脚本自己那份记录，或者进程压根没起来时 PowerShell 那一路的痕迹 —— 所以本页把它们显示在用户已经在的地方，而不是给一个路径让用户自己去读。只要一次尝试失败或被拒绝，这段折叠内容就自动展开，其余时候保持收起；内容为空的转录不会显示，被宿主截断的则会说明。
 
 复制会把两份转录一起放上剪贴板，每一份前面带上它来自的绝对路径，这样粘贴出来的日志能自己说明是哪几个文件。浏览器拒绝复制时会如实报告，而不是当作成功。
 
-### Refusals
+### 拒绝原因
 
 宿主用固定代码回答刷新请求，句子由本页挑选。没有代码的拒绝与该约定相悖，按「进程没能启动」处理。
 
@@ -60,7 +61,7 @@ kind: "package-reference"
 | `spawn-failed` | The refresh process could not start |
 
 <a id="understand-the-implementation"></a>
-## Understand the implementation
+## 理解实现
 
 两个决策是承重的：
 
@@ -70,14 +71,14 @@ kind: "package-reference"
 两个存储都不做合并：后一次读取会取代仍在飞行中的前一次，因此慢的应答不会覆盖更新的快照；销毁时轮询与发布同时停止。转录单独占一个存储，因为不断增长日志不该让反代事实跟着重渲染。
 
 <a id="further-exploration"></a>
-## Further Exploration
+## 进一步探索
 
 - [`dsh-host-local-bridge`](../../host/local-bridge/README.zh.md) —— 启动反代并提供这些路由的宿主插件。
 - [`dsh-client-ui-settings`](../ui-settings/README.zh.md) —— 本页所占 `settings.section` 座位所属的设置域基座。
 - [`dsh-client-ui-settings-models`](../ui-settings-models/README.zh.md) —— 导航中位于本页之前的页面，列出这些反代所服务的路由。
 
 <a id="model-experience"></a>
-## Model Experience
+## 模型体验
 
 None, as the package is a browser-side settings page that reads relay status; it registers nothing model-facing.
 
@@ -85,7 +86,7 @@ None, as the package is a browser-side settings page that reads relay status; it
 
 None; this package neither assembles nor sends a provider request.
 
-## Known Limitations and Deferred Work
+## 已知限制与延期工作 <a id="known-limitations-and-deferred-work"></a>
 
 - **本页实际上只在 Windows 上有意义。** 两个反代与刷新链路都以 Windows 为前提；在其他平台上本页会直接说明，并收起那个动作，而不是提供一个必然被拒绝的控件。
 - **刷新无法取消，也无法等待。** 宿主启动的是分离进程，所以本页只能报告「已启动」然后观察；离开设置页并不会让它停下。
@@ -93,6 +94,6 @@ None; this package neither assembles nor sends a provider request.
 - **刷新锁比这次尝试活得更久。** 提示在令牌推进时清除，所以失败的尝试会被及时读成失败；在宿主锁窗口内再次操作会以 busy 被拒绝，而不是排队。
 - **除转录之外没有进度。** 宿主给出的是每次尝试的原始输出，不是解析后的进度流，所以本页无法显示这次尝试走到了哪一步 —— 它显示的是脚本写下的内容。
 
-### Dev Note
+### 开发备注
 
 **Runtime invariant:** No companion is published. The package owns one store whose snapshots are derived from the host's route answers; its behavior is covered by the controller and component suites beside it.

@@ -66,7 +66,22 @@ function desktopRelease(): DesktopRelease {
   })
 }
 
-function runPnpm(args: readonly string[]): Promise<void> {
+/**
+ * Windows 把异常终止报成 NTSTATUS 退出码（≥ 0x80000000），正常退出码不会落在这个区间。
+ *
+ * 实测：pnpm 以 `electron.exe --expose-internals` 运行，偶尔在**打完 `Done in …` 之后**、
+ * 退出阶段崩溃，报 `PostQueuedCompletionStatus: (6) 句柄无效` 并返回 `0x80000003`
+ * （STATUS_BREAKPOINT）。pnpm 的活已经干完，崩溃发生在 Electron 的 Node 集成收尾时，
+ * 同一命令换个时机跑就正常 —— 属于间歇性问题，不是打包逻辑错。
+ * 这种退出码值得重试：pnpm 的 install 是幂等的，重跑只会补齐，不会重复安装。
+ */
+function isAbnormalExit(code: number): boolean {
+  return (code >>> 0) >= 0x80000000
+}
+
+const PNPM_ATTEMPTS = 3
+
+function runPnpmOnce(args: readonly string[]): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
   return new Promise((resolvePromise, reject) => {
     const [command, ...commandArgs] = args
     if (command === undefined) throw new Error('desktop runtime: pnpm command is required')
@@ -103,10 +118,25 @@ function runPnpm(args: readonly string[]): Promise<void> {
     })
     child.once('error', reject)
     child.once('close', (code, signal) => {
-      if (code === 0) resolvePromise()
-      else reject(new Error(`desktop runtime: pnpm exited with ${String(code ?? signal)}`))
+      resolvePromise({ code, signal })
     })
   })
+}
+
+async function runPnpm(args: readonly string[]): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    const { code, signal } = await runPnpmOnce(args)
+    if (code === 0) return
+    // 只在 Windows 的异常退出码上重试；普通的非零退出（依赖解析失败等）直接抛。
+    const abnormal = code !== null && process.platform === 'win32' && isAbnormalExit(code)
+    if (!abnormal || attempt >= PNPM_ATTEMPTS) {
+      throw new Error(`desktop runtime: pnpm exited with ${String(code ?? signal)}`)
+    }
+    console.warn(
+      `desktop runtime: pnpm 异常退出 0x${(code >>> 0).toString(16)}（Electron 作为 Node 时的退出阶段崩溃，`
+      + `已知间歇问题），第 ${attempt + 1}/${PNPM_ATTEMPTS} 次重试`,
+    )
+  }
 }
 
 async function main(): Promise<void> {

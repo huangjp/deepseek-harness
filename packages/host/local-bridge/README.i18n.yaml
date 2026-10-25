@@ -3,44 +3,44 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/host/local-bridge/README.md
 /:
-  en: 639a6cdb156731e0
-  zh: 4b7996cdf9512b04
+  en: e7dd755b45c17f34
+  zh: 96f523fa770c0e0d
 /deepseek-ai-dsh-host-local-bridge:
   en: 482c2d2ff97e7e16
   zh: 3ddd988124b9b7bf
 /deepseek-ai-dsh-host-local-bridge/summary:
-  en: fb072d0e4201a55c
-  zh: 372c340228eb08db
+  en: 69fff107927d2d44
+  zh: 9cb892e9d0d74ff3
 /deepseek-ai-dsh-host-local-bridge/table-of-contents:
   en: b563e4ec4727d0de
-  zh: b563e4ec4727d0de
+  zh: 44ebe7ceeda3dff6
 /deepseek-ai-dsh-host-local-bridge/use-this-package:
-  en: f447a095e48d1f46
-  zh: 2ab96c337ed3befe
+  en: 84e8cdce486e46d9
+  zh: 0e0aa4ab81a510f8
 /deepseek-ai-dsh-host-local-bridge/use-this-package/refreshing-while-the-app-runs:
   en: 40ace05a78b39df0
-  zh: 2ccc714202320630
+  zh: 1da6562c62de770f
 /deepseek-ai-dsh-host-local-bridge/use-this-package/the-settings-routes:
-  en: 73fead29a647af5d
-  zh: ae6d6092c2e1e60c
+  en: 0d8a38f111bd6961
+  zh: 3d6a55aa5f3310ee
 /deepseek-ai-dsh-host-local-bridge/understand-the-implementation:
   en: 9a8a61b501564940
-  zh: f3c476b4cb380aa8
+  zh: 04a009a3c6439142
 /deepseek-ai-dsh-host-local-bridge/understand-the-implementation/tool-calls-over-a-text-only-upstream:
   en: 392de49543c2c1b5
-  zh: ce0f72e13c82bf4c
+  zh: 956edc0f56f769ad
 /deepseek-ai-dsh-host-local-bridge/further-exploration:
   en: c260b247d1afe8e6
-  zh: 9873adf9af78617c
+  zh: 68a7863cea530044
 /deepseek-ai-dsh-host-local-bridge/model-experience:
   en: 1cfa8466d72ff69f
-  zh: 1cfa8466d72ff69f
+  zh: a7b51029b88fb067
 /deepseek-ai-dsh-host-local-bridge/model-experience/kv-cache-effect:
   en: ca75c51c89c2c9b0
   zh: ca75c51c89c2c9b0
 /deepseek-ai-dsh-host-local-bridge/known-limitations-and-deferred-work:
-  en: 0e7e349c07db477b
-  zh: c7f86e2d100874f6
+  en: 02468509c64491da
+  zh: 2fb616775161edf7
 /deepseek-ai-dsh-host-local-bridge/known-limitations-and-deferred-work/dev-note:
   en: 3f179b447b9d5c27
-  zh: 3f179b447b9d5c27
+  zh: ac43bf20e2ae7db5

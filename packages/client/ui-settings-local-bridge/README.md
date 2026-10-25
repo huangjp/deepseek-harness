@@ -1,5 +1,5 @@
 ---
-description: "The “Local model services” settings page of the dsh web client: both bundled relays' listeners, the Copilot token's age, the refresh requirements, and the manual token refresh."
+description: "The “Local model services” settings page of the dsh web client: the bundled relays' listeners, the Copilot token's age, the Celia session cookie's age, the refresh requirements, and the manual token refresh."
 kind: "package-reference"
 ---
 
@@ -32,8 +32,9 @@ The page is read-only about the machine and its state lives where its owner put 
 
 | Area | Reads |
 |---|---|
-| Each relay | Its loopback port, whether a connect succeeds, and whether the application behind it is running, installed-but-stopped, or absent |
+| Each relay | Its loopback port, whether a connect succeeds, and — for the two relays with a desktop application behind them — whether that application is running, installed-but-stopped, or absent |
 | The Copilot token | When it was harvested, that age in the active language, and whether it is past the platform's one-hour lifetime |
+| The Celia session cookie | Whether it was harvested, that age in the active language, and which cookie names the harvest did not produce |
 | Refresh requirements | Four checks — the interception proxy, the harvest script, the upstream proxy, and the interception certificate — each with its remedy while unmet |
 | The refresh action | One confirmed gesture, its progress while the host harvests, and its outcome once the token lands |
 | The refresh log | Both transcripts the last attempt wrote, each under its own heading and path, with one action that copies them together |

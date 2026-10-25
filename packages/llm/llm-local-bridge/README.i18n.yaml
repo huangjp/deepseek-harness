@@ -3,23 +3,23 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/llm/llm-local-bridge/README.md
 /:
-  en: 33e8cc27166d9f90
-  zh: 5639ce7ad3410cd0
+  en: 9f3577de72ca10ea
+  zh: f24a0dd418f251e6
 /deepseek-ai-dsh-llm-local-bridge:
   en: 94a4d57cd3c3ab63
   zh: d30ca75910ecfa9f
 /deepseek-ai-dsh-llm-local-bridge/summary:
-  en: c81f54519de38768
-  zh: 9882adf523f76364
+  en: c6fbb97c89d0b939
+  zh: b79bb46020f2e27c
 /deepseek-ai-dsh-llm-local-bridge/table-of-contents:
   en: b563e4ec4727d0de
-  zh: c3fb1f227529c67d
+  zh: bf4a4164c22c8300
 /deepseek-ai-dsh-llm-local-bridge/use-this-package:
-  en: 3eec6a9f30a4225e
-  zh: 1961e867053e2750
+  en: 95baaff67a72f22e
+  zh: 6f98b4728500706c
 /deepseek-ai-dsh-llm-local-bridge/understand-the-implementation:
-  en: 228b5fc48ec2596e
-  zh: 03dd6059c8175ad4
+  en: 0a710f4d9bc2f574
+  zh: 9199e37cb578506c
 /deepseek-ai-dsh-llm-local-bridge/further-exploration:
   en: fb15b687d4f67821
   zh: 32eae3f464cdf456
@@ -39,8 +39,8 @@
   en: bdb11d4fa3235a9b
   zh: 489a3e3ed554dac1
 /deepseek-ai-dsh-llm-local-bridge/known-limitations-and-deferred-work:
-  en: 135a63f547ab123b
-  zh: 5b155cd2f0353211
+  en: e786a1e4ed7a5d00
+  zh: 0afc313472368122
 /deepseek-ai-dsh-llm-local-bridge/known-limitations-and-deferred-work/dev-note:
   en: 0725f3dc323fc4ea
-  zh: 27c734ce365247b5
+  zh: 042299cae1af30bd

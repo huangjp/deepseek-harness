@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-llm-local-bridge",
-  "description": "Built-in local-bridge LLM providers (WorkBuddy relay 127.0.0.1:8787, Copilot relay 127.0.0.1:8899) registered as fixed, non-deletable routes on the LLM seam.",
+  "description": "Built-in local-bridge LLM providers (WorkBuddy relay 127.0.0.1:8787, Copilot relay 127.0.0.1:8899, Huawei Celia relay 127.0.0.1:8123) registered as fixed, non-deletable routes on the LLM seam.",
   "version": "0.2.0-rc.1",
   "publishConfig": {
     "access": "public"

@@ -1,5 +1,5 @@
 ---
-description: "The host plugin that starts the two locally bundled model relays and serves the status and token-refresh routes the settings page reads."
+description: "The host plugin that starts the three locally bundled model relays and serves the status and token-refresh routes the settings page reads."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@deepseek-ai/dsh-host-local-bridge` starts the two model relays bundled with the desktop installer as independent loopback listeners: the WorkBuddy relay on `127.0.0.1:8787` and the Microsoft Copilot relay on `127.0.0.1:8899`. Before either listens it runs a dependency preflight that starts the desktop applications behind them, deploys the harvest files, imports the interception certificate, and refreshes a stale Copilot access token. The same plugin serves the routes the “Local model services” settings page reads: one status snapshot of both relays, the trigger for a Copilot token refresh, and the tails of the transcripts that refresh writes.
+`@deepseek-ai/dsh-host-local-bridge` starts the three model relays bundled with the desktop installer as independent loopback listeners: the WorkBuddy relay on `127.0.0.1:8787`, the Microsoft Copilot relay on `127.0.0.1:8899`, and the Huawei Celia relay on `127.0.0.1:8123`. Before any of them listens it runs a dependency preflight that starts the desktop applications behind them, deploys the harvest files, imports the interception certificate, and refreshes a stale Copilot access token. The same plugin serves the routes the “Local model services” settings page reads: one status snapshot of the relays, the trigger for a Copilot token refresh, and the tails of the transcripts that refresh writes.
 
 ## Table of Contents
 
@@ -36,8 +36,12 @@ Mount this plugin in a composition that ships the bundled relays; the desktop ap
 | `copilot.enabled` | `true` | Start the Copilot relay |
 | `copilot.port` | `8899` | Copilot relay port |
 | `copilot.harvestDir` | `%USERPROFILE%\copilot-probe` | Harvested token, request template, and refresh transcripts |
+| `xiaoyi.enabled` | `false` | Start the Huawei Celia relay. Off by default: it needs the Huawei “AI Space” app running with its chat page open |
+| `xiaoyi.port` | `8123` | Celia relay port |
+| `xiaoyi.python` | auto-detected | Interpreter used to run `bridge/xiaoyi-harvest.py`; empty means look under `%LOCALAPPDATA%\Programs\Python` and on `PATH` |
+| `xiaoyi.cacheFile` | `%LOCALAPPDATA%\xiaoyi-bridge\auth.json` | Cached Celia cookies, refreshed automatically when the upstream rejects them |
 | `deps.autoStart` | `true` | Start a companion application that is installed but not running |
-| `deps.autoRefreshToken` | `true` | Refresh the token at boot when it is stale |
+| `deps.autoRefreshToken` | `false` | Refresh the token at boot when it is stale. Off by default: the script writes the machine's system-proxy registry keys for about a minute, behind the proxy client's back, which desynchronizes the client's idea of who owns the system proxy |
 | `deps.autoRefreshWhileRunning` | `false` | Let the relay replace a stale token during use. Off by default: one refresh redirects the whole machine's system proxy at the interception proxy for about a minute, so any other outbound traffic — including the other relay — fails while it runs |
 | `deps.bootstrap` | `true` | Copy the shipped harvest files into the harvest directory at boot |
 | `deps.autoInstallCa` | `true` | Import the interception certificate when it is not trusted yet |
@@ -62,7 +66,7 @@ Every route answers only under the composition's connection trust fence, and eac
 
 | Route | Method | Answer |
 |---|---|---|
-| `/local-bridge/status` | `GET` | One snapshot: both relays' listeners and companion applications, the Copilot token's age, the unmet refresh prerequisites, and whether an attempt holds the refresh lock |
+| `/local-bridge/status` | `GET` | One snapshot: the three relays' listeners, the WorkBuddy and Copilot companion applications, the Copilot token's age, the Celia session cookie's age, the unmet refresh prerequisites, and whether an attempt holds the refresh lock |
 | `/local-bridge/refresh` | `POST` | Whether a refresh process started, and a refusal code when it did not |
 | `/local-bridge/log` | `GET` | The tails of both transcripts the last attempt wrote, each with its absolute path and whether the file holds more |
 
@@ -116,7 +120,7 @@ None; this package neither assembles nor sends a provider request.
 - **The whole refresh chain is Windows-only.** The probes, the script, the UI automation, and the certificate import all assume Windows; the routes report `process.platform` so the page can say so rather than failing obscurely.
 - **The interception ports are fixed.** `bridge/refresh-token.ps1` listens on `8082` and tunnels through `127.0.0.1:7890` — the mixed port of the proxy client it ships against — and neither is configurable, because the control plane probes the same ports the script uses and a value that moved only one of them would report a checkout as ready when the chain cannot run.
 - **A refresh is not awaited by the trigger.** The host starts a detached process and reports only that it started. The caller that needs the result — the relay, before serving a request — reads it back by polling the harvested token's timestamp, bounded by a deadline; progress the settings page shows comes from the lock file and that same timestamp.
-- **`deps.autoRefreshToken` is on by default and its side effects are not silent.** It changes the system proxy for about a minute, and drives the Copilot window to send one message; the certificate import shows one Windows security prompt that cannot be suppressed.
+- **Token refresh owns the machine's system proxy while it runs, so it is opt-in.** `refresh-token.ps1` writes the `ProxyEnable`/`ProxyServer` registry keys directly, which takes the setting away from whichever proxy client normally manages it; a client that then re-asserts or shuts its core down leaves the system proxy pointing at nothing and every node timing out. Both `deps.autoRefreshToken` and `deps.autoRefreshWhileRunning` therefore default to off, and the settings page button is how a refresh is normally run. Enabling either one also drives the Copilot window to send one message.
 - **The relays are not probed for readiness.** A listener that binds proves nothing about the application behind it; the first request is what discovers an unauthenticated upstream.
 - **Tool calls depend on recognising what the model emitted.** The bridge renders a tool list and accepts three shapes back: the `bridge_tool_calls` JSON it asks for, repairable variants of it, and the model's own DSML marker family. A model that invents a fourth shape produces prose instead of a call. Tool calls also arrive whole rather than as streamed fragments, because the payload has to be seen before it can be parsed.
 

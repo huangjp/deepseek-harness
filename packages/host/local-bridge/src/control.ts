@@ -17,6 +17,7 @@ import { join } from 'node:path'
 import net from 'node:net'
 import type {
   LocalBridgeAppStatus,
+  LocalBridgeCookieStatus,
   LocalBridgeCopilotStatus,
   LocalBridgeLogPayload,
   LocalBridgePrerequisite,
@@ -90,6 +91,8 @@ export interface LocalBridgeControlOptions {
   readonly workbuddyPort: number
   /** Copilot relay port. */
   readonly copilotPort: number
+  /** Huawei Celia relay port. */
+  readonly xiaoyiPort: number
   /** Receives the operator prose preflight returns, which the wire never carries. */
   readonly log: (message: string) => void
 }
@@ -177,6 +180,60 @@ async function relayStatus(port: number): Promise<LocalBridgeStatusPayload['work
   return { port, listening: await probePort(port) }
 }
 
+/**
+ * Loopback deadline for reading one relay's own health response. The target is
+ * on 127.0.0.1 and answers in microseconds, so the deadline only keeps a
+ * stalled relay from holding the status read open.
+ */
+const RELAY_HEALTH_TIMEOUT_MS = 2000
+
+/** The cookie facts of a Celia relay that did not answer. */
+const ABSENT_COOKIE: LocalBridgeCookieStatus = {
+  present: false,
+  harvestedAt: null,
+  ageSec: null,
+  missing: [],
+}
+
+/**
+ * The Celia relay's credential facts, as its own health response reports them.
+ *
+ * The relay owns the credential cache, so the control plane asks the relay
+ * instead of reading that cache file itself: a second reader would have to
+ * know the file's path and shape, and would drift from the relay writing it.
+ *
+ * @param port - the Celia relay's loopback port.
+ * @returns the cookie facts, or the absent facts when the relay did not answer.
+ */
+async function readXiaoyiCookie(port: number): Promise<LocalBridgeCookieStatus> {
+  const ctl = new AbortController()
+  const timer = setTimeout(() => { ctl.abort() }, RELAY_HEALTH_TIMEOUT_MS)
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/health`, { signal: ctl.signal })
+    if (!res.ok) return ABSENT_COOKIE
+    const body: unknown = await res.json()
+    if (typeof body !== 'object' || body === null) return ABSENT_COOKIE
+    const record = body as Record<string, unknown>
+    const savedAt = record['savedAt']
+    const ageHours = record['ageHours']
+    const missing = record['missing']
+    return {
+      present: record['token'] === 'cached',
+      harvestedAt: typeof savedAt === 'number' ? savedAt : null,
+      ageSec: typeof ageHours === 'number' ? Math.round(ageHours * 3600) : null,
+      missing: Array.isArray(missing)
+        ? missing.filter((name): name is string => typeof name === 'string')
+        : [],
+    }
+  } catch {
+    // The relay did not answer. Its listener probe already reports that, and
+    // this status says the same thing about the cookie.
+    return ABSENT_COOKIE
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /** Normalize one detection result, whose absence reads as unavailable. */
 function appStatus(facts: { installed: boolean; running: boolean } | undefined): LocalBridgeAppStatus {
   return { installed: facts?.installed ?? false, running: facts?.running ?? false }
@@ -248,11 +305,15 @@ export function createLocalBridgeControl(options: LocalBridgeControlOptions): Lo
         module.detectAllApps(),
         module.detectCa(),
       ])
-      const [workbuddyRelay, copilotRelay, refreshStartedAt] = await Promise.all([
+      const [workbuddyRelay, copilotRelay, xiaoyiRelay, refreshStartedAt] = await Promise.all([
         relayStatus(options.workbuddyPort),
         relayStatus(options.copilotPort),
+        relayStatus(options.xiaoyiPort),
         heldRefreshStamp(module.refreshLockMs),
       ])
+      const xiaoyiCookie = xiaoyiRelay.listening
+        ? await readXiaoyiCookie(options.xiaoyiPort)
+        : ABSENT_COOKIE
       const copilot: LocalBridgeCopilotStatus = {
         relay: copilotRelay,
         app: appStatus(apps['copilot']),
@@ -264,6 +325,7 @@ export function createLocalBridgeControl(options: LocalBridgeControlOptions): Lo
         platform: process.platform,
         workbuddy: { relay: workbuddyRelay, app: appStatus(apps['workbuddy']) },
         copilot,
+        xiaoyi: { relay: xiaoyiRelay, cookie: xiaoyiCookie },
         checkedAt: Date.now(),
         refreshStartedAt,
       }

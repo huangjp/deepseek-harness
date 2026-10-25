@@ -108,7 +108,34 @@ export interface LocalBridgeWorkBuddyStatus {
   readonly app: LocalBridgeAppStatus
 }
 
-/** One status snapshot of both bundled relays. */
+/**
+ * The harvested Celia session cookie's state.
+ *
+ * Unlike the Copilot access token, this cookie has no published lifetime: it
+ * is a session credential read out of the running application's memory, so it
+ * stops working when that application signs out or closes. The page therefore
+ * reports its age without claiming whether it is still valid.
+ */
+export interface LocalBridgeCookieStatus {
+  /** A harvested cookie is cached. */
+  readonly present: boolean
+  /** Harvest time in epoch milliseconds; null without a cookie. */
+  readonly harvestedAt: number | null
+  /** Age in seconds; null without a cookie. */
+  readonly ageSec: number | null
+  /** Cookie names the harvest did not produce; empty when every one is present. */
+  readonly missing: readonly string[]
+}
+
+/** Huawei Celia relay facts: listener and the harvested session cookie. */
+export interface LocalBridgeXiaoyiStatus {
+  /** The Celia relay's listener. */
+  readonly relay: LocalBridgeRelayStatus
+  /** The harvested session cookie behind it. */
+  readonly cookie: LocalBridgeCookieStatus
+}
+
+/** One status snapshot of the bundled relays. */
 export interface LocalBridgeStatusPayload {
   /** `process.platform` of the host, so the page gates Windows-only actions. */
   readonly platform: string
@@ -116,6 +143,8 @@ export interface LocalBridgeStatusPayload {
   readonly workbuddy: LocalBridgeWorkBuddyStatus
   /** The Copilot relay. */
   readonly copilot: LocalBridgeCopilotStatus
+  /** The Huawei Celia relay. */
+  readonly xiaoyi: LocalBridgeXiaoyiStatus
   /** Epoch milliseconds this snapshot was read. */
   readonly checkedAt: number
   /**

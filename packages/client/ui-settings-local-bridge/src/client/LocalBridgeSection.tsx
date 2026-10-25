@@ -17,8 +17,8 @@ import {
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type {
-  LocalBridgeAppStatus, LocalBridgeCopilotStatus, LocalBridgeLogPayload, LocalBridgePrerequisite,
-  LocalBridgeRefreshPayload, LocalBridgeRefreshRefusal, LocalBridgeStatusPayload,
+  LocalBridgeAppStatus, LocalBridgeCookieStatus, LocalBridgeCopilotStatus, LocalBridgeLogPayload,
+  LocalBridgePrerequisite, LocalBridgeRefreshPayload, LocalBridgeRefreshRefusal, LocalBridgeStatusPayload,
 } from '@deepseek-ai/dsh-host-local-bridge/shared'
 import { refreshInFlight, type LocalBridgeLogState, type LocalBridgePageState } from './controller.ts'
 import type { LocalBridgeLocaleKey, LocalBridgeTranslate } from './locales.ts'
@@ -190,6 +190,7 @@ function Loaded({ usePage, useLog, load, refresh, t }: InjectFace<LocalBridgeSec
               <TokenRow status={status} t={t} />
               <Requirements copilot={status.copilot} t={t} />
             </RelayCard>
+            <XiaoyiCard xiaoyi={status.xiaoyi} checkedAt={status.checkedAt} t={t} />
           </div>
         )}
 
@@ -281,10 +282,10 @@ function RelayCard({ title, t, port, listening, app, children }: {
   t: LocalBridgeTranslate
   port: number
   listening: boolean
-  app: LocalBridgeAppStatus
+  app?: LocalBridgeAppStatus
   children?: ReactNode
 }): ReactNode {
-  const application = appState(app, t)
+  const application = app === undefined ? undefined : appState(app, t)
   return (
     <section className={styles['card']}>
       <h3 className={styles['cardTitle']}>{title}</h3>
@@ -295,7 +296,9 @@ function RelayCard({ title, t, port, listening, app, children }: {
           value={listening ? t('listeningOn') : t('listeningOff')}
           dot={listening ? 'done' : 'error'}
         />
-        <Fact label={t('app')} value={application.label} dot={application.dot} />
+        {application === undefined
+          ? null
+          : <Fact label={t('app')} value={application.label} dot={application.dot} />}
       </dl>
       {children}
     </section>
@@ -341,6 +344,75 @@ function TokenRow({ status, t }: {
         value={`${t('tokenAge', { age })} · ${token.stale ? t('tokenStale') : t('tokenFresh')}`}
         dot={token.stale ? 'warning' : 'done'}
       />
+    </dl>
+  )
+}
+
+/**
+ * The Celia relay's listener and the session cookie harvested from its app.
+ *
+ * The relay owns the credential cache, so the host reports what the relay
+ * says about it. This cookie has no published lifetime — it is a session
+ * credential read out of a running application — so the card reports its age
+ * without claiming whether it is still valid.
+ * @param props.xiaoyi - the relay's listener and cookie facts.
+ * @param props.checkedAt - when the snapshot was read.
+ * @param props.t - the page's locale reader.
+ * @returns the card.
+ */
+function XiaoyiCard({ xiaoyi, checkedAt, t }: {
+  xiaoyi: LocalBridgeStatusPayload['xiaoyi']
+  checkedAt: number
+  t: LocalBridgeTranslate
+}): ReactNode {
+  return (
+    <RelayCard
+      title={t('xiaoyi')}
+      t={t}
+      port={xiaoyi.relay.port}
+      listening={xiaoyi.relay.listening}
+    >
+      <CookieRow cookie={xiaoyi.cookie} checkedAt={checkedAt} t={t} />
+      <p className={styles['pathHint']}>{t('xiaoyiGuidance')}</p>
+    </RelayCard>
+  )
+}
+
+/** The harvested Celia session cookie and how long ago it was harvested. */
+function CookieRow({ cookie, checkedAt, t }: {
+  cookie: LocalBridgeCookieStatus
+  checkedAt: number
+  t: LocalBridgeTranslate
+}): ReactNode {
+  const harvestedAt = cookie.harvestedAt
+  if (harvestedAt === null) {
+    return (
+      <dl className={styles['facts']}>
+        <Fact label={t('cookie')} value={t('cookieMissing')} dot="error" />
+        {cookie.missing.length === 0
+          ? null
+          : (
+            <Fact
+              label={t('cookie')}
+              value={t('cookieMissingNames', { names: cookie.missing.join(', ') })}
+            />
+          )}
+      </dl>
+    )
+  }
+  const age = ageText(relativeTime(harvestedAt, checkedAt), t)
+  return (
+    <dl className={styles['facts']}>
+      <Fact label={t('cookie')} value={t('cookieAge', { age })} dot="done" />
+      {cookie.missing.length === 0
+        ? null
+        : (
+          <Fact
+            label={t('cookie')}
+            value={t('cookieMissingNames', { names: cookie.missing.join(', ') })}
+            dot="warning"
+          />
+        )}
     </dl>
   )
 }

@@ -1,17 +1,19 @@
 /**
  * @deepseek-ai/dsh-host-local-bridge — 内置本地模型反代，随桌面安装包一起分发。
  *
- * 本包内嵌**两个**反代服务，各自独立监听：
+ * 本包内嵌**三个**反代服务，各自独立监听：
  *   1. WorkBuddy 模型反代（`bridge/bridge.mjs`，默认 127.0.0.1:8787）——
  *      把本机已登录的 WorkBuddy 账号额度或 CodeBuddy CLI 反代成 OpenAI 兼容接口，
  *      两条对外路径：`POST /v1/chat/completions`（+3 别名）与 `POST /summarize`；
  *   2. Microsoft Copilot 反代（`bridge/copilot-bridge.mjs`，默认 127.0.0.1:8899）——
- *      复用 Copilot 桌面版已登录的 SignalR chatHub 通道，暴露 `POST /v1/chat/completions`。
+ *      复用 Copilot 桌面版已登录的 SignalR chatHub 通道，暴露 `POST /v1/chat/completions`；
+ *   3. 小艺反代（`bridge/xiaoyi-bridge.mjs`，默认 127.0.0.1:8123）——
+ *      复用华为「AI空间」里小艺的 WebSocket 通道，暴露 `POST /v1/chat/completions`。
  *
- * 两个反代分别依赖**用户自己安装的第三方应用**（WorkBuddy AI / Microsoft Copilot），
- * 本包不打包它们。所以启动顺序是：先跑依赖预检（`bridge/preflight.mjs`）——
+ * 三个反代分别依赖**用户自己安装的第三方应用**（WorkBuddy AI / Microsoft Copilot /
+ * 华为 AI空间），本包不打包它们。所以启动顺序是：先跑依赖预检（`bridge/preflight.mjs`）——
  * 装了没跑就自动拉起来、没装就给出安装指引、Copilot 令牌陈旧且前置条件齐备就自动刷新 ——
- * 再起两个反代。顺序反过来只会让首批请求失败。
+ * 再起三个反代。顺序反过来只会让首批请求失败。
  *
  * 反代本体都是零依赖的纯 Node 标准库代码，位于本包的 `bridge/` 目录并随包发布；
  * 这里只负责编排生命周期：单个反代启动失败只记一条 warning，不影响另一个，
@@ -91,14 +93,31 @@ export interface Config {
     /** 令牌/模板收割目录；留空则用 `%USERPROFILE%\copilot-probe`。 */
     harvestDir: string
   }
+  /** 华为「AI空间」小艺反代。 */
+  xiaoyi: {
+    /** 是否启动小艺反代（需 AI空间 开着对话页，否则只监听、调用会报 no_cookies）。 */
+    enabled: boolean
+    /** 小艺反代端口。 */
+    port: number
+    /** 运行 `xiaoyi-harvest.py` 的解释器；留空则自动在 LOCALAPPDATA\Programs\Python 与 PATH 里找。 */
+    python: string
+    /** 凭证缓存文件；留空则用 `%LOCALAPPDATA%\xiaoyi-bridge\auth.json`。 */
+    cacheFile: string
+  }
   /** 配套依赖（WorkBuddy AI / Microsoft Copilot）的自愈开关。 */
   deps: {
     /** 装了但没在跑时，是否自动把它们拉起来。 */
     autoStart: boolean
     /**
-     * Copilot 令牌陈旧且前置条件齐备时，是否在**启动时**自动触发 `refresh-token.ps1`。
-     * 注意：该脚本会**临时切换系统代理**（约 1 分钟，`finally` 里还原），
-     * 并用 UI 自动化让 Copilot 建一次连接 —— 介意的话把它关掉。
+     * 令牌陈旧且前置条件齐备时，是否在**启动时**自动触发 `refresh-token.ps1`（默认关）。
+     *
+     * 这个开关默认 false。脚本的做法是**直接改写系统代理注册表**（`ProxyEnable` /
+     * `ProxyServer`）指向拦截代理约一分钟，再还原快照 —— 它绕开了用户自己的代理客户端，
+     * 所以那一分钟里整台机器的出境流量都压到拦截代理上，而拦截代理只放行微软的域名。
+     * 更麻烦的是它会让代理客户端"系统代理归谁管"的状态错位：实测把 FlClash 的内核弄停了，
+     * 系统代理仍指着已经没人监听的端口，于是所有节点全部 Timeout。
+     *
+     * 要刷新请用设置页的「刷新令牌」按钮 —— 那是用户主动发起、看得见结果的。
      */
     autoRefreshToken: boolean
     /**
@@ -135,6 +154,7 @@ export interface Config {
  */
 const DEFAULT_WORKBUDDY_PORT = 8787
 const DEFAULT_COPILOT_PORT = 8899
+const DEFAULT_XIAOYI_PORT = 8123
 
 export const Config: z<Config> = z.object({
   enabled: z.boolean().default(true),
@@ -147,9 +167,18 @@ export const Config: z<Config> = z.object({
     port: z.number().default(DEFAULT_COPILOT_PORT),
     harvestDir: z.string().default(''),
   }),
+  xiaoyi: z.object({
+    // 默认关：它依赖华为「AI空间」开着对话页，对没装这个应用的人是纯噪音。
+    enabled: z.boolean().default(false),
+    port: z.number().default(DEFAULT_XIAOYI_PORT),
+    python: z.string().default(''),
+    cacheFile: z.string().default(''),
+  }),
   deps: z.object({
     autoStart: z.boolean().default(true),
-    autoRefreshToken: z.boolean().default(true),
+    // 默认关：一次刷新会直接改写系统代理注册表（绕开用户自己的代理客户端）约一分钟，
+    // 期间整台机器的出境流量都受影响，且会把代理客户端的"系统代理归谁管"弄乱。
+    autoRefreshToken: z.boolean().default(false),
     // 默认关：运行中刷新会把全机系统代理指向拦截代理约一分钟，打断其它出境流量。
     autoRefreshWhileRunning: z.boolean().default(false),
     bootstrap: z.boolean().default(true),
@@ -390,6 +419,7 @@ export function apply(ctx: Context, config: Config): void {
     harvestDir,
     workbuddyPort: config.port,
     copilotPort: config.copilot.port,
+    xiaoyiPort: config.xiaoyi.port,
     // 预检的拒绝原因是给人看的操作提示，落日志；线上只传代码，文案由页面自己的字典出。
     log: (message) => { ctx.logger.warn(message) },
   })
@@ -439,6 +469,24 @@ export function apply(ctx: Context, config: Config): void {
         // 决定，宿主只交出触发能力。**默认不注入** —— 一次刷新会把整机系统代理指向
         // 拦截代理约一分钟（实测 57 秒），期间其它出境流量会失败，见 Config 的说明。
         ...config.deps.autoRefreshWhileRunning ? { refreshToken: () => control.refresh() } : {},
+      },
+    })
+  }
+  if (config.xiaoyi.enabled) {
+    specs.push({
+      label: '小艺反代',
+      url: new URL('../bridge/xiaoyi-bridge.mjs', import.meta.url),
+      start: 'startXiaoyiBridge',
+      stop: 'stopXiaoyiBridge',
+      overrides: {
+        server: { host: config.host, port: config.xiaoyi.port },
+        auth: {
+          // 收割器由 python 这个**外部进程**读取，打包后必须给真实磁盘路径，
+          // 否则它只会拿到 app.asar 里的伪路径（与 refresh-token.ps1 同一个坑）。
+          harvestScript: resolveRealPath(fileURLToPath(new URL('../bridge/xiaoyi-harvest.py', import.meta.url))),
+          ...config.xiaoyi.python ? { python: config.xiaoyi.python } : {},
+          ...config.xiaoyi.cacheFile ? { cacheFile: config.xiaoyi.cacheFile } : {},
+        },
       },
     })
   }

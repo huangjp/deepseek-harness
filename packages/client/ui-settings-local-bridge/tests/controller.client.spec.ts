@@ -24,6 +24,7 @@ function status(overrides: {
   missing?: readonly string[]
   mitmdump?: string | null
   token?: { present: boolean; harvestedAt: number | null; ageSec: number | null; stale: boolean }
+  cookie?: { present: boolean; harvestedAt: number | null; ageSec: number | null; missing: readonly string[] }
 } = {}): Record<string, unknown> {
   return {
     platform: overrides.platform ?? 'win32',
@@ -39,6 +40,10 @@ function status(overrides: {
       token: overrides.token ?? { present: true, harvestedAt: 940_000, ageSec: 60, stale: false },
       missing: overrides.missing ?? [],
       mitmdump: overrides.mitmdump === undefined ? 'C:/python/Scripts/mitmdump.exe' : overrides.mitmdump,
+    },
+    xiaoyi: {
+      relay: { port: 8123, listening: overrides.listening ?? true },
+      cookie: overrides.cookie ?? { present: true, harvestedAt: 940_000, ageSec: 60, missing: [] },
     },
   }
 }
@@ -119,6 +124,45 @@ describe('parseStatusPayload', () => {
     // Version skew must not blank the checklist the rest of the payload fills.
     const parsed = parseStatusPayload(status({ missing: ['mitmdump', 'brand-new-requirement'] }))
     expect(parsed?.copilot.missing).toEqual(['mitmdump'])
+  })
+
+  it('keeps only the cookie names the host reports as names', () => {
+    const base = status()
+    const parsed = parseStatusPayload({
+      ...base,
+      xiaoyi: {
+        relay: { port: 8123, listening: true },
+        cookie: { present: true, harvestedAt: 940_000, ageSec: 60, missing: ['xy_token', 42] },
+      },
+    })
+    expect(parsed?.xiaoyi.cookie.missing).toEqual(['xy_token'])
+  })
+
+  it('rejects a Celia section the page would render as garbage', () => {
+    const base = status()
+    expect(parseStatusPayload({ ...base, xiaoyi: undefined })).toBeNull()
+    const parsed = parseStatusPayload({
+      ...base,
+      xiaoyi: {
+        relay: { port: 8123, listening: true },
+        cookie: { present: 7, harvestedAt: 940_000, ageSec: 60, missing: [] },
+      },
+    })
+    expect(parsed).toBeNull()
+  })
+
+  it('rejects a Celia cookie the page would render as garbage', () => {
+    const base = status()
+    const relay = { port: 8123, listening: true }
+    expect(parseStatusPayload({ ...base, xiaoyi: { relay, cookie: 'nope' } })).toBeNull()
+    const parsed = parseStatusPayload({
+      ...base,
+      xiaoyi: {
+        relay,
+        cookie: { present: true, harvestedAt: 940_000, ageSec: 60, missing: 'xy_token' },
+      },
+    })
+    expect(parsed).toBeNull()
   })
 
   it('rejects a payload missing any field the page renders', () => {

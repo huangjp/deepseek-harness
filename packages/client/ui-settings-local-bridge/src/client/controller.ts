@@ -12,10 +12,10 @@
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import {
   LOCAL_BRIDGE_LOG_ROUTE, LOCAL_BRIDGE_REFRESH_ROUTE, LOCAL_BRIDGE_STATUS_ROUTE,
-  type LocalBridgeAppStatus, type LocalBridgeCopilotStatus, type LocalBridgeLogPayload,
+  type LocalBridgeAppStatus, type LocalBridgeCookieStatus, type LocalBridgeCopilotStatus, type LocalBridgeLogPayload,
   type LocalBridgePrerequisite, type LocalBridgeRefreshPayload, type LocalBridgeRefreshRefusal,
   type LocalBridgeRelayStatus, type LocalBridgeStatusPayload, type LocalBridgeTokenStatus,
-  type LocalBridgeTranscript, type LocalBridgeWorkBuddyStatus,
+  type LocalBridgeTranscript, type LocalBridgeWorkBuddyStatus, type LocalBridgeXiaoyiStatus,
 } from '@deepseek-ai/dsh-host-local-bridge/shared'
 
 /** HTTP carrier for the three control-plane routes. */
@@ -143,6 +143,31 @@ function parseCopilot(value: unknown): LocalBridgeCopilotStatus | null {
   return { relay, app, token, missing, mitmdump }
 }
 
+/** The harvested session cookie's facts, or null when the payload does not describe them. */
+function parseCookie(value: unknown): LocalBridgeCookieStatus | null {
+  if (!isRecord(value)) return null
+  const present = booleanOf(value['present'])
+  const harvestedAt = nullableNumberOf(value['harvestedAt'])
+  const ageSec = nullableNumberOf(value['ageSec'])
+  const missing = value['missing']
+  if (present === null || harvestedAt === undefined || ageSec === undefined) return null
+  if (!Array.isArray(missing)) return null
+  return {
+    present,
+    harvestedAt,
+    ageSec,
+    missing: missing.filter((name): name is string => typeof name === 'string'),
+  }
+}
+
+/** One Celia status, or null when the payload does not describe one. */
+function parseXiaoyi(value: unknown): LocalBridgeXiaoyiStatus | null {
+  if (!isRecord(value)) return null
+  const relay = parseRelay(value['relay'])
+  const cookie = parseCookie(value['cookie'])
+  return relay === null || cookie === null ? null : { relay, cookie }
+}
+
 /** One WorkBuddy status, or null when the payload does not describe one. */
 function parseWorkBuddy(value: unknown): LocalBridgeWorkBuddyStatus | null {
   if (!isRecord(value)) return null
@@ -163,9 +188,10 @@ export function parseStatusPayload(value: unknown): LocalBridgeStatusPayload | n
   const refreshStartedAt = nullableNumberOf(value['refreshStartedAt'])
   const workbuddy = parseWorkBuddy(value['workbuddy'])
   const copilot = parseCopilot(value['copilot'])
+  const xiaoyi = parseXiaoyi(value['xiaoyi'])
   if (typeof platform !== 'string' || checkedAt === null || refreshStartedAt === undefined
-    || workbuddy === null || copilot === null) return null
-  return { platform, workbuddy, copilot, checkedAt, refreshStartedAt }
+    || workbuddy === null || copilot === null || xiaoyi === null) return null
+  return { platform, workbuddy, copilot, xiaoyi, checkedAt, refreshStartedAt }
 }
 
 /**

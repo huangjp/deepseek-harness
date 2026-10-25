@@ -3,44 +3,44 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/client/ui-settings-local-bridge/README.md
 /:
-  en: d711fbcdcaddcc98
-  zh: a27948186d8f0033
+  en: 408fc01ef0faa051
+  zh: 9e4a82a0c54d41c4
 /deepseek-ai-dsh-client-ui-settings-local-bridge:
   en: ad216bdce1b8cff4
   zh: 4fe0bf58fa7e644e
 /deepseek-ai-dsh-client-ui-settings-local-bridge/summary:
   en: 3965a5fff01bb4d5
-  zh: bf9296b90dc3c652
+  zh: f1ff0409600e9aa0
 /deepseek-ai-dsh-client-ui-settings-local-bridge/table-of-contents:
   en: b563e4ec4727d0de
-  zh: b563e4ec4727d0de
+  zh: 44ebe7ceeda3dff6
 /deepseek-ai-dsh-client-ui-settings-local-bridge/use-this-package:
   en: 03d05d7b0388df4a
-  zh: 5a297b241d25b450
+  zh: 94824be3b39af831
 /deepseek-ai-dsh-client-ui-settings-local-bridge/use-this-package/what-the-page-shows:
-  en: a989c2428a702fc8
-  zh: adaaae72afa650a5
+  en: f3252568d270ec8c
+  zh: 5d19dc8395717428
 /deepseek-ai-dsh-client-ui-settings-local-bridge/use-this-package/reading-the-refresh-log:
   en: 37181a87ef80fc26
-  zh: a4e571a69188273e
+  zh: 0ef211d850a1dbaf
 /deepseek-ai-dsh-client-ui-settings-local-bridge/use-this-package/refusals:
   en: 4f1050e1750641ce
-  zh: 7ee995d8c6c2b814
+  zh: bda63941fe5eab11
 /deepseek-ai-dsh-client-ui-settings-local-bridge/understand-the-implementation:
   en: dfb4312d0295de78
-  zh: f902838920963c1b
+  zh: 819213a3cb9f83ae
 /deepseek-ai-dsh-client-ui-settings-local-bridge/further-exploration:
   en: f3544fc4600dc22a
-  zh: c2a553277202b6da
+  zh: 3807a8d1e5cc9df0
 /deepseek-ai-dsh-client-ui-settings-local-bridge/model-experience:
   en: 5b3fe2424b1bddc0
-  zh: 5b3fe2424b1bddc0
+  zh: fd771fa22475e28f
 /deepseek-ai-dsh-client-ui-settings-local-bridge/model-experience/kv-cache-effect:
   en: ca75c51c89c2c9b0
   zh: ca75c51c89c2c9b0
 /deepseek-ai-dsh-client-ui-settings-local-bridge/known-limitations-and-deferred-work:
   en: 090a4aae02107795
-  zh: cd483ecc00890991
+  zh: c8f872c9375451e5
 /deepseek-ai-dsh-client-ui-settings-local-bridge/known-limitations-and-deferred-work/dev-note:
   en: 16eedddc548ef98a
-  zh: 16eedddc548ef98a
+  zh: 1e7574f8771f39e8

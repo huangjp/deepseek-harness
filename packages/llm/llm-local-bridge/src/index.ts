@@ -1,7 +1,7 @@
 /**
  * Built-in local-bridge LLM providers for the DeepSeek Harness desktop app.
  *
- * Two routes are registered here exactly the way `llm-deepseek` registers
+ * Three routes are registered here exactly the way `llm-deepseek` registers
  * `deepseek-official`: as fixed, code-level routes on the LLM seam, NOT through
  * the user-editable `llm-pi-ai` settings section.
  *
@@ -29,7 +29,7 @@
  *   routes actually read. `configure({ auto: false })` keeps the Plugins
  *   settings section from generating a page for it.
  *
- * Both relays authenticate with the hop-specific `authorization: Bearer
+ * All relays authenticate with the hop-specific `authorization: Bearer
  * local-bridge` header (see the `dsh-host-local-bridge` host plugin), so no
  * credential reference is needed.
  */
@@ -66,14 +66,34 @@ const BRIDGE_PROVIDERS: Record<string, PiAiProviderProfile> = {
     ],
   },
   // Microsoft Copilot relay (dsh-host-local-bridge, default 127.0.0.1:8899).
+  //
+  // 只声明 `text`：Copilot 的 SignalR chatHub 帧只有一个纯文本提示字段，没有附件
+  // 字段。声明 image 会让 DSH 把附图送进请求，然后被反代以 `400 images_unsupported`
+  // 拒掉 —— 那时消息已经落盘，会话只能反复重试一个注定失败的请求。少声明，DSH 才
+  // 会在发送前就用 MODEL_DOES_NOT_SUPPORT_IMAGES 拦住，并给出可读的提示。
   slefgpt56: {
     displayName: 'Copilot Local Bridge',
     api: 'openai-completions',
     baseURL: 'http://127.0.0.1:8899/v1',
     headers: { authorization: 'Bearer local-bridge' },
     models: [
-      { id: 'copilot', name: 'copilot', input: ['text', 'image'] },
-      { id: 'm365-copilot', name: 'm365-copilot', input: ['text', 'image'] },
+      { id: 'copilot', name: 'copilot', input: ['text'] },
+      { id: 'm365-copilot', name: 'm365-copilot', input: ['text'] },
+    ],
+  },
+  // Huawei Celia relay (dsh-host-local-bridge, default 127.0.0.1:8123).
+  //
+  // 只声明 `text`：小艺的通道是 `textRecognize`（文本进、文本出），没有附件字段，
+  // 声明 image 会让 DSH 把附图直接送过去然后失败。少声明，DSH 才会在发送前就用
+  // MODEL_DOES_NOT_SUPPORT_IMAGES 拦住，并给出可读的提示。
+  hwcelia: {
+    displayName: 'Huawei Celia Local Bridge',
+    api: 'openai-completions',
+    baseURL: 'http://127.0.0.1:8123/v1',
+    headers: { authorization: 'Bearer local-bridge' },
+    models: [
+      { id: 'xiaoyi-chat', name: 'xiaoyi-chat', input: ['text'] },
+      { id: 'xiaoyi', name: 'xiaoyi', input: ['text'] },
     ],
   },
 }
@@ -137,10 +157,10 @@ export function apply(ctx: Context): void {
     },
   })
 
-  // Register both routes as fixed, built-in routes.
+  // Register every route as a fixed, built-in route.
   ctx.llm.registerAdapter([...profiles.keys()], adapter)
 
-  // Place the same two routes into the Models settings page directory so the
+  // Place the same routes into the Models settings page directory so the
   // page shows them by name. `settingsNs` is this plugin's own namespace and
   // `settingsPath` is empty on purpose: the page marks a row removable only
   // when a non-empty path exists in the *user* settings layer, so an empty

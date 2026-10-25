@@ -37,6 +37,7 @@ function status(overrides: {
   missing?: readonly ('mitmdump' | 'harvester' | 'upstream-proxy' | 'ca')[]
   mitmdump?: string | null
   token?: { present: boolean; harvestedAt: number | null; ageSec: number | null; stale: boolean }
+  cookie?: { present: boolean; harvestedAt: number | null; ageSec: number | null; missing: readonly string[] }
 } = {}): LocalBridgeStatusPayload {
   const app = { installed: overrides.appInstalled ?? true, running: overrides.appRunning ?? true }
   return {
@@ -50,6 +51,10 @@ function status(overrides: {
       token: overrides.token ?? { present: true, harvestedAt: 940_000, ageSec: 60, stale: false },
       missing: overrides.missing ?? [],
       mitmdump: overrides.mitmdump === undefined ? 'C:/python/Scripts/mitmdump.exe' : overrides.mitmdump,
+    },
+    xiaoyi: {
+      relay: { port: 8123, listening: overrides.listening ?? true },
+      cookie: overrides.cookie ?? { present: true, harvestedAt: 940_000, ageSec: 60, missing: [] },
     },
   }
 }
@@ -133,20 +138,47 @@ describe('LocalBridgeSection states', () => {
     expect(load).toHaveBeenCalledTimes(1)
   })
 
-  it('renders both relays with their listeners and applications', () => {
+  it('renders every relay with its listener and application', () => {
     renderPage({ phase: 'ready', status: status({ listening: false, appRunning: false }) })
 
     expect(screen.getByText(en.workbuddy)).toBeTruthy()
     expect(screen.getByText(en.copilot)).toBeTruthy()
+    expect(screen.getByText(en.xiaoyi)).toBeTruthy()
     expect(screen.getByText('8787')).toBeTruthy()
     expect(screen.getByText('8899')).toBeTruthy()
-    expect(screen.getAllByText(en.listeningOff)).toHaveLength(2)
+    expect(screen.getByText('8123')).toBeTruthy()
+    // Three listeners; only the two application-backed relays report an app state.
+    expect(screen.getAllByText(en.listeningOff)).toHaveLength(3)
     expect(screen.getAllByText(en.appStopped)).toHaveLength(2)
   })
 
   it('names an application that is not installed apart from one merely stopped', () => {
     renderPage({ phase: 'ready', status: status({ appInstalled: false, appRunning: false }) })
     expect(screen.getAllByText(en.appMissing)).toHaveLength(2)
+  })
+
+  it('reports a Celia cookie that was never harvested', () => {
+    renderPage({
+      phase: 'ready',
+      status: status({ cookie: { present: false, harvestedAt: null, ageSec: null, missing: [] } }),
+    })
+    expect(screen.getByText(en.cookieMissing)).toBeTruthy()
+  })
+
+  it('names the Celia cookies the harvest did not produce', () => {
+    renderPage({
+      phase: 'ready',
+      status: status({ cookie: { present: false, harvestedAt: null, ageSec: null, missing: ['xy_token'] } }),
+    })
+    expect(screen.getByText(en.cookieMissingNames.replace('{names}', 'xy_token'))).toBeTruthy()
+  })
+
+  it('flags a harvested Celia cookie that is still missing a name', () => {
+    renderPage({
+      phase: 'ready',
+      status: status({ cookie: { present: true, harvestedAt: 940_000, ageSec: 60, missing: ['xy_deviceId'] } }),
+    })
+    expect(screen.getByText(en.cookieMissingNames.replace('{names}', 'xy_deviceId'))).toBeTruthy()
   })
 
   it('warns that the relays are Windows-only elsewhere and offers no refresh', () => {

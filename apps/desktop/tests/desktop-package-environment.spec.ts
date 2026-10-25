@@ -118,6 +118,21 @@ describe('Desktop local packaging configuration', () => {
     })
   })
 
+  it('accepts the Electron download mirror from the local file but nothing beyond it', async () => {
+    await withDirectory(async (directory) => {
+      // @electron/get 用全局 fetch 下载 Electron，既不读系统代理也没有超时；受限网络里只能靠镜像。
+      await writeFile(join(directory, '.env.windows'), 'ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/\n')
+      expect(loadDesktopPackageEnvironment('win32', {}, directory)).toEqual({
+        ELECTRON_MIRROR: 'https://npmmirror.com/mirrors/electron/',
+      })
+      // 白名单是按整键匹配的：相邻的拼错键必须照旧被拒，不能因为放宽前缀就漏过去。
+      await writeFile(join(directory, '.env.windows'),
+        'ELECTRON_MIRROR=https://mirror.example/\nELECTRON_MIRROR_TYPO=x\n')
+      expect(() => loadDesktopPackageEnvironment('win32', {}, directory))
+        .toThrow(/unsupported setting ELECTRON_MIRROR_TYPO/u)
+    })
+  })
+
   it('checks application and update configuration before Windows credentials while preserving unsigned and preparation modes', () => {
     expect(() => {
       validateDesktopPackageEnvironment({}, WINDOWS, { unsigned: true })

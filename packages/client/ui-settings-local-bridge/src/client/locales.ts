@@ -10,10 +10,11 @@
 export type LocalBridgeLocaleKey =
   | 'nav' | 'title' | 'intro'
   | 'loading' | 'loadFailed' | 'recheck' | 'unsupported'
-  | 'workbuddy' | 'copilot'
+  | 'workbuddy' | 'copilot' | 'xiaoyi'
   | 'port' | 'listening' | 'listeningOn' | 'listeningOff'
   | 'app' | 'appRunning' | 'appStopped' | 'appMissing'
   | 'token' | 'tokenMissing' | 'tokenAge' | 'tokenFresh' | 'tokenStale'
+  | 'cookie' | 'cookieMissing' | 'cookieAge' | 'cookieMissingNames' | 'xiaoyiGuidance'
   | 'ageJustNow' | 'ageMinutes' | 'ageHours' | 'ageDays' | 'ageMonths' | 'ageYears'
   | 'prerequisites' | 'prereqReady' | 'prereqMissing'
   | 'prereqMitmdump' | 'prereqHarvester' | 'prereqUpstreamProxy' | 'prereqCa'
@@ -35,13 +36,14 @@ export type LocalBridgeTranslate =
 export const en: Record<LocalBridgeLocaleKey, string> = {
   nav: 'Local model services',
   title: 'Local model services',
-  intro: 'The two model relays bundled with the desktop app, and the Copilot access token they run on.',
+  intro: 'The three model relays bundled with the desktop app, and the Copilot access token they run on.',
   loading: 'Checking this machine…',
   loadFailed: 'The local relay service did not answer. Restart the desktop app, then check again.',
   recheck: 'Check again',
   unsupported: 'These relays are available on Windows only.',
   workbuddy: 'WorkBuddy relay',
   copilot: 'Microsoft Copilot relay',
+  xiaoyi: 'Huawei Celia relay',
   port: 'Port',
   listening: 'Relay',
   listeningOn: 'Listening',
@@ -55,6 +57,11 @@ export const en: Record<LocalBridgeLocaleKey, string> = {
   tokenAge: 'Obtained {age} ago',
   tokenFresh: 'Still valid',
   tokenStale: 'Expired; a refresh is due',
+  cookie: 'Session cookie',
+  cookieMissing: 'Not harvested yet',
+  cookieAge: 'Harvested {age} ago',
+  cookieMissingNames: 'Missing: {names}',
+  xiaoyiGuidance: 'The cookie is read out of the Huawei AI Space app while it sits on a conversation page. The next request re-harvests it.',
   ageJustNow: 'moments',
   ageMinutes: '{count} min',
   ageHours: '{count} h',
@@ -101,13 +108,14 @@ export const en: Record<LocalBridgeLocaleKey, string> = {
 export const zh: Record<LocalBridgeLocaleKey, string> = {
   nav: '本地模型服务',
   title: '本地模型服务',
-  intro: '桌面端随包分发的两个模型中继，以及 Copilot 通道所依赖的访问令牌。',
+  intro: '桌面端随包分发的三个模型中继，以及 Copilot 通道所依赖的访问令牌。',
   loading: '正在检测本机状态…',
   loadFailed: '本地中继服务没有响应。请重启桌面端后重试。',
   recheck: '重新检测',
-  unsupported: '这两个中继只在 Windows 上可用。',
+  unsupported: '这三个中继只在 Windows 上可用。',
   workbuddy: 'WorkBuddy 中继',
   copilot: 'Microsoft Copilot 中继',
+  xiaoyi: '华为小艺中继',
   port: '端口',
   listening: '中继状态',
   listeningOn: '监听中',
@@ -121,6 +129,11 @@ export const zh: Record<LocalBridgeLocaleKey, string> = {
   tokenAge: '获取于 {age}前',
   tokenFresh: '仍然有效',
   tokenStale: '已过期，该刷新了',
+  cookie: '会话凭据',
+  cookieMissing: '尚未收割',
+  cookieAge: '收割于 {age}前',
+  cookieMissingNames: '缺少：{names}',
+  xiaoyiGuidance: '凭据从华为 AI空间 开着对话页时的进程内存里收割,下一次请求会重新收割。',
   ageJustNow: '片刻',
   ageMinutes: '{count} 分钟',
   ageHours: '{count} 小时',

@@ -31,6 +31,9 @@ async function openPort(): Promise<{ port: number; close: () => Promise<void> }>
   const server = createServer((socket: Socket) => {
     sockets.add(socket)
     socket.on('close', () => { sockets.delete(socket) })
+    // The probe under test destroys its socket without reading, so the server
+    // side sees a reset; an unhandled 'error' would fail the whole run.
+    socket.on('error', () => { sockets.delete(socket) })
   })
   await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', () => { resolve() }) })
   const address = server.address()
@@ -111,6 +114,7 @@ async function fixture(module: PreflightFacts, options: {
   refreshScript?: 'present' | 'absent'
   workbuddyPort?: number
   copilotPort?: number
+  xiaoyiPort?: number
 } = {}): Promise<Fixture> {
   root = await mkdtemp(join(tmpdir(), 'dsh-local-bridge-control-'))
   const script = join(root, 'refresh-token.ps1')
@@ -125,6 +129,7 @@ async function fixture(module: PreflightFacts, options: {
       harvestDir: root,
       workbuddyPort: options.workbuddyPort ?? await closedPort(),
       copilotPort: options.copilotPort ?? await closedPort(),
+      xiaoyiPort: options.xiaoyiPort ?? await closedPort(),
       log,
     }),
   }
@@ -175,6 +180,124 @@ describe('local-bridge status', () => {
       harvest: { hasToken: true, harvestedAt: 'not-a-timestamp', ageSec: 5 },
     }))
     expect((await control.status()).copilot.token.harvestedAt).toBeNull()
+  })
+
+  it('reports no Celia cookie while its relay is not listening', async () => {
+    const { control } = await fixture(preflightModule())
+    const status = await control.status()
+    expect(status.xiaoyi.relay.listening).toBe(false)
+    expect(status.xiaoyi.cookie).toEqual({
+      present: false,
+      harvestedAt: null,
+      ageSec: null,
+      missing: [],
+    })
+  })
+
+  it('reports the Celia cookie the relay itself reports', async () => {
+    bound = await openPort()
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        token: 'cached',
+        savedAt: 1_792_859_868_000,
+        ageHours: 3.5,
+        missing: [],
+      }),
+    } as Response)
+    const { control } = await fixture(preflightModule(), { xiaoyiPort: bound.port })
+    const status = await control.status()
+    expect(status.xiaoyi.relay).toEqual({ port: bound.port, listening: true })
+    expect(status.xiaoyi.cookie).toEqual({
+      present: true,
+      harvestedAt: 1_792_859_868_000,
+      ageSec: 12_600,
+      missing: [],
+    })
+  })
+
+  it('keeps only the cookie names the relay reports as names', async () => {
+    bound = await openPort()
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        token: 'cached',
+        savedAt: 1,
+        ageHours: 1,
+        missing: ['xy_token', 42],
+      }),
+    } as Response)
+    const { control } = await fixture(preflightModule(), { xiaoyiPort: bound.port })
+    expect((await control.status()).xiaoyi.cookie.missing).toEqual(['xy_token'])
+  })
+
+  it('reports no Celia cookie when the relay answers with a failure', async () => {
+    bound = await openPort()
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: false,
+      json: () => Promise.resolve({}),
+    } as Response)
+    const { control } = await fixture(preflightModule(), { xiaoyiPort: bound.port })
+    expect((await control.status()).xiaoyi.cookie.present).toBe(false)
+  })
+
+  it('reports no Celia cookie when the relay answers with something that is not an object', async () => {
+    bound = await openPort()
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve('not-an-object'),
+    } as Response)
+    const { control } = await fixture(preflightModule(), { xiaoyiPort: bound.port })
+    expect((await control.status()).xiaoyi.cookie.present).toBe(false)
+  })
+
+  it('reports no Celia cookie when the relay answers with unusable fields', async () => {
+    bound = await openPort()
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        token: 'missing',
+        savedAt: 'soon',
+        ageHours: null,
+        missing: 'xy_token',
+      }),
+    } as Response)
+    const { control } = await fixture(preflightModule(), { xiaoyiPort: bound.port })
+    expect((await control.status()).xiaoyi.cookie).toEqual({
+      present: false,
+      harvestedAt: null,
+      ageSec: null,
+      missing: [],
+    })
+  })
+
+  it('reports no Celia cookie when the relay does not answer at all', async () => {
+    bound = await openPort()
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('connect ECONNREFUSED'))
+    const { control } = await fixture(preflightModule(), { xiaoyiPort: bound.port })
+    expect((await control.status()).xiaoyi.cookie.present).toBe(false)
+  })
+
+  it('gives up on a Celia relay that does not answer in time', async () => {
+    bound = await openPort()
+    const { control } = await fixture(preflightModule(), { xiaoyiPort: bound.port })
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((_input, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => { reject(new Error('aborted')) })
+    }))
+    // Only the timers are faked, so the port probe still completes over real
+    // loopback I/O while the relay's own deadline is reached without waiting.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const pending = control.status()
+      for (let i = 0; i < 10 && fetchSpy.mock.calls.length === 0; i++) {
+        await new Promise<void>((resolve) => { setImmediate(resolve) })
+      }
+      expect(fetchSpy).toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(2_100)
+      expect((await pending).xiaoyi.cookie.present).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('reports no unmet prerequisite once every fact is present', async () => {
@@ -270,6 +393,7 @@ describe('local-bridge refresh', () => {
       harvestDir: root,
       workbuddyPort: 8787,
       copilotPort: 8899,
+      xiaoyiPort: 8123,
       log: vi.fn(),
     })
     expect(await control.refresh()).toEqual({ started: false, refusal: 'unsupported-platform', logFile: null })

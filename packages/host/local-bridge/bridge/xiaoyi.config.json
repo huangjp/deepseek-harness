@@ -1,0 +1,27 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8123,
+    "apiKey": "",
+    "cors": "*"
+  },
+
+  "auth": {
+    "profileDir": "",
+    "_profileDirComment": "WebView2 用户数据目录。留空则用 %APPDATA%\\PersonalCenter\\Temp\\EBWebView",
+
+    "python": "",
+    "_pythonComment": "运行收割器 xiaoyi-harvest.py 的解释器。留空则自动在 LOCALAPPDATA\\Programs\\Python 与 PATH 里找 python.exe",
+
+    "cacheFile": "",
+    "_cacheFileComment": "凭证缓存。留空则用 %LOCALAPPDATA%\\xiaoyi-bridge\\auth.json",
+
+    "harvestScript": "",
+    "_harvestScriptComment": "收割脚本路径。留空则用同目录的 xiaoyi-harvest.py"
+  },
+
+  "chat": {
+    "timeoutMs": 180000,
+    "_comment": "单轮对话超时。小艺首字通常 2-5 秒，深度检索会久一些"
+  }
+}
