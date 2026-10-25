@@ -20,3 +20,13 @@ export function startXiaoyiBridge(overrides?: Record<string, unknown>): Promise<
 
 /** 停止由 `startXiaoyiBridge()` 启动的服务（幂等）。 */
 export function stopXiaoyiBridge(): Promise<void>
+
+/**
+ * 把 OpenAI 的 messages 收敛成一段给小艺的提示词。
+ *
+ * 只保留最后一条真实用户输入，丢弃 assistant 历史与 DSH harness 注入的内部噪声，
+ * 短 system 提示词才保留，最终长度硬顶在 4000 字符以内（小艺通道实测上限约 8000）。
+ * @param messages - OpenAI 格式的对话，可缺省。
+ * @returns 交给小艺的提示词；没有可用用户输入时返回空串。
+ */
+export function buildPrompt(messages?: Array<{ role?: string; content?: unknown }>): string

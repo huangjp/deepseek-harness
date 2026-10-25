@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { startXiaoyiBridge, stopXiaoyiBridge } from '../bridge/xiaoyi-bridge.mjs'
+import { buildPrompt, startXiaoyiBridge, stopXiaoyiBridge } from '../bridge/xiaoyi-bridge.mjs'
 
 /**
  * 小艺反代的 HTTP 表面与生命周期。
@@ -98,5 +98,77 @@ describe('xiaoyi bridge', () => {
     const { base } = await boot()
     await stopXiaoyiBridge()
     await expect(fetch(`${base}/health`)).rejects.toThrow()
+  })
+})
+
+/**
+ * 提示词收敛。
+ *
+ * 小艺的 `textRecognize` 通道有两个硬约束（实测，见 bridge/xiaoyi-protocol-notes.md）：
+ * 输入超过约 8000 字符，上游**不报错**，只把答案换成一句固定英文模板
+ * 「Sorry, I don't know the answer to that.」；而且它是单轮通道，整段对话历史喂进去
+ * 它会照着第一条用户输入回答。
+ *
+ * DSH 一次真实请求的 messages 有 4.4 万~6.3 万字符，所以 buildPrompt() 必须自己收敛。
+ */
+describe('buildPrompt', () => {
+  it('passes a plain single-turn question through unchanged', () => {
+    expect(buildPrompt([{ role: 'user', content: '你好' }])).toBe('你好')
+  })
+
+  it('keeps a short system prompt in the 要求 wrapper', () => {
+    expect(buildPrompt([
+      { role: 'system', content: '用中文简短回答。' },
+      { role: 'user', content: '你好' },
+    ])).toBe('（要求：用中文简短回答。）\n\n你好')
+  })
+
+  it('drops a long system prompt — Celia has no tools and cannot follow one', () => {
+    const system = 'A'.repeat(201)
+    expect(buildPrompt([
+      { role: 'system', content: system },
+      { role: 'user', content: '你好' },
+    ])).toBe('你好')
+  })
+
+  it('ignores assistant history so Celia answers the latest turn', () => {
+    expect(buildPrompt([
+      { role: 'user', content: '第一句' },
+      { role: 'assistant', content: '助手答' },
+      { role: 'user', content: '最后一句' },
+    ])).toBe('最后一句')
+  })
+
+  it('skips the harness blocks DSH injects into user turns', () => {
+    expect(buildPrompt([
+      { role: 'user', content: '真实问题' },
+      { role: 'user', content: '<system-reminder>\nworkspace instructions' },
+      { role: 'user', content: 'Current runtime context. This snapshot supersedes earlier ones.' },
+      { role: 'user', content: '[model changed: dpv41f/deepseek-v4.1-flash → hwcelia/xiaoyi-chat]' },
+    ])).toBe('真实问题')
+  })
+
+  it('falls back to the last raw user turn when every turn is harness noise', () => {
+    expect(buildPrompt([
+      { role: 'user', content: '<system-reminder>\nonly noise' },
+    ])).toBe('<system-reminder>\nonly noise')
+  })
+
+  it('caps the prompt below the upstream length ceiling', () => {
+    const prompt = buildPrompt([{ role: 'user', content: '长'.repeat(50_000) }])
+    expect(prompt.length).toBeLessThanOrEqual(4000)
+    expect(prompt.endsWith('…')).toBe(true)
+  })
+
+  it('reads array-shaped content parts', () => {
+    expect(buildPrompt([
+      { role: 'user', content: [{ type: 'text', text: '你好' }, { type: 'text', text: '世界' }] },
+    ])).toBe('你好世界')
+  })
+
+  it('returns an empty prompt when there is no user turn', () => {
+    expect(buildPrompt([])).toBe('')
+    expect(buildPrompt([{ role: 'system', content: '只有系统提示' }])).toBe('')
+    expect(buildPrompt([{ role: 'assistant', content: '只有助手回话' }])).toBe('')
   })
 })

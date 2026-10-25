@@ -484,21 +484,99 @@ async function* streamChat(prompt, jar, { timeoutMs = 180000 } = {}) {
   }
 }
 
-/** 把 OpenAI 的 messages 压成一段给小艺的文本。 */
-function buildPrompt(messages) {
+// ---------------------------------------------------------------- 提示词收敛
+//
+// 小艺的 `textRecognize` 通道有两个硬约束，决定了这里必须自己收敛，而不是照搬
+// OpenAI 的 messages：
+//
+// 1) **输入长度上限约 8000 字符**。实测（同一个真实会话回放）：7999 字符正常作答，
+//    8494 字符起上游固定回「Sorry, I don't know the answer to that. Would you like to
+//    ask me something else?」—— 不报错、不给错误码，只是把答案换成这句英文模板。
+//    所以超长输入在客户端看来就是「模型答非所问」，极难定位。
+//    DSH 一次真实请求的 messages 有 4.4 万~6.3 万字符（agent 系统提示词 ~6KB +
+//    工作区说明 + skill 清单 + runtime context + 整段对话历史），必然踩线。
+//
+// 2) **它是单轮语音通道**：每次调用都新建 session（sessionId 随机），没有多轮上下文。
+//    实测把整段对话历史喂进去，它会照着**第一条**用户输入回答，而不是最后一条。
+//
+// 所以这里只保留「最后一条真实用户输入」，并把总长压到远低于阈值的量级。
+
+/** 收敛后的提示词长度上限。取实测阈值（~8000）的一半，留足余量。 */
+const MAX_PROMPT_CHARS = 4000;
+
+/**
+ * system 提示词的保留上限。
+ *
+ * 小艺是语音助手：没有工具、没有文件系统、没有多轮上下文，DSH 那套 agent 提示词对它
+ * 完全无用（实测它会回「我注意到你发送的内容似乎是 DeepSeek Harness 的特定系统指令」
+ * 这种答非所问的话）。只有很短的 system 才可能带有效信息，长的直接丢掉。
+ */
+const MAX_SYSTEM_CHARS = 200;
+
+/**
+ * DSH 注入到 user 轮里的内部噪声 —— 不是用户说的话。
+ *
+ * 这些块（工作区说明、skill 清单、runtime context 快照、切模型提示）都是 harness
+ * 自己插进对话里的，小艺既用不上，又会挤掉用户真正问的那句话。
+ */
+const DSH_INTERNAL_PREFIXES = [
+  '<system-reminder>',
+  'current runtime context.',
+  '[model changed:',
+  '[runtime context',
+  '[attached files',
+];
+
+/** 这段文本是不是 DSH harness 插进来的内部噪声。 */
+function isInternalChatter(text) {
+  const head = text.trimStart().toLowerCase();
+  return DSH_INTERNAL_PREFIXES.some((p) => head.startsWith(p));
+}
+
+/**
+ * 把 OpenAI 的 messages 收敛成一段给小艺的文本。
+ *
+ * 规则：
+ * - 只取**最后一条**不是 DSH 内部噪声的用户输入（整条 user 都算噪声时退回最后一条原始输入）；
+ * - assistant 历史一律丢弃（通道是单轮的，带上只会让它答错轮次）；
+ * - system 提示词短于 {@link MAX_SYSTEM_CHARS} 才保留，且保留时仍按「（要求：…）」包裹；
+ * - 最终长度硬顶在 {@link MAX_PROMPT_CHARS} 以内，超出部分截断并加省略号。
+ *
+ * @param {Array<{role?: string, content?: unknown}>} [messages] OpenAI 格式的对话。
+ * @returns {string} 交给小艺的提示词；没有可用用户输入时返回空串。
+ */
+export function buildPrompt(messages) {
   const systems = [];
-  const turns = [];
+  const users = [];
   for (const m of messages || []) {
     let content = m.content;
     if (Array.isArray(content)) content = content.map((c) => (c && c.text) || '').join('');
     content = String(content || '').trim();
     if (!content) continue;
     if (m.role === 'system') systems.push(content);
-    else turns.push([m.role === 'assistant' ? '助手' : '用户', content]);
+    else if (m.role !== 'assistant') users.push(content);
   }
-  if (!turns.length) return '';
-  const body = turns.length === 1 ? turns[0][1] : turns.map(([w, t]) => `${w}：${t}`).join('\n');
-  return systems.length ? `（要求：${systems.join('；')}）\n\n${body}` : body;
+  if (!users.length) return '';
+
+  // 取最后一条「不是 harness 内部噪声」的用户输入；全被过滤时退回最后一条原始输入，
+  // 宁可答得勉强，也不要因为 harness 插了几段说明就把请求判成空。
+  let question = users[users.length - 1];
+  for (let i = users.length - 1; i >= 0; i--) {
+    if (!isInternalChatter(users[i])) {
+      question = users[i];
+      break;
+    }
+  }
+
+  const systemText = systems.join('；');
+  const prefix = systemText && systemText.length <= MAX_SYSTEM_CHARS
+    ? `（要求：${systemText}）\n\n`
+    : '';
+  const room = Math.max(0, MAX_PROMPT_CHARS - prefix.length);
+  const body = question.length > room
+    ? `${question.slice(0, Math.max(0, room - 1))}…`
+    : question;
+  return `${prefix}${body}`;
 }
 
 // ---------------------------------------------------------------- HTTP 辅助
