@@ -1,6 +1,7 @@
 // 后端适配层：把"一次对话请求"落到具体模型通道上。
 //   CliBackend    —— 官方路线：无头调用本机 CodeBuddy CLI（共享客户端账号额度）
 //   OpenAIBackend —— 第三方路线：任何 OpenAI 兼容网关（如 workbuddy2api）
+//   WorkBuddyCloudBackend —— 直连 WorkBuddy 云端（自带渠道头，见 workbuddy-cloud.mjs）
 //
 // 关键工程细节都集中在 buildCleanEnv()：直接 spawn CLI 会因为继承了
 // WorkBuddy 桌面端注入的环境变量而静默挂死。
@@ -10,6 +11,8 @@ import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { WorkBuddyCloudBackend } from './workbuddy-cloud.mjs';
 
 /** 本模块所在目录 —— 用作凭证缓存的默认落盘位置，避免依赖 cwd。 */
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -1260,6 +1263,7 @@ export function createBackend(config) {
   if (config.backend === 'mock') return new MockBackend(config.mock || {});
   if (config.backend === 'openai') return new OpenAIBackend(config.openai || {});
   if (config.backend === 'serve') return new ServeBackend(config.serve || {});
+  if (config.backend === 'wbcloud') return new WorkBuddyCloudBackend(config.wbcloud || {});
   return new CliBackend(config.cli || {});
 }
 

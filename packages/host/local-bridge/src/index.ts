@@ -19,10 +19,10 @@
  * 这里只负责编排生命周期：单个反代启动失败只记一条 warning，不影响另一个，
  * 也不阻断宿主启动；fiber dispose 时关掉全部监听。
  *
- * 图片投递：两条通道的上游都只接受**纯文本**（WorkBuddy 网关的 `userPrompt` 是 string；
- * Copilot 的 chatHub 协议无附件字段），所以图片按通道分别处理：WorkBuddy 的
- * `serve`/`cli` 后端把图片落盘、交上游 agent 自己读文件（`openai` 后端则按多模态
- * content 数组真透传）；Copilot 通道无法承载图片，收到图片时**显式报错**而不是静默丢弃。
+ * 图片投递：两条通道的上游都只接受**纯文本**（Copilot 的 chatHub 协议无附件字段），
+ * 所以图片按通道分别处理：`openai` 与 `wbcloud` 是真正的 OpenAI 兼容端点，按多模态
+ * content 数组真透传；WorkBuddy 网关的 `serve`/`cli` 后端则把图片落盘、交上游 agent
+ * 自己读文件；Copilot 通道无法承载图片，收到图片时**显式报错**而不是静默丢弃。
  * @module @deepseek-ai/dsh-host-local-bridge
  */
 
@@ -80,10 +80,23 @@ export interface Config {
   host: string
   /** WorkBuddy 模型反代端口。 */
   port: number
-  /** WorkBuddy 反代的模型通道：`serve`（客户端网关）/ `cli`（CodeBuddy CLI）/ `openai`（任意 OpenAI 兼容端点）。 */
+  /**
+   * WorkBuddy 反代的模型通道：
+   * - `wbcloud`（默认）：直连 WorkBuddy 云端，自带官方客户端的渠道头。
+   * - `serve`：客户端本地网关的一次性 agent 接口 —— 云端现在做渠道校验，这条路已被拒。
+   * - `cli`：无头调用本机 CodeBuddy CLI。
+   * - `openai`：任意 OpenAI 兼容端点。
+   */
   backend: string
   /** 网关凭据缓存目录；留空则落在系统临时目录（安装目录通常不可写）。 */
   cacheDir: string
+  /** `wbcloud` 通道的专属设置；其余通道不读这里。 */
+  wbcloud: {
+    /** 运行 `workbuddy-token.py` 的解释器；留空则自动在 LOCALAPPDATA\Programs\Python 与 PATH 里找。 */
+    python: string
+    /** 收割脚本路径；留空则用同目录的 `workbuddy-token.py`。 */
+    harvestScript: string
+  }
   /** Microsoft Copilot 反代。 */
   copilot: {
     /** 是否启动 Copilot 反代（需先收割到令牌，否则只监听、调用会报 no_token）。 */
@@ -160,8 +173,12 @@ export const Config: z<Config> = z.object({
   enabled: z.boolean().default(true),
   host: z.string().default('127.0.0.1'),
   port: z.number().default(DEFAULT_WORKBUDDY_PORT),
-  backend: z.string().default('serve'),
+  backend: z.string().default('wbcloud'),
   cacheDir: z.string().default(''),
+  wbcloud: z.object({
+    python: z.string().default(''),
+    harvestScript: z.string().default(''),
+  }),
   copilot: z.object({
     enabled: z.boolean().default(true),
     port: z.number().default(DEFAULT_COPILOT_PORT),
@@ -453,6 +470,15 @@ export function apply(ctx: Context, config: Config): void {
         server: { host: config.host, port: config.port },
         backend: config.backend,
         serve: { cacheDir },
+        wbcloud: {
+          // 收割器由 python 这个**外部进程**读取，打包后必须给真实磁盘路径，
+          // 否则它只会拿到 app.asar 里的伪路径（与 xiaoyi-harvest.py 同一个坑）。
+          harvestScript: resolveRealPath(
+            config.wbcloud.harvestScript
+              || fileURLToPath(new URL('../bridge/workbuddy-token.py', import.meta.url)),
+          ),
+          ...config.wbcloud.python ? { python: config.wbcloud.python } : {},
+        },
       },
     },
   ]

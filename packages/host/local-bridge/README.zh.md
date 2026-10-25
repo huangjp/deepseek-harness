@@ -31,8 +31,10 @@ kind: "package-reference"
 | `enabled` | `true` | 是否启动反代；关闭时设置页的路由依然存在 |
 | `host` | `127.0.0.1` | 两个反代共用的监听地址 |
 | `port` | `8787` | WorkBuddy 反代端口 |
-| `backend` | `serve` | WorkBuddy 的模型通道：客户端网关、CodeBuddy CLI，或任意 OpenAI 兼容端点 |
+| `backend` | `wbcloud` | WorkBuddy 的模型通道：`wbcloud`（直连 WorkBuddy 云端，自带官方客户端的渠道头）/ `serve`（客户端网关）/ `cli`（CodeBuddy CLI）/ `openai`（任意 OpenAI 兼容端点） |
 | `cacheDir` | 系统临时目录 | 网关凭据缓存；安装目录通常不可写 |
+| `wbcloud.python` | 自动探测 | 运行 `bridge/workbuddy-token.py` 的解释器；留空则在 `%LOCALAPPDATA%\Programs\Python` 与 `PATH` 里找 |
+| `wbcloud.harvestScript` | 随包分发 | 从客户端进程内存收割 WorkBuddy access token 的脚本；留空则用 `bridge/workbuddy-token.py` |
 | `copilot.enabled` | `true` | 是否启动 Copilot 反代 |
 | `copilot.port` | `8899` | Copilot 反代端口 |
 | `copilot.harvestDir` | `%USERPROFILE%\copilot-probe` | 收割到的令牌、请求模板与刷新转录 |

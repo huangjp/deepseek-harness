@@ -110,6 +110,7 @@ function initRuntime(overrides = {}) {
 /** 当前后端实际使用的模型名（不同后端配置项不同，统一在这里取）。 */
 function activeModel() {
   if (config.backend === 'serve') return config.serve?.model || 'deepseek-v4.1-flash';
+  if (config.backend === 'wbcloud') return config.wbcloud?.model || 'deepseek-v4.1-flash';
   if (config.backend === 'openai') return config.openai?.model || 'default';
   if (config.backend === 'mock') return 'mock';
   return config.cli?.model || 'default';
@@ -380,10 +381,11 @@ function materializeImages(images) {
 async function invokeModel({ prompt, systemPrompt, model, signal, onDelta, images }) {
   await gate.acquire();
   const hasImages = Array.isArray(images) && images.length > 0;
+  // openai 与 wbcloud 都是「真正的 OpenAI 兼容端点」：按多模态 content 数组透传，保真度最高。
+  const passthrough = config.backend === 'openai' || config.backend === 'wbcloud';
   let tempDir = null;
   try {
-    if (hasImages && config.backend === 'openai') {
-      // openai 后端是真正的 OpenAI 兼容端点：按多模态 content 数组透传，保真度最高。
+    if (hasImages && passthrough) {
       const content = [{ type: 'text', text: prompt }];
       for (const img of images) {
         content.push({ type: 'image_url', image_url: { url: `data:${img.mime};base64,${img.base64}` } });
@@ -402,7 +404,7 @@ async function invokeModel({ prompt, systemPrompt, model, signal, onDelta, image
       log(`[图片] ${images.length} 张已落盘到 ${tempDir}，交由上游 agent 读取`);
     }
 
-    if (config.backend === 'openai') {
+    if (passthrough) {
       const msgs = [];
       if (systemPrompt) msgs.push({ role: 'system', content: systemPrompt });
       msgs.push({ role: 'user', content: finalPrompt });
@@ -433,7 +435,9 @@ async function handleHealth(req, res) {
   sendJson(res, 200, {
     ok: true,
     backend: config.backend,
-    model: config.backend === 'openai' ? config.openai?.model : config.cli?.model,
+    model: config.backend === 'openai' ? config.openai?.model
+      : config.backend === 'wbcloud' ? config.wbcloud?.model
+        : config.cli?.model,
     cli: typeof backend.check === 'function' ? await backend.check() : null,
     weflow: wf,
     queue: { active: gate.active, pending: gate.pending, max: gate.max },

@@ -6,7 +6,22 @@
     "cors": "*"
   },
 
-  "backend": "serve",
+  "backend": "wbcloud",
+
+  "wbcloud": {
+    "_comment": "直连 WorkBuddy 云端（https://www.workbuddy.ai/v2/chat/completions）。云端做渠道校验：请求必须带官方客户端那组头，否则一律 code 11128「request illegal」，本地 CLI 网关的一次性 agent 路径不带这些头，所以那条路已不可用。",
+    "endpoint": "https://www.workbuddy.ai/v2/chat/completions",
+    "model": "deepseek-v4.1-flash",
+    "timeoutMs": 180000,
+    "maxTokens": 32000,
+    "temperature": 1,
+    "_userAgentComment": "渠道校验会看这个 UA；换 WorkBuddy 版本后要跟着改。",
+    "userAgent": "WorkBuddy/5.8.4 workbuddy-ai/5.8.4 CLI/2.161.0",
+    "_harvestScriptComment": "从 WorkBuddy 桌面端进程内存收割 access token 的脚本；留空则用同目录的 workbuddy-token.py",
+    "harvestScript": "",
+    "_pythonComment": "运行收割器 workbuddy-token.py 的解释器；留空则自动在 LOCALAPPDATA\\Programs\\Python 与 PATH 里找 python.exe",
+    "python": ""
+  },
 
   "serve": {
     "host": "127.0.0.1",

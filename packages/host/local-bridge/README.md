@@ -31,8 +31,10 @@ Mount this plugin in a composition that ships the bundled relays; the desktop ap
 | `enabled` | `true` | Start the relays at all; the settings routes exist either way |
 | `host` | `127.0.0.1` | Bind address both relays share |
 | `port` | `8787` | WorkBuddy relay port |
-| `backend` | `serve` | WorkBuddy model channel: the client gateway, the CodeBuddy CLI, or any OpenAI-compatible endpoint |
+| `backend` | `wbcloud` | WorkBuddy model channel: `wbcloud` (talk to WorkBuddy's cloud directly, with the official-client channel headers), `serve` (the client gateway), `cli` (the CodeBuddy CLI), or `openai` (any OpenAI-compatible endpoint) |
 | `cacheDir` | system temp | Gateway credential cache; the install directory is usually not writable |
+| `wbcloud.python` | auto-detected | Interpreter used to run `bridge/workbuddy-token.py`; empty means look under `%LOCALAPPDATA%\Programs\Python` and on `PATH` |
+| `wbcloud.harvestScript` | bundled | Script that harvests the WorkBuddy access token out of the client's process memory; empty means use `bridge/workbuddy-token.py` |
 | `copilot.enabled` | `true` | Start the Copilot relay |
 | `copilot.port` | `8899` | Copilot relay port |
 | `copilot.harvestDir` | `%USERPROFILE%\copilot-probe` | Harvested token, request template, and refresh transcripts |
