@@ -37,6 +37,25 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+/**
+ * 把打包环境下的 ASAR 虚拟路径改写成 ASAR 之外的真实磁盘路径。
+ *
+ * python 收割器是外部进程，完全不认识 ASAR：它拿到 ASAR 里的路径只会静默失败。
+ * （与宿主侧、backends.mjs 里的同名函数成对。）
+ *
+ * @param {string} filePath - 从模块位置推导出的文件系统路径。
+ * @returns {string} 外部进程可用的真实磁盘路径。
+ */
+function resolveUnpackedPath(filePath) {
+  const marker = /([\\/])app\.asar\1/;
+  const match = marker.exec(filePath);
+  if (!match) return filePath;
+  const separator = match[1];
+  const head = filePath.slice(0, match.index);
+  const tail = filePath.slice(match.index + match[0].length);
+  return `${head}${separator}app.asar.unpacked${separator}${tail}`;
+}
+
 const DEFAULT_ENDPOINT = 'https://www.workbuddy.ai/v2/chat/completions';
 
 /** 官方客户端的渠道头。键名与 CLI 里的常量一一对应（见 codebuddy-lite-wb.mjs 的 header 常量表）。 */
@@ -134,7 +153,8 @@ export class WorkBuddyCloudBackend {
     this.timeoutMs = cfg.timeoutMs ?? 180000;
     this.userAgent = cfg.userAgent
       || 'WorkBuddy/5.8.4 workbuddy-ai/5.8.4 CLI/2.161.0';
-    this.harvestScript = cfg.harvestScript || path.join(__dirname, 'workbuddy-token.py');
+    this.harvestScript = cfg.harvestScript
+      || resolveUnpackedPath(path.join(__dirname, 'workbuddy-token.py'));
     this._token = null;
     this._tokenAt = 0;
   }

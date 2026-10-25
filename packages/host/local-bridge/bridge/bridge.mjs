@@ -75,7 +75,7 @@ function initRuntime(overrides = {}) {
   config = { ...base, ...overrides };
   // 已知子对象做浅合并：宿主只传一个字段（例如只改 server.port）时，
   // 不能把整块配置顶掉 —— 那会连 serve.agentName 这类必填项一起丢掉。
-  for (const key of ['server', 'serve', 'cli', 'openai', 'weflow', 'summary']) {
+  for (const key of ['server', 'serve', 'cli', 'openai', 'weflow', 'summary', 'wbcloud']) {
     if (overrides[key] && base[key]) config[key] = { ...base[key], ...overrides[key] };
   }
 

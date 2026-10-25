@@ -10,12 +10,41 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-import { WorkBuddyCloudBackend } from './workbuddy-cloud.mjs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** 本模块所在目录 —— 用作凭证缓存的默认落盘位置，避免依赖 cwd。 */
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * 把打包环境下的 ASAR 虚拟路径改写成 ASAR 之外的真实磁盘路径。
+ *
+ * 与宿主侧的同名函数成对：外部进程（python 收割器）完全不认识 ASAR，拿到 ASAR 里的
+ * 路径只会静默失败。
+ *
+ * @param {string} filePath - 从模块位置推导出的文件系统路径。
+ * @returns {string} 外部进程可用的真实磁盘路径。
+ */
+function resolveUnpackedPath(filePath) {
+  const marker = /([\\/])app\.asar\1/;
+  const match = marker.exec(filePath);
+  if (!match) return filePath;
+  const separator = match[1];
+  const head = filePath.slice(0, match.index);
+  const tail = filePath.slice(match.index + match[0].length);
+  return `${head}${separator}app.asar.unpacked${separator}${tail}`;
+}
+
+/**
+ * 云端后端单独成文件，但**必须用绝对路径动态导入**。
+ *
+ * 打包后本模块的 URL 在 `app.asar/` 里，相对 import 会解析到 asar 内部 —— 而新加的
+ * 文件不在 asar 头里（头是打包时按文件清单生成的），于是模块找不到，整个反代加载
+ * 失败、端口根本不监听（表现为「反代没起来」，而日志里只有一条启动失败）。
+ * 绝对路径 + asar→unpacked 映射指向真实的解包副本，与 asar 头无关。
+ */
+const { WorkBuddyCloudBackend } = await import(
+  pathToFileURL(resolveUnpackedPath(path.join(MODULE_DIR, 'workbuddy-cloud.mjs'))).href,
+);
 
 /**
  * 必须从子进程环境中剔除的变量。
