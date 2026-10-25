@@ -1118,20 +1118,25 @@ export class ServeBackend {
             '请确认 serve.agentName 指向纯文本任务型 agent（如 terminalTitleGenerator）。'
           ), { code: 'agent_tool_not_found', httpStatus: 502, retriable: true });
         }
-        // 云端拒绝这一类要单独说清楚，因为它**不是反代自身的问题**。
+        // 云端拒绝这一类要单独说清楚，因为它**不是反代配置的问题**。
         //
-        // 实测（2026-10-25）：同一个账号下所有内置模型（deepseek-v4.1-flash /
-        // default-model / fast-model / gpt-5.6-sol / glm-5.3-flash / kimi-k3 …）、
-        // 所有 agent、所有请求体形态都命中这一条；**WorkBuddy 客户端自己的后台请求**
-        // （每分钟一次的 conversation_topic）同样命中。反代的链路是好的 ——
-        // 走自定义模型（custom-local:*，即 models.json 里直连第三方 API 的那条）
-        // 完全正常。所以这里要告诉调用方「这是账号/云端侧的状态」，而不是让人
-        // 去查反代配置。
+        // 实测（2026-10-25）：同一账号、同一 CLI 进程、同一模型，
+        //   · 走**会话内**请求（ACP `session/prompt`，即 WorkBuddy 客户端聊天那条路）
+        //     → HTTP 200，首字 ~740ms，流正常收完；
+        //   · 走**一次性 agent** 请求（`/api/v1/llm/completions`，也就是本反代在用
+        //     的这条路）→ 一律 400 request illegal。
+        // 差别在请求上下文：会话内请求带 `conversation_id`（真实会话 id）与
+        // `conversation_request_id` / `prompt_request_id` / `trace_id`，一次性路径
+        // 这三个是空串、`conversation_id` 是随机 uuid，云端现在不收。
+        // 历史日志里这条一次性路径成功过几千次，说明是云端后加了校验，不是本地写错。
+        //
+        // 所以文案要指向「云端要求会话标识」这件事，而不是让人去查反代配置。
         if (/^400 request illegal/i.test(msg)) {
           throw Object.assign(new Error(
             `WorkBuddy 云端拒绝了这次模型调用（400 request illegal）：${msg}。`
-            + '这不是反代自身的问题 —— 同一账号下所有内置模型都会被拒，WorkBuddy 客户端自己的后台请求同样被拒；'
-            + '若在 WorkBuddy 的 models.json 里配过自定义模型（custom-local:*，直连第三方 API），那条路不走云端模型网关，仍可用。'
+            + '这不是反代配置问题 —— WorkBuddy 云端现在只接受带会话标识的请求，'
+            + '而本反代走的一次性 agent 接口（/api/v1/llm/completions）填不出这些标识，所以必被拒；'
+            + 'WorkBuddy 客户端里直接对话走的是会话路径，不受影响。'
           ), {
             code: 'upstream_error', httpStatus: 502, retriable: false,
           });
