@@ -19,7 +19,8 @@ import {
   buildSummaryPrompt, buildSchemaInstruction, parseJsonLoose,
 } from './weflow.mjs';
 import {
-  buildToolInstruction, completeWithToolCalls, toolCallFailureText, toolTurnText, TRANSCRIPT_TRAILER,
+  buildToolCallFormatHint, buildToolInstruction, completeWithToolCalls, resolveToolOutcome,
+  toolCallFailureText, toolTurnText, TRANSCRIPT_TRAILER,
 } from './toolprompt.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -402,7 +403,13 @@ async function invokeModel({ prompt, systemPrompt, messages, tools, toolChoice, 
       // 原生路径**原样透传**整段对话（含 role=assistant 的 tool_calls 与 role=tool 的
       // 执行结果）：这是多轮工具调用能接上的关键 —— 压成文本再喂回去，模型就分不清
       // 哪句是上一轮要的工具、哪句是它的执行结果。
-      const msgs = Array.isArray(messages) && messages.length
+      //
+      // 只在 system 后面补一段**格式提示**：WorkBuddy 云端的模型训练时带的是 DSML
+      // 标记，工具一多就会退回 DSML，还常把 invoke 的 name 写成 bridge_tool_calls
+      // （于是真正要调的工具名丢了）。提示里把「name 必须是真实工具名」讲清楚，
+      // 就能让它两边都写对。
+      const hint = buildToolCallFormatHint(tools);
+      let msgs = Array.isArray(messages) && messages.length
         ? messages
         : (() => {
           const list = [];
@@ -410,6 +417,13 @@ async function invokeModel({ prompt, systemPrompt, messages, tools, toolChoice, 
           list.push({ role: 'user', content: prompt });
           return list;
         })();
+      if (hint) {
+        msgs = msgs.map((m, i) => (
+          i === 0 && m?.role === 'system'
+            ? { ...m, content: `${m.content}\n\n${hint}` }
+            : m
+        ));
+      }
       return await backend.complete({ messages: msgs, tools, toolChoice, model, signal, onDelta });
     }
 
@@ -548,7 +562,18 @@ async function handleChatCompletions(req, res) {
         messages: body.messages, tools: body.tools, toolChoice: body.tool_choice,
         model, signal: ctl.signal, images,
       });
-      r = { calls: x.toolCalls || null, content: x.text, broken: false, text: x.text, usage: x.usage };
+      // 原生 function calling 没给出调用时，回退**文本协议**解析。工具一多，模型
+      // 常常改用自己的 DSML 标记或 bridge_tool_calls JSON 表达同一件事（实测：27 个
+      // 真实工具时就是这个形状），那同样是合法的工具意图，不该被当成正文丢掉。
+      const fallback = x.toolCalls?.length ? null : resolveToolOutcome({ text: x.text, hasTools: true });
+      const calls = x.toolCalls?.length ? x.toolCalls : (fallback?.calls ?? null);
+      r = {
+        calls,
+        content: calls ? '' : x.text,
+        broken: Boolean(fallback?.broken),
+        text: x.text,
+        usage: x.usage,
+      };
     } else if (hasTools) {
       const out = await chatWithTools({ prompt, systemPrompt, model, signal: ctl.signal, images });
       r = { ...out.outcome, text: out.text, usage: out.usage };
@@ -609,10 +634,16 @@ async function handleChatCompletions(req, res) {
         messages: body.messages, tools: body.tools, toolChoice: body.tool_choice,
         model, signal: ctl.signal, images,
       });
-      if (x.toolCalls?.length) {
+      const fallback = x.toolCalls?.length ? null : resolveToolOutcome({ text: x.text, hasTools: true });
+      const calls = x.toolCalls?.length ? x.toolCalls : (fallback?.calls ?? null);
+      if (calls) {
         frame({ role: 'assistant', content: '' });
-        frame({ tool_calls: x.toolCalls.map((c, i) => ({ index: i, ...c })) });
+        frame({ tool_calls: calls.map((c, i) => ({ index: i, ...c })) });
         frame({}, 'tool_calls');
+      } else if (fallback?.broken) {
+        frame({ role: 'assistant', content: '' });
+        frame({ content: toolCallFailureText(x.text) });
+        frame({}, 'stop');
       } else {
         frame({ role: 'assistant', content: x.text });
         frame({}, 'stop');

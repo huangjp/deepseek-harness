@@ -60,20 +60,42 @@ export const TRANSCRIPT_TRAILER = [
 ].join('\n');
 
 /**
+ * 归一化 OpenAI 的 tools 数组 —— **同时认两种形状**。
+ *
+ * 标准形状是 `{type:'function', function:{name, description, parameters}}`，
+ * 但 DSH 那边发过来的是**扁平**的 `{name, description, parameters}`（没有 function
+ * 包装，也没有 type 字段）。
+ *
+ * 这个差别很要命：早先只认标准形状，于是 DSH 那 27 个工具渲染出来的清单是**空的** ——
+ * 模型压根不知道自己有工具，于是只会说「我无法访问你本机上的文件」，一次调用都不会发。
+ *
+ * @param {Array<object>} tools OpenAI 风格或扁平形状的 tools 数组。
+ * @returns {Array<{name: string, description: string, parameters: object}>} 归一化后的清单。
+ */
+export function normalizeToolSpecs(tools) {
+  if (!Array.isArray(tools)) return [];
+  return tools
+    .map((t) => {
+      const fn = t?.function && typeof t.function === 'object' ? t.function : t;
+      const name = fn?.name;
+      if (!name) return null;
+      return {
+        name: String(name),
+        description: fn?.description || '',
+        parameters: fn?.parameters || { type: 'object', properties: {} },
+      };
+    })
+    .filter(Boolean);
+}
+
+/**
  * 把 OpenAI tools 定义渲染成提示词里的清单与格式约定。
- * @param {Array<object>} tools OpenAI 风格 tools 数组。
+ * @param {Array<object>} tools OpenAI 风格或扁平形状的 tools 数组。
  * @param {string} [toolChoice] OpenAI 的 tool_choice：`required` / `none` / 其他。
  * @returns {string} 提示词片段；没有可用工具时为空串。
  */
 export function buildToolInstruction(tools, toolChoice) {
-  if (!Array.isArray(tools) || tools.length === 0) return '';
-  const specs = tools
-    .map((t) => ({
-      name: t?.function?.name,
-      description: t?.function?.description || '',
-      parameters: t?.function?.parameters || { type: 'object', properties: {} },
-    }))
-    .filter((t) => t.name);
+  const specs = normalizeToolSpecs(tools);
   if (!specs.length) return '';
 
   const lines = [
@@ -171,6 +193,42 @@ export function toolTurnText(message, content) {
 ].join('\n');
 
 /**
+ * 工具调用格式提示 —— 给**已经拿到原生 tools** 的通道追加的一段话。
+ *
+ * 背景：WorkBuddy 云端的模型是 WorkBuddy 官方 agent 用的那一族，训练时就带原生
+ * 工具调用格式（DSML）。实测（DSH 真实 27 个工具）：
+ *   - 工具少、提示简单时，它会**直接用原生 tool_calls**（能正常落地）；
+ *   - 工具多、或提示里出现过 `bridge_tool_calls` 这个名字时，它会改吐自己的 DSML
+ *     标记，而且常把 invoke 的 name 写成 `bridge_tool_calls`（那是我们的文本协议
+ *     约定的名字），真正要调的工具名就丢了 —— 表现是"模型明明要读文件，却什么
+ *     都没发生"。
+ *
+ * 所以这里明确告诉它两种都算数，但 **name 必须是真实工具名**。
+ *
+ * @param {Array<object>} tools OpenAI 风格 tools 数组。
+ * @returns {string} 提示词片段；没有可用工具时为空串。
+ */
+export function buildToolCallFormatHint(tools) {
+  const specs = normalizeToolSpecs(tools);
+  if (!specs.length) return '';
+  const names = specs.map((s) => s.name);
+  if (!names.length) return '';
+  return [
+    '【工具调用格式】',
+    '需要工具时用下面任一种方式表达意图，外部会解析并替你执行：',
+    '  1. 原生 function calling（直接把工具名与参数作为 tool_calls 给出）；',
+    '  2. DSML 标记：',
+    '     <｜DSML｜｜ calls>',
+    '     <｜DSML｜｜ invoke name="真实工具名">',
+    '     <｜DSML｜｜ parameter name="参数名" string="true">参数值</｜DSML｜｜ parameter>',
+    '     </｜DSML｜｜ invoke>',
+    '     </｜DSML｜｜ calls>',
+    '注意：invoke 的 name 必须是**下面清单里的真实工具名**，不要用任何占位名或协议名。',
+    `可用工具名：${names.join('、')}`,
+  ].join('\n');
+}
+
+/**
  * 精简版工具清单 —— 给**输入长度有硬上限**的通道用（小艺的 textRecognize 实测约 8000 字符）。
  *
  * 完整版 {@link buildToolInstruction} 会把每个工具的完整 JSON schema 渲染进去：DSH 有
@@ -182,16 +240,11 @@ export function toolTurnText(message, content) {
  * @returns {string} 提示词片段；没有可用工具时为空串。
  */
 export function buildCompactToolInstruction(tools, toolChoice) {
-  if (!Array.isArray(tools) || tools.length === 0) return '';
-  const specs = tools
-    .map((t) => {
-      const name = t?.function?.name;
-      if (!name) return null;
-      const desc = String(t?.function?.description || '').replace(/\s+/g, ' ').trim();
-      const args = Object.keys(t?.function?.parameters?.properties || {});
-      return { name, desc: desc.slice(0, 60), args };
-    })
-    .filter(Boolean);
+  const specs = normalizeToolSpecs(tools).map((s) => {
+    const desc = String(s.description || '').replace(/\s+/g, ' ').trim();
+    const args = Object.keys(s.parameters?.properties || {});
+    return { name: s.name, desc: desc.slice(0, 60), args };
+  });
   if (!specs.length) return '';
 
   const lines = [

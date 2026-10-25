@@ -305,7 +305,22 @@ export class WorkBuddyCloudBackend {
     // 去输出纯文本、一半概率去输出原生 tool_calls，而解析器只认其中一种。
     const nativeTools = Array.isArray(tools) && tools.length > 0;
     if (nativeTools) {
-      body.tools = tools;
+      // 归一化成 OpenAI 标准形状：DSH 那边发过来的是**扁平**的
+      // {name, description, parameters}，云端只认 {type:'function', function:{…}}。
+      body.tools = tools
+        .map((t) => {
+          const fn = t?.function && typeof t.function === 'object' ? t.function : t;
+          if (!fn?.name) return null;
+          return {
+            type: 'function',
+            function: {
+              name: String(fn.name),
+              description: fn.description || '',
+              parameters: fn.parameters || { type: 'object', properties: {} },
+            },
+          };
+        })
+        .filter(Boolean);
       if (toolChoice) body.tool_choice = toolChoice;
     }
 

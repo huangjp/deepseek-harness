@@ -11,6 +11,20 @@ export interface WireTool {
     description?: string
     parameters?: unknown
   }
+  /** 扁平形状：DSH 那边发过来的是 `{name, description, parameters}`，没有 function 包装。 */
+  name?: string
+  description?: string
+  parameters?: unknown
+}
+
+/** 归一化后的工具定义。 */
+export interface ToolSpec {
+  /** 工具名。 */
+  name: string
+  /** 工具说明。 */
+  description: string
+  /** 参数 schema。 */
+  parameters: { type?: string; properties?: Record<string, unknown>; [key: string]: unknown }
 }
 
 /** 一条 OpenAI 风格的 tool_call。 */
@@ -44,13 +58,45 @@ export const EXTERNAL_TOOLING_NOTICE: string
 /** JSON 写坏时的重试提示。 */
 export const TOOL_CALL_REPAIR_REMINDER: string
 
+/** 模型拒绝执行工具任务时的重试提示。 */
+export const TOOL_CALL_REFUSAL_REMINDER: string
+
+/**
+ * 归一化 tools —— 同时认 OpenAI 标准形状与 DSH 的扁平形状。
+ * @param tools - OpenAI 风格或扁平形状的 tools 数组。
+ * @returns 归一化后的清单。
+ */
+export function normalizeToolSpecs(tools: WireTool[] | undefined): ToolSpec[]
+
 /**
  * 把 OpenAI tools 渲染成提示词里的清单与格式约定。
- * @param tools - OpenAI 风格 tools 数组。
+ * @param tools - OpenAI 风格或扁平形状的 tools 数组。
  * @param toolChoice - OpenAI 的 tool_choice。
  * @returns 提示词片段；没有可用工具时为空串。
  */
 export function buildToolInstruction(tools: WireTool[] | undefined, toolChoice?: string): string
+
+/**
+ * 精简版工具清单 —— 给输入长度有硬上限的通道用。
+ * @param tools - OpenAI 风格或扁平形状的 tools 数组。
+ * @param toolChoice - OpenAI 的 tool_choice。
+ * @returns 提示词片段；没有可用工具时为空串。
+ */
+export function buildCompactToolInstruction(tools: WireTool[] | undefined, toolChoice?: string): string
+
+/**
+ * 工具调用格式提示 —— 给已经拿到原生 tools 的通道追加。
+ * @param tools - OpenAI 风格或扁平形状的 tools 数组。
+ * @returns 提示词片段；没有可用工具时为空串。
+ */
+export function buildToolCallFormatHint(tools: WireTool[] | undefined): string
+
+/**
+ * 模型的输出是不是「拒绝执行工具任务」。
+ * @param text - 模型输出。
+ * @returns 是否像一次拒答。
+ */
+export function looksLikeToolRefusal(text: string | undefined): boolean
 
 /**
  * 助手表达过的调用回放成对话文本。

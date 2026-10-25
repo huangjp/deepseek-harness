@@ -128,13 +128,20 @@ function toToolCalls(obj) {
     wrapperKeys = Object.keys(obj).filter((k) => k !== 'tool_calls');
   } else if (obj.name && obj.arguments !== undefined) {
     list = [obj];
+  } else if (obj.tool && (obj.arguments !== undefined || obj.args !== undefined)) {
+    // 模型有时把单个调用写成 {"tool":"read","arguments":{…}} 或 {"tool":"read","args":{…}}
+    // （用 tool 而不是 name；参数键也可能是 args）。这也是我们文本协议约定的形状，
+    // 漏掉它就会把一次明确的调用意图当成正文丢掉。
+    list = [obj];
   }
   if (!Array.isArray(list) || !list.length) return null;
 
   const calls = list
     .map((t, i) => {
-      const name = String(t?.name || t?.function?.name || '');
-      let args = t?.arguments !== undefined ? t.arguments : t?.function?.arguments;
+      const name = String(t?.name || t?.tool || t?.function?.name || '');
+      let args = t?.arguments !== undefined ? t.arguments
+        : t?.args !== undefined ? t.args
+          : t?.function?.arguments;
       if (args === undefined || args === null) args = {};
       // 模型常见错误：把 summarize / scenarios 之类参数放到 wrapper 层。
       // 只有一个调用时并回 arguments（不覆盖已有键），多个调用时语义不明，不做猜测。
@@ -246,13 +253,99 @@ export function parseDsmlToolCalls(text) {
       if (cut >= 0) raw = raw.slice(0, cut);
       args[key] = dsmlValue(param[1] ?? '', raw);
     }
+    // 没有 parameter 标签时，invoke 的正文可能**直接就是一个 JSON 对象** ——
+    // 实测（WorkBuddy 云端直连 + 27 个真实工具）：
+    //   <｜DSML｜｜ invoke name="bridge_tool_calls">
+    //   {"tool":"read","arguments":{"path":"…"}}
+    //   </｜DSML｜｜ invoke>
+    // 那种形状下参数就在正文里，不取出来就等于丢了。
+    if (!params.length) {
+      const candidate = extractJsonObjects(body)[0];
+      if (candidate) {
+        try {
+          const parsed = JSON.parse(candidate);
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) Object.assign(args, parsed);
+        } catch { /* 不是 JSON 就当没有参数 */ }
+      }
+    }
     calls.push({
       id: `call_${Date.now().toString(36)}${index}${Math.random().toString(36).slice(2, 6)}`,
       type: 'function',
       function: { name, arguments: JSON.stringify(args) },
     });
   }
-  return calls.length ? calls : null;
+  return calls.length ? unwrapMetaToolCalls(calls) : null;
+}
+
+/**
+ * 剥掉「元工具」这层壳。
+ *
+ * 模型有时把**文本协议本身**当成一个工具来调用：
+ *   <｜DSML｜｜ invoke name="bridge_tool_calls">
+ *   {"tool":"read","arguments":{"path":"…"}}
+ *   </｜DSML｜｜ invoke>
+ * 不剥这层，下游就会去找一个叫 `bridge_tool_calls` 的工具 —— 它根本不存在，
+ * 于是这次调用必然失败，表现为「模型明明要读文件，却什么都没发生」。
+ *
+ * @param {Array<object>} calls 解析出来的工具调用。
+ * @returns {Array<object>} 剥壳后的工具调用。
+ */
+export function unwrapMetaToolCalls(calls) {
+  if (!Array.isArray(calls)) return calls;
+  const out = [];
+  for (const c of calls) {
+    if (c?.function?.name !== 'bridge_tool_calls') {
+      out.push(c);
+      continue;
+    }
+    let args = {};
+    try { args = JSON.parse(c?.function?.arguments || '{}'); } catch { args = {}; }
+    // 形状一：{"tool":"read","arguments":{…}}
+    const single = args.tool || args.name;
+    if (single) {
+      // 参数可能在 arguments 里，也可能就是**其余那些键**（模型把 tool 与参数平铺在一起：
+      //   {"tool":"read","path":"…"}/DSML 的 <parameter name="tool">read</parameter>
+      //   + <parameter name="path">…</parameter>）。
+      const rest = { ...args };
+      delete rest.tool;
+      delete rest.name;
+      delete rest.arguments;
+      const finalArgs = args.arguments !== undefined ? args.arguments : rest;
+      out.push({
+        id: c.id,
+        type: 'function',
+        function: {
+          name: String(single),
+          arguments: typeof finalArgs === 'string' ? finalArgs : JSON.stringify(finalArgs ?? {}),
+        },
+      });
+      continue;
+    }
+    // 形状二：{"tool_calls":[{"name":"read","arguments":{…}}, …]}
+    // （实测两种形状模型都吐过：前者把单个调用包起来，后者把整份协议包起来。）
+    const list = Array.isArray(args.tool_calls)
+      ? args.tool_calls
+      : (args.tool_calls && typeof args.tool_calls === 'object' ? [args.tool_calls] : null);
+    if (list?.length) {
+      for (const [i, t] of list.entries()) {
+        const name = String(t?.name || t?.function?.name || '');
+        if (!name) continue;
+        const a = t?.arguments ?? t?.function?.arguments ?? {};
+        out.push({
+          // id 必须逐个不同：下游 agent 用它把工具结果对回调用。
+          id: list.length === 1 && c.id ? c.id : `${c.id}_${i}`,
+          type: 'function',
+          function: {
+            name,
+            arguments: typeof a === 'string' ? a : JSON.stringify(a ?? {}),
+          },
+        });
+      }
+      continue;
+    }
+    out.push(c);
+  }
+  return out;
 }
 
 /** 从模型输出里解析工具调用；不是工具调用则返回 null。 */
@@ -281,7 +374,7 @@ export function parseToolCalls(text) {
       let obj;
       try { obj = JSON.parse(cand); } catch { continue; }
       const calls = toToolCalls(obj);
-      if (calls) return calls;
+      if (calls) return unwrapMetaToolCalls(calls);
     }
   }
   return null;
