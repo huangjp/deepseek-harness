@@ -116,6 +116,52 @@ In pi-ai configuration, every list must name at least one modality except a mode
 
 Both fields state a claim about your endpoint rather than checking it. A model that declares images its endpoint does not serve is not caught here; the provider rejects the request instead.
 
+### MiniMax's Anthropic-compatible endpoint
+
+MiniMax's platform offers an Anthropic-compatible endpoint at `https://api.minimax.cn/anthropic` (the international site is `https://api.minimax.io/anthropic`). It currently supports two models, both natively multimodal with a 1,000,000-token context window:
+
+| Model | Context window | Modalities | Thinking |
+| :- | :-: | :- | :- |
+| `MiniMax-M3.1-Flash` | 1,000,000 | text + image | always on, depth adjustable |
+| `MiniMax-M3` | 1,000,000 | text + image | off by default, `adaptive` turns it on |
+
+The installed pi-ai catalog carries `MiniMax-M3` (1,000,000-token context, text + image) but **not** `MiniMax-M3.1-Flash`, and it names no reasoning levels or `forceAdaptiveThinking`. Declare both models to get the full capability:
+
+```yaml
+- id: llm-pi-ai
+  config:
+    providers:
+      slefminimax:
+        apiKeyEnv: SLEFMINIMAX_API_KEY
+        api: anthropic-messages
+        baseURL: https://api.minimax.cn/anthropic
+        models:
+          - id: MiniMax-M3.1-Flash
+            name: MiniMax-M3.1-Flash
+            input: [text, image]
+            contextWindow: 1000000
+            maxTokens: 128000
+            reasoningEfforts:
+              low: low
+              medium: medium
+              high: high
+              xhigh: xhigh
+              max: max
+            compat:
+              forceAdaptiveThinking: true
+              supportsTemperature: false
+```
+
+Each of those entries answers a specific fact about the endpoint:
+
+- `input: [text, image]` — Without it pi-ai consults the installed catalog (which does not describe this model) and falls back to the route's `defaultInput` (`[text]` by default), so the harness treats the model as text-only and refuses an attached image before sending with `MODEL_DOES_NOT_SUPPORT_IMAGES`. The endpoint also accepts video content blocks, but pi-ai knows only `text` and `image`, so video cannot reach it.
+- `reasoningEfforts` — Thinking depth is the endpoint's `output_config.effort`, taking `low`, `medium`, `high`, `xhigh`, or `max`; omitting it makes the endpoint default to `max`, and `none` is refused with a 400. These values are the spellings that go on the wire.
+- **No `off` level** — This is the easiest mistake to make. The endpoint forces thinking on for `MiniMax-M3.1-Flash`, and `thinking.type="disabled"` answers 400 (code 2013). That is exactly what pi-ai sends when the user picks "off" for thinking; omitting the `off` key declares that the model has no such level, so pi-ai never sends `disabled`. Writing `off: null` does not work — that tells pi-ai the level exists and must be sent.
+- `forceAdaptiveThinking: true` — Makes pi-ai send `thinking.type="adaptive"` with `output_config.effort`, which is the shape the endpoint documents. Without it pi-ai sends `thinking.type="enabled"` with `budget_tokens` instead; the endpoint accepts that too, but the thinking depth is then fixed.
+- `supportsTemperature: false` — The endpoint ignores `temperature` (fixed at 1) and `top_p` (fixed at 0.95), as it does `top_k`, `stop_sequences`, `mcp_servers`, `context_management`, and `container`.
+
+Two more things worth knowing: thinking tokens count toward `max_tokens`, so a cap set too low ends the turn with `stop_reason=max_tokens` and no text; and a multi-turn conversation must carry the model's thinking content blocks back verbatim, or the chain of thought breaks.
+
 ### DeepSeek account models
 
 A signed-in DeepSeek account lists its models from the account service, so the Models page offers no model editor for it. Adjust a single model with `modelOverrides` in `$DSH_HOME/profiles/<profile>/cordis.patch.yml`; the fields match a DeepSeek `models` entry, and unset fields keep the listed values:

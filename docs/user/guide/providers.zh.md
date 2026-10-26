@@ -116,6 +116,52 @@ DeepSeek 将省略的 `inputModalities` 视为纯文本，并拒绝空列表。�
 
 这两个字段都是对你端点的断言，而不是对它的检查。声明了端点并不提供的图片能力的模型不会在这里被拦下，改由提供商拒绝该请求。
 
+### MiniMax 的 Anthropic 兼容接口
+
+MiniMax 开放平台提供 Anthropic 兼容端点：`https://api.minimax.cn/anthropic`（国际站为 `https://api.minimax.io/anthropic`）。该端点目前只支持两个模型，二者都是原生多模态、上下文窗口 1,000,000：
+
+| 模型 | 上下文窗口 | 模态 | 思考 |
+| :- | :-: | :- | :- |
+| `MiniMax-M3.1-Flash` | 1,000,000 | 文本 + 图片 | 强制开启，深度可调 |
+| `MiniMax-M3` | 1,000,000 | 文本 + 图片 | 默认关闭，可用 `adaptive` 开启 |
+
+已安装的 pi-ai 目录收录了 `MiniMax-M3`（上下文 1,000,000、文本 + 图片），但**没有** `MiniMax-M3.1-Flash`，也没有给出思考档位与 `forceAdaptiveThinking`。要用满能力，按下面的写法声明这两个模型：
+
+```yaml
+- id: llm-pi-ai
+  config:
+    providers:
+      slefminimax:
+        apiKeyEnv: SLEFMINIMAX_API_KEY
+        api: anthropic-messages
+        baseURL: https://api.minimax.cn/anthropic
+        models:
+          - id: MiniMax-M3.1-Flash
+            name: MiniMax-M3.1-Flash
+            input: [text, image]
+            contextWindow: 1000000
+            maxTokens: 128000
+            reasoningEfforts:
+              low: low
+              medium: medium
+              high: high
+              xhigh: xhigh
+              max: max
+            compat:
+              forceAdaptiveThinking: true
+              supportsTemperature: false
+```
+
+这几处各有其由：
+
+- `input: [text, image]` —— 不声明时 pi-ai 先查已安装目录（不认识这个模型），再回退到路由的 `defaultInput`（默认 `[text]`），于是宿主把它当纯文本模型，在发送前就以 `MODEL_DOES_NOT_SUPPORT_IMAGES` 拦下附图。该端点还接受视频内容块，但 pi-ai 的模态只有 `text` 与 `image`，所以视频接不进来。
+- `reasoningEfforts` —— 思考深度由端点的 `output_config.effort` 控制，取 `low`、`medium`、`high`、`xhigh`、`max`，省略时端点默认 `max`，`none` 不支持（返回 400）。这些值就是发到线上的拼写。
+- **不写 `off` 档** —— 这是最容易踩的一处。端点对 `MiniMax-M3.1-Flash` 强制开启 thinking，`thinking.type="disabled"` 会返回 400（错误码 2013）。宿主选择「关闭思考」时，pi-ai 正是发出这个字段；省略 `off` 键等于声明本模型没有关闭档，pi-ai 便永不发 `disabled`。写 `off: null` 不行 —— 那会让 pi-ai 认为该档位存在且需要发送。
+- `forceAdaptiveThinking: true` —— 让 pi-ai 走 `thinking.type="adaptive"` 加 `output_config.effort`，正是端点文档要求的形态；不开这个开关时 pi-ai 改用 `thinking.type="enabled"` 加 `budget_tokens`，端点也接受，但思考深度就固定了。
+- `supportsTemperature: false` —— 端点忽略 `temperature`（固定为 1）与 `top_p`（固定为 0.95），同样被忽略的还有 `top_k`、`stop_sequences`、`mcp_servers`、`context_management`、`container`。
+
+另外两点值得留意：思考 token 计入 `max_tokens`，上限设得太小会以 `stop_reason=max_tokens` 且无正文结束；多轮对话必须把模型返回的 thinking 内容块原样回带，否则思维链会断。
+
 ### DeepSeek 账号的模型
 
 已登录 DeepSeek 账号的模型列表来自账号服务，因此模型页不为它提供模型编辑器。要调整单个模型，在 `$DSH_HOME/profiles/<profile>/cordis.patch.yml` 中使用 `modelOverrides`；字段与 DeepSeek 的 `models` 条目相同，未设置的字段沿用列表中的值：
