@@ -72,7 +72,9 @@ describe('probeTcp', () => {
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
     const port = (server.address() as net.AddressInfo).port
     try {
-      expect(await probeTcp('127.0.0.1', port, 800)).toBe(true)
+      // 超时给足：这条断言走的是真实 TCP 握手，机器正忙时 800ms 会偶发不够
+      // （实测与并行的端到端探测一起跑时失败过一次）。
+      expect(await probeTcp('127.0.0.1', port, 3000)).toBe(true)
     } finally {
       await new Promise<void>(resolve => server.close(() => resolve()))
     }
@@ -110,6 +112,19 @@ describe('formatProxyDiagnosis', () => {
     )
     expect(text).toContain('HTTPS_PROXY')
     expect(text).toContain('Node')
+  })
+
+  it('says Node will use the proxy environment when NODE_USE_ENV_PROXY is on', () => {
+    const text = formatProxyDiagnosis(
+      {
+        impl: 'node-undici',
+        proxyEnv: { NODE_USE_ENV_PROXY: '1', HTTPS_PROXY: 'http://127.0.0.1:7890' },
+      },
+      { enabled: false, server: '', bypass: '', reachable: null, endpoint: null },
+    )
+    // 这是实测到的那个坑：启动环境里的代理变量会让 Node 的 WebSocket 也走代理。
+    expect(text).toContain('NODE_USE_ENV_PROXY')
+    expect(text).not.toContain('直连')
   })
 
   it('says nothing useful when there is no proxy at all', () => {

@@ -131,10 +131,17 @@ export function parseProxyEndpoint(server) {
  */
 export function formatProxyDiagnosis(stack, proxy) {
   const parts = [];
+  const env = stack?.proxyEnv || {};
+  const envProxyKeys = Object.keys(env).filter((k) => k.toLowerCase().endsWith('_proxy'));
+  const usesEnvProxy = env.NODE_USE_ENV_PROXY === '1' && envProxyKeys.length > 0;
   if (stack?.impl === 'chromium') {
     parts.push('本进程的 WebSocket 由 Chromium 实现，它会自动使用 Windows 系统代理');
   } else if (stack?.impl === 'node-undici') {
-    parts.push('本进程的 WebSocket 由 Node 直连实现（不读系统代理）');
+    parts.push(
+      usesEnvProxy
+        ? '本进程的 WebSocket 由 Node 实现，且 NODE_USE_ENV_PROXY=1 —— 它会按进程里的代理环境变量走代理'
+        : '本进程的 WebSocket 由 Node 实现（直连，不读系统代理）',
+    );
   }
   if (proxy?.enabled && proxy.server) {
     const endpoint = parseProxyEndpoint(proxy.server);
@@ -147,9 +154,8 @@ export function formatProxyDiagnosis(stack, proxy) {
       parts.push(`Windows 系统代理指向 ${proxy.server}`);
     }
   }
-  const envKeys = Object.keys(stack?.proxyEnv || {});
-  if (envKeys.length) {
-    parts.push(`进程代理环境变量：${envKeys.join('、')}`);
+  if (envProxyKeys.length) {
+    parts.push(`进程代理环境变量：${envProxyKeys.join('、')}`);
   }
   return parts.length ? `出站诊断：${parts.join('；')}。` : '';
 }
