@@ -23,7 +23,7 @@
         - text: Add workspace ⌥ ⌘ O
       - listitem:
         - button "Edit shortcut for Rename session"
-        - text: Rename session ⇧ ⌘ R
+        - text: Rename session ⌥ ⌘ G
       - listitem:
         - button "Edit shortcut for Fork session"
         - text: Fork session ⇧ ⌘ F
@@ -32,7 +32,7 @@
         - text: Archive session ⌥ ⌘ A
       - listitem:
         - button "Edit shortcut for Open settings"
-        - text: Open settings ⌘ ,
+        - text: Open settings ⌥ ⌘ ,
       - listitem:
         - button "Edit shortcut for Toggle right sidebar"
         - text: Toggle right sidebar ⇧ ⌘ B
@@ -72,7 +72,7 @@
   - region "Approval area":
     - heading "Approval area" [level=3]
     - list:
-      - listitem: Allow once Enter
+      - listitem: Allow Enter
       - listitem: Reject Esc
   - contentinfo:
     - button "Restore all defaults" [disabled]

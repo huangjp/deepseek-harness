@@ -311,6 +311,12 @@ export interface FrequencyTooHighError {
   readonly message: string
 }
 
+/** Stable error returned when the target Session belongs to subagent routing, which never receives reminder delivery. */
+export interface SubagentSessionError {
+  readonly code: 'subagent_session'
+  readonly message: string
+}
+
 /** Stable fallback that does not disclose an internal exception. */
 export interface InternalScheduleError {
   readonly code: 'internal_error'
@@ -326,6 +332,7 @@ export type ScheduleToolError =
   | NotFutureError
   | TimeOutOfRangeError
   | FrequencyTooHighError
+  | SubagentSessionError
   | InternalScheduleError
 
 /** Canonical `schedule_create` value. */
@@ -341,6 +348,12 @@ export type ScheduleDeleteResult =
 
 /** Canonical `schedule_delete` value. */
 export type ScheduleDeleteValue = ScheduleDeleteResult | ScheduleToolError
+
+/** Successful Host-wide removal of every ended task, whether or not any remained. */
+export interface ScheduleDeleteInactiveResult {
+  /** Ended task rows this call removed; zero when the Host held none. */
+  readonly deleted: number
+}
 
 declare module '@deepseek-ai/dsh-workspace/types' {
   interface SessionActivityKindMap {

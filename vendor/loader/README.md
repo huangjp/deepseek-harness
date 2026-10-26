@@ -41,11 +41,22 @@ root.loader.update(id, { config: { enabled: false } })
 | `loader.update(id, options, parent?, position?)` | Update, move, and restart an entry. |
 | `loader.remove(id)` | Stop and delete an entry. |
 | `loader.resolve(id)` | Resolve an entry by id, including nested `a:b` ids. |
+| `loader.resolve(id).moduleNamespace` | Raw import result before export normalization; HMR updates it after a successful reload. |
 | `loader.resolveGroup(id)` | Resolve the root group or a nested group. |
 | `loader.await()` | Wait for pending entry imports and fiber reloads. |
 | `loader.locate(fiber?)` | Return the loader entry id that owns a fiber. |
 
 For file-backed trees, use `@cordisjs/plugin-include`.
+
+## Module resolution
+
+Without Node module internals, Loader resolves bare specifiers, package imports and self-references in the nearest package scope containing the configuration file. Relative specifiers use the configuration URL directly, and `cordis:` builtins bypass filesystem resolution. Other specifiers, including `node:` builtins and absolute URLs, initialize an ignored `.cordis/resolve.mjs` helper in that scope to preserve native ESM import conditions.
+
+If no scope exists or writing the helper files fails, Loader uses its native import fallback. This fallback emits no diagnostic of its own; project-only dependencies can remain unavailable, and the resulting import error can name the Loader module rather than the configuration project. Failure to import a written helper propagates to the caller without this fallback.
+
+Initialization results are cached for the lifetime of the resolver module, including failed writes and rejected helper imports. Fixing the filesystem does not retry initialization for an already cached scope. Concurrent initialization through filesystem aliases of the same package can contend for the temporary helper files and cause a write failure.
+
+Node module internals are classified by their available APIs, including the v1 API used by Node 24.0–24.11.
 
 ## Volatile configuration
 

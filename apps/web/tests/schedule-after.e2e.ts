@@ -1,13 +1,17 @@
 /** Keyless assembled-Web evidence for conversational Schedule delivery. */
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import type { Browser, Page } from 'playwright'
 import { chromium } from 'playwright'
+import { dump } from 'js-yaml'
 import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
+import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 import { bundlePatchPaths, composeEntries, loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
 import { MessageId, ToolCallId, createUserMessage, LlmAdapter } from '@deepseek-ai/dsh-llm'
 import { appendDelivery } from '../../../packages/schedule/schedule/src/delivery-history.ts'
@@ -16,6 +20,7 @@ import type { ContextFormed, GenerateOptions, StreamChunk } from '@deepseek-ai/d
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import {
   ScheduleId,
+  createAfterScheduleRecord,
   createEveryScheduleRecord,
   foldScheduleEvents,
   type EveryScheduleRecord,
@@ -44,9 +49,6 @@ declare module '@deepseek-ai/dsh-llm' {
 }
 
 const MODE = webSnapshotMode()
-/** The optional Schedule bundle is the switch these scenarios turn on. */
-const SCHEDULE_BUNDLE = fileURLToPath(new URL('../../../packages/experimental/schedule-bundle/cordis.patch.yml', import.meta.url))
-const TIME_CONTEXT_EVERY_STEP = fileURLToPath(new URL('./fixtures/time-context-every-step.patch.yml', import.meta.url))
 const SNAPSHOT_DIR = fileURLToPath(new URL('./expected/schedule-after', import.meta.url))
 const AFTER_EXPECTED = join(SNAPSHOT_DIR, 'conversation.expected.md')
 const AT_EXPECTED = join(SNAPSHOT_DIR, 'at-conversation.expected.md')
@@ -73,6 +75,35 @@ const CATALOG_EXPECTED = join(CATALOG_SNAPSHOT_DIR, 'catalog.expected.md')
 const BASE_PATCH = fileURLToPath(new URL('../../../packages/bundle/base/cordis.patch.yml', import.meta.url))
 const WEB_BUNDLE = fileURLToPath(new URL('../../../packages/bundle/web-app/', import.meta.url))
 const WEB_PATCHES = bundlePatchPaths(WEB_BUNDLE, (JSON.parse(readFileSync(join(WEB_BUNDLE, 'package.json'), 'utf8')) as { dsh: { bundle: { patch: string[] } } }).dsh.bundle)
+
+/**
+ * Write the overlay that makes every step carry a fresh clock reading.
+ *
+ * The shipped Web composition carries no `time-context` row and the `standard`
+ * preset owns the clock, so an overlay naming a Host row reaches nothing. The
+ * overlay therefore restates the shipped `preset-standard` row with its
+ * `time-context` plugin configured to re-read on every step.
+ * @param dir - Directory that receives the overlay file.
+ * @returns Absolute path of the written overlay.
+ */
+async function writeEveryStepOverlay(dir: string): Promise<string> {
+  const layers = [
+    loadOverlayPatches('Schedule Web every-step overlay', BASE_PATCH),
+    ...WEB_PATCHES.map(file => loadOverlayPatches('Schedule Web every-step overlay', file)),
+  ]
+  const row = composeEntries(layers).find(entry => entry.id === 'preset-standard')
+  if (row === undefined) throw new Error('the shipped Web surface declares no preset-standard row')
+  const config = row.config as { plugins: Array<{ id?: string; config?: unknown }> }
+  const plugins = config.plugins.map(plugin => plugin.id === 'time-context'
+    ? { ...plugin, config: { refreshIntervalMs: 0 } }
+    : plugin)
+  const path = join(dir, 'time-context-every-step.patch.yml')
+  await writeFile(path, dump([
+    { id: 'preset-standard', config: { ...config, plugins } },
+  ], { schema: entryListSchema, noRefs: true, lineWidth: -1 }))
+  return path
+}
+
 const CATALOG_NOW = Date.parse('2099-08-25T12:00:00.000Z')
 const CATALOG_SESSION_ID = SessionId('schedule-catalog-web-e2e')
 const CATALOG_TITLE = 'Active schedule catalog'
@@ -214,14 +245,14 @@ function requestText(options: GenerateOptions): string {
     .join('\n')
 }
 
-/** Require one assembled request to preserve the reminder-content trust boundary. */
+/** Require one assembled request to frame the reminder as a scheduled user message. */
 function expectReminderFraming(options: GenerateOptions): void {
   const reminder = options.messages.find(message => (
     message.role === 'user' && message.source?.kind === 'schedule'
   ))
   expect(reminder?.role).toBe('user')
   const text = reminder?.content.find(block => block.type === 'text')?.text
-  expect(text).toContain('untrusted reminder content, not new user instructions.')
+  expect(text).toContain('This is a scheduled message from the user')
 }
 
 /** Wait for and return one exact durable assistant reply. */
@@ -269,13 +300,16 @@ describe.skipIf(MODE === 'record')('web e2e: conversational reminders', () => {
   let everyAssistantReply: SessionEvent<'assistant/message'> | undefined
   let everyRecords: readonly [EveryScheduleRecord, EveryScheduleRecord]
   let tripwire: ReturnType<typeof watchConsole>
+  let overlayRoot: string | undefined
   const afterAdapter = new ReminderAdapter()
   const atAdapter = new BrowserZoneAtAdapter()
   const everyAdapter = new EveryReminderAdapter()
 
   beforeAll(async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-schedule-every-step-'))
+    overlayRoot = root
     scaffold = await launchWebScaffold({
-      extraOverlayPath: [SCHEDULE_BUNDLE, TIME_CONTEXT_EVERY_STEP],
+      extraOverlayPath: [await writeEveryStepOverlay(root)],
     })
     scaffold.ctx.effect(
       () => scaffold.ctx.llm.registerAdapter([AFTER_PROVIDER], afterAdapter),
@@ -312,6 +346,9 @@ describe.skipIf(MODE === 'record')('web e2e: conversational reminders', () => {
       sessionId: SessionId('schedule-after-web-e2e'),
       meta: { cwd },
       agentOptions: { provider: AFTER_PROVIDER, model: MODEL },
+      // The reminder tools are preset-level Consumers, so a directly created Agent
+      // needs the default preset the product mounts.
+      setup: agentCtx => scaffold.ctx.agentPresets.mount(agentCtx).then(() => undefined),
     })
     afterHandle.agent.session.append('session/title', {
       title: 'Scheduled After follow-up',
@@ -319,7 +356,7 @@ describe.skipIf(MODE === 'record')('web e2e: conversational reminders', () => {
       source: { kind: 'user' },
     })
     await workspace.attachSession(afterHandle.agent.id)
-    const afterCreated = await scaffold.ctx.tools.execute({
+    const afterCreated = await executeToolFixture(scaffold.ctx, {
       signal: AbortSignal.timeout(10_000),
       callId: ToolCallId('schedule-after-create'),
       name: 'schedule_create',
@@ -349,6 +386,9 @@ describe.skipIf(MODE === 'record')('web e2e: conversational reminders', () => {
       sessionId: SessionId('schedule-every-web-e2e'),
       meta: { cwd },
       agentOptions: { provider: EVERY_PROVIDER, model: MODEL },
+      // The reminder tools are preset-level Consumers, so a directly created Agent
+      // needs the default preset the product mounts.
+      setup: agentCtx => scaffold.ctx.agentPresets.mount(agentCtx).then(() => undefined),
     })
     everyHandle.agent.session.append('session/title', {
       title: 'Fixed-rate reminder batch',
@@ -382,7 +422,7 @@ describe.skipIf(MODE === 'record')('web e2e: conversational reminders', () => {
     })
     await scaffold.ctx.schedule.delete({ sessionId: everyHandle.agent.id, id: wake.id })
     await workspace.attachSession(everyHandle.agent.id)
-    const everyListed = await scaffold.ctx.tools.execute({
+    const everyListed = await executeToolFixture(scaffold.ctx, {
       signal: AbortSignal.timeout(10_000),
       callId: ToolCallId('schedule-every-list'),
       name: 'schedule_list',
@@ -398,6 +438,9 @@ describe.skipIf(MODE === 'record')('web e2e: conversational reminders', () => {
       sessionId: SessionId('schedule-at-web-e2e'),
       meta: { cwd },
       agentOptions: { provider: AT_PROVIDER, model: MODEL },
+      // The reminder tools are preset-level Consumers, so a directly created Agent
+      // needs the default preset the product mounts.
+      setup: agentCtx => scaffold.ctx.agentPresets.mount(agentCtx).then(() => undefined),
     })
     atHandle.agent.session.append('session/title', {
       title: 'Explicit local-time reminder',
@@ -445,6 +488,9 @@ describe.skipIf(MODE === 'record')('web e2e: conversational reminders', () => {
     await everyHandle?.dispose().catch((error: unknown) => failures.push(error))
     await afterHandle?.dispose().catch((error: unknown) => failures.push(error))
     await scaffold?.close().catch((error: unknown) => failures.push(error))
+    if (overlayRoot !== undefined) {
+      await rm(overlayRoot, { recursive: true, force: true }).catch((error: unknown) => failures.push(error))
+    }
     if (failures.length === 1) throw failures[0]
     if (failures.length > 1) throw new AggregateError(failures, 'Schedule Web evidence teardown failed')
   })
@@ -489,8 +535,8 @@ describe.skipIf(MODE === 'record')('web e2e: conversational reminders', () => {
     const detail = manager.getByRole('complementary', { name: 'Task details' })
     expect(await detail.getByRole('tab', { name: 'Rules', exact: true }).getAttribute('aria-selected')).toBe('true')
     expect(await detail.getByRole('region', { name: 'Saved delivery record' }).count()).toBe(0)
-    await detail.getByRole('tab', { name: 'Delivery records', exact: true }).click()
-    await detail.getByRole('tabpanel', { name: 'Delivery records', exact: true }).waitFor()
+    await detail.getByRole('tab', { name: 'Records', exact: true }).click()
+    await detail.getByRole('tabpanel', { name: 'Records', exact: true }).waitFor()
     const receipt = detail.getByRole('region', { name: 'Saved delivery record' })
     await receipt.waitFor()
     expect(await detail.getByText('Earlier delivery records have been cleared', { exact: true }).count()).toBe(0)
@@ -575,9 +621,9 @@ describe.skipIf(MODE === 'record')('web e2e: conversational reminders', () => {
     const manager = page.getByTestId('task-manager-page')
     await manager.getByRole('list', { name: 'Task catalog' }).getByRole('button', { name: original.title, exact: true }).click()
     const detail = manager.getByRole('complementary', { name: 'Task details' })
-    await detail.getByRole('tab', { name: 'Delivery records', exact: true }).click()
+    await detail.getByRole('tab', { name: 'Records', exact: true }).click()
     const receipts = detail.getByRole('region', { name: 'Saved delivery record' })
-    const recordsPanel = detail.getByRole('tabpanel', { name: 'Delivery records', exact: true })
+    const recordsPanel = detail.getByRole('tabpanel', { name: 'Records', exact: true })
     await expect.poll(() => receipts.count()).toBe(1)
     expect(await detail.getByText('Earlier delivery records have been cleared', { exact: true }).count()).toBe(0)
 
@@ -604,7 +650,7 @@ describe.skipIf(MODE === 'record')('web e2e: conversational reminders', () => {
       // Each saved occurrence renders its own scheduled instant.
       expect(await recordsPanel.locator(`time[datetime="${record.scheduledAt}"]`).count()).toBe(1)
     }
-    expect(await detail.getByRole('tab', { name: 'Delivery records', exact: true }).getAttribute('aria-selected')).toBe('true')
+    expect(await detail.getByRole('tab', { name: 'Records', exact: true }).getAttribute('aria-selected')).toBe('true')
     await detail.getByRole('tab', { name: 'Rules', exact: true }).click()
     // The interval row states its quantity in the friendly unit the stored
     // seconds select: 3600 seconds is one whole hour, so the row shows 1 and
@@ -621,7 +667,7 @@ describe.skipIf(MODE === 'record')('web e2e: conversational reminders', () => {
         kind: 'every', everySeconds: EVERY_INTERVAL_SECONDS * 2, status: 'active',
       })
     expect(await scaffold.ctx.schedule.history({ sessionId: everyHandle.agent.id, id: original.id, limit: 20 })).toEqual(saved)
-    await detail.getByRole('tab', { name: 'Delivery records', exact: true }).click()
+    await detail.getByRole('tab', { name: 'Records', exact: true }).click()
     await expect.poll(() => receipts.count()).toBe(2)
     // The linked-session row renders on the Rules view only.
     await detail.getByRole('tab', { name: 'Rules', exact: true }).click()
@@ -712,11 +758,14 @@ describe.skipIf(MODE === 'record')('web e2e: active Schedule catalog', () => {
   let browser: Browser
   let page: Page
   let tripwire: ReturnType<typeof watchConsole>
+  let overlayRoot: string | undefined
 
   beforeAll(async () => {
     const fixture = await readFile(CATALOG_FIXTURE, 'utf8')
+    const root = await mkdtemp(join(tmpdir(), 'dsh-schedule-catalog-'))
+    overlayRoot = root
     scaffold = await launchWebScaffold({
-      extraOverlayPath: [SCHEDULE_BUNDLE, TIME_CONTEXT_EVERY_STEP],
+      extraOverlayPath: [await writeEveryStepOverlay(root)],
     })
     await seedSession(scaffold, fixture, CATALOG_SESSION_ID, 'standard')
     const records = foldScheduleEvents(fixture.trim().split('\n').slice(1).map(line => JSON.parse(line) as SessionEvent)).active
@@ -757,6 +806,9 @@ describe.skipIf(MODE === 'record')('web e2e: active Schedule catalog', () => {
     const failures: unknown[] = []
     await browser?.close().catch((error: unknown) => failures.push(error))
     await scaffold?.close().catch((error: unknown) => failures.push(error))
+    if (overlayRoot !== undefined) {
+      await rm(overlayRoot, { recursive: true, force: true }).catch((error: unknown) => failures.push(error))
+    }
     if (failures.length === 1) throw failures[0]
     if (failures.length > 1) throw new AggregateError(failures, 'Schedule catalog teardown failed')
   })
@@ -789,7 +841,7 @@ describe.skipIf(MODE === 'record')('web e2e: active Schedule catalog', () => {
     const details = manager.getByRole('complementary', { name: 'Task details' })
     expect(await details.textContent()).toContain(otherSessionId)
     expect(scaffold.ctx.agents.get(otherSessionId)).toBeUndefined()
-    await details.getByRole('tab', { name: 'Delivery records', exact: true }).click()
+    await details.getByRole('tab', { name: 'Records', exact: true }).click()
     await details.getByText('No delivery record available', { exact: true }).waitFor()
     expect(await details.getByRole('region', { name: 'Saved delivery record' }).count()).toBe(0)
     expect(scaffold.ctx.agents.get(otherSessionId)).toBeUndefined()
@@ -847,16 +899,37 @@ describe.skipIf(MODE === 'record')('web e2e: active Schedule catalog', () => {
       ...WEB_PATCHES.map(file => loadOverlayPatches('Schedule catalog shipped roster', file)),
     ]
     const shipped = composeEntries(layers)
-    const withBundle = composeEntries([...layers, loadOverlayPatches('Schedule catalog bundle', SCHEDULE_BUNDLE)])
+    // The delivered composition carries the Schedule service and its task page;
+    // the clock stays preset-level, so no Host row declares it.
     for (const row of [
-      { id: 'time-context', name: '@deepseek-ai/dsh-time-context' },
       { id: 'schedule', name: '@deepseek-ai/dsh-schedule' },
       { id: 'ui-schedule', name: '@deepseek-ai/dsh-client-ui-schedule' },
     ]) {
-      // The shipped Web composition carries none of the rows; the bundle inserts each once, switched on.
-      expect(shipped.some(entry => entry.id === row.id)).toBe(false)
-      expect(withBundle.filter(entry => entry.id === row.id && entry.name === row.name && entry.disabled !== true)).toHaveLength(1)
+      expect(shipped.filter(entry => entry.id === row.id && entry.name === row.name && entry.disabled !== true))
+        .toHaveLength(1)
     }
+    expect(shipped.some(entry => entry.id === 'time-context')).toBe(false)
+    // Each preset that offers reminders declares the clock and the tool package
+    // in its own scope and ships them enabled; `minimal` declares neither.
+    const presetPlugins = (id: string): Array<{ id?: string; name?: string; disabled?: boolean }> => {
+      const row = shipped.find(entry => entry.id === id)
+      if (row === undefined) throw new Error(`missing shipped preset row ${id}`)
+      return (row.config as { plugins: Array<{ id?: string; name?: string; disabled?: boolean }> }).plugins
+    }
+    for (const id of ['preset-standard', 'preset-ptc', 'preset-cordis']) {
+      const plugins = presetPlugins(id)
+      expect(plugins.filter(row => row.id === 'time-context'
+        && row.name === '@deepseek-ai/dsh-time-context')).toHaveLength(1)
+      expect(plugins.filter(row => row.id === 'tool-schedule'
+        && row.name === '@deepseek-ai/dsh-tool-schedule')).toHaveLength(1)
+      for (const name of ['@deepseek-ai/dsh-time-context', '@deepseek-ai/dsh-tool-schedule']) {
+        const matches = plugins.filter(row => row.name === name)
+        expect(matches).toHaveLength(1)
+        expect(matches[0]?.disabled).not.toBe(true)
+      }
+    }
+    expect(presetPlugins('preset-minimal').some(row => row.name === '@deepseek-ai/dsh-time-context'
+      || row.name === '@deepseek-ai/dsh-tool-schedule')).toBe(false)
 
     await page.getByRole('button', { name: 'Automation tasks', exact: true }).click()
     const manager = page.getByTestId('task-manager-page')
@@ -1036,7 +1109,7 @@ describe.skipIf(MODE === 'record')('web e2e: active Schedule catalog', () => {
       await manager.getByRole('searchbox', { name: 'Search tasks' }).fill(record.title)
       await manager.getByRole('list', { name: 'Task catalog' }).getByRole('button', { name: record.title, exact: true }).click()
       const detail = manager.getByRole('complementary', { name: 'Task details' })
-      const recordsTab = detail.getByRole('tab', { name: 'Delivery records', exact: true })
+      const recordsTab = detail.getByRole('tab', { name: 'Records', exact: true })
       const rulesTab = detail.getByRole('tab', { name: 'Rules', exact: true })
       const notice = detail.getByText('Earlier delivery records have been cleared', { exact: true })
       await recordsTab.click()
@@ -1110,7 +1183,7 @@ describe.skipIf(MODE === 'record')('web e2e: active Schedule catalog', () => {
     })
     const time = clock.format(new Date(Date.now() + 3_600_000))
     const prompt = 'Inspect the daily calendar rule'
-    const result = await scaffold.ctx.tools.execute({
+    const result = await executeToolFixture(scaffold.ctx, {
       signal: AbortSignal.timeout(10_000), callId: ToolCallId('schedule-daily-catalog-create'),
       name: 'schedule_create', arguments: { prompt, title: prompt, daily: { time, time_zone: timeZone } }, agent,
     })
@@ -1185,6 +1258,88 @@ describe.skipIf(MODE === 'record')('web e2e: active Schedule catalog', () => {
     } finally {
       await scaffold.ctx.schedule.delete({ sessionId: CATALOG_SESSION_ID, id: created.id })
       await page.clock.setFixedTime(new Date(CATALOG_NOW))
+    }
+  }, 60_000)
+
+  it('removes every ended task from the page and keeps the active ones', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-schedule-clear-ended'))
+    const endedSession = SessionId('schedule-manager-ended-clear')
+    const domain = scaffold.ctx.storageDomain.get('schedule')
+    if (domain === undefined) throw new Error('Schedule domain was not opened')
+    const endedIds = [ScheduleId('schedule-ended-first'), ScheduleId('schedule-ended-second')]
+    const endedTitles = ['Ended release check', 'Ended metrics check'] as const
+    // An earlier scenario may leave an ended row behind; the confirmation states
+    // the whole ended set, so the lane starts from an empty one.
+    await scaffold.ctx.schedule.deleteInactive()
+    for (const [index, id] of endedIds.entries()) {
+      const title = endedTitles[index]!
+      const record = createAfterScheduleRecord(id, title, 60, Date.now(), title)
+      const receipt = {
+        scheduledAt: record.scheduledAt,
+        deliveredAt: new Date(Date.parse(record.scheduledAt) + 1_000).toISOString(),
+        messageId: MessageId(`${id}-delivery`),
+      }
+      await domain.table('tasks').put(record.id, {
+        sessionId: endedSession, record, status: 'inactive', lastDelivery: receipt,
+        deliveryHistory: { records: [receipt], earlierRecordsUnavailable: false },
+      })
+    }
+    // The running task is what the cleanup must leave alone. Creating it also
+    // announces a committed Host change, so the open page reads the rows seeded
+    // above without waiting for its own first catalog read.
+    const kept = await scaffold.ctx.schedule.create(endedSession, {
+      prompt: 'Keep this running task', title: 'Keep this running task', at: '2099-08-25T12:08:00.000Z',
+    })
+    try {
+      await page.getByRole('button', { name: 'Automation tasks', exact: true }).click()
+      const manager = page.getByTestId('task-manager-page')
+      // Earlier scenarios leave their own search text and status filter on this
+      // shared page; this scenario asserts the complete list.
+      await manager.getByRole('searchbox', { name: 'Search tasks' }).fill('')
+      await manager.getByRole('button', { name: 'All', exact: true }).click()
+      const more = manager.getByRole('button', { name: 'More task actions', exact: true })
+      await more.waitFor({ timeout: 15_000 })
+
+      // The confirmation states the Host-side target and removes nothing until it
+      // is confirmed.
+      await more.click()
+      await page.getByRole('menuitem', { name: 'Clear all inactive tasks', exact: true }).click()
+      const confirmation = page.getByRole('dialog', { name: 'Clear inactive tasks (2)?' })
+      await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click()
+      expect((await scaffold.ctx.schedule.catalog()).filter(task => task.status === 'inactive')).toHaveLength(2)
+
+      await more.click()
+      await page.getByRole('menuitem', { name: 'Clear all inactive tasks', exact: true }).click()
+      await confirmation.getByRole('button', { name: 'Clear tasks', exact: true }).click()
+      await expect.poll(
+        async () => (await scaffold.ctx.schedule.catalog()).filter(task => task.status === 'inactive'),
+        { timeout: 15_000 },
+      ).toEqual([])
+      const remaining = await scaffold.ctx.schedule.catalog()
+      expect(remaining.some(task => endedIds.includes(task.id))).toBe(false)
+      expect(remaining.map(task => task.title)).toContain('Keep this running task')
+      await page.getByText('Cleared 2 inactive tasks.', { exact: true }).waitFor({ timeout: 15_000 })
+      // The trigger left with the rows it removed, so the page heading owns the
+      // focus after the confirmation closes; this confirms the heading fallback
+      // in a real browser.
+      await expect.poll(() => page.evaluate(() => document.activeElement?.tagName), { timeout: 15_000 })
+        .toBe('H1')
+      // The page follows the acknowledged removal: no ended row or cleanup action
+      // remains, and the running task is still listed.
+      await expect.poll(() => manager.getByRole('button', { name: 'More task actions', exact: true }).count(), { timeout: 15_000 })
+        .toBe(0)
+      await manager.getByRole('button', { name: 'All', exact: true }).click()
+      await expect.poll(() => manager.getByRole('list', { name: 'Task catalog' })
+        .getByRole('button', { name: kept.title, exact: true }).count(), { timeout: 15_000 }).toBe(1)
+      expect((await scaffold.ctx.schedule.catalog()).filter(task => task.status === 'inactive')).toEqual([])
+      expect(tripwire.pageErrors).toEqual([])
+    } finally {
+      // The shared page and Host outlive a failed assertion: remove every row
+      // this scenario introduced so the next one starts from the same state. A
+      // teardown rejection must not mask the assertion that failed first.
+      await Promise.allSettled(
+        [kept.id, ...endedIds].map(id => scaffold.ctx.schedule.delete({ sessionId: endedSession, id })),
+      )
     }
   }, 60_000)
 })

@@ -8,7 +8,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { createShortcutsStore } from './store.ts'
 import { ShortcutReference, ShortcutsRow } from './Reference.tsx'
-import { en, zh } from './locales.ts'
+import { en, ja, es, fr, de, ru, pt, zh } from './locales.ts'
 import { fixedCommands } from './fixed.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -26,7 +26,7 @@ export const inject = ['shortcuts', 'locale', 'slots']
  * @param ctx - plugin-owned client context.
  */
 export function apply(ctx: Context): void {
-  ctx.effect(() => ctx.locale.register('shortcuts', { zh, en }), 'shortcuts: dictionaries')
+  ctx.effect(() => ctx.locale.register('shortcuts', { zh, en, ja, es, fr, de, ru, pt }), 'shortcuts: dictionaries')
   const t = ctx.locale.bind('shortcuts')
   const handle = createShortcutsStore()
   const instance = handle.create()
@@ -40,7 +40,7 @@ export function apply(ctx: Context): void {
   const injected = () => ({ platform: ctx.shortcuts.platform, runtime: ctx.shortcuts.runtime, edit, recording, describeBinding,
     hooks: { catalog: ctx.shortcuts.catalog, config: ctx.shortcuts.config, fixedCatalog: ctx.shortcuts.fixedCatalog } })
   ctx.slots.inject('settings.general.item', () => ctx.slots.register({
-    name: 'settings.general.item', id: 'shortcuts', order: 20, locale: 'shortcuts', store,
+    name: 'settings.general.item', id: 'shortcuts', order: 16, locale: 'shortcuts', store,
     inject: injected,
   }, ShortcutsRow))
   ctx.slots.inject('shell.overlay', () => {

@@ -116,7 +116,7 @@ interface LocalAtInput {
 type AtInput = string | LocalAtInput
 ```
 
-The shipped Web composition carries no `time-context` row; the optional experimental bundle `@deepseek-ai/dsh-experimental-schedule-bundle`, enabled from the Plugins page, inserts and mounts time-context, which samples the browser's IANA zone for every prompt. Time-context tells the model to interpret otherwise-unqualified natural-language dates and times in that request-local zone when the open turn has one unambiguous browser zone; mixed or missing browser-zone records tell the model to ask. That guidance is not a durable Session default: the model must still pass an offset in the string form or `time_zone` in the local form, and Schedule never reads browser, Session, process, or model context.
+The shipped Web composition mounts the `schedule` service and the `ui-schedule` task page. The clock reading and the four reminder tools are preset-owned: `standard`, `cordis`, and `ptc` declare `time-context` and `@deepseek-ai/dsh-tool-schedule` together, and `minimal` declares neither. The `tool-subagent` and `tool-subagent-fork` rows in those three presets deny the four tools, and each tool refuses a delegated caller with `subagent_session`, so a delegated child neither sees the tools nor has a call accepted. Time-context tells the model to interpret otherwise-unqualified natural-language dates and times in that request-local zone when the open turn has one unambiguous browser zone; mixed or missing browser-zone records tell the model to ask. That guidance is not a durable Session default: the model must still pass an offset in the string form or `time_zone` in the local form, and Schedule never reads browser, Session, process, or model context.
 
 Schedule rejects invalid offsets and zones, offset-free strings, non-future targets, and local times inside daylight-saving gaps. A daylight-saving overlap chooses its first, earlier instant. Successful creation stores only canonical UTC `scheduledAt`, so replay never depends on ambient time-zone state.
 
@@ -172,7 +172,7 @@ Cron decoding preserves the committed instant and the stored zone spelling, and 
 
 ## Historical Session changes
 
-Version-1 `schedule/change` events remain decodable as historical Session data. Their create, fold, and invariant types use `LegacyScheduleRecord`, which admits only After, At, and Every; Daily, Weekly, and Cron belong only to the current Host `ScheduleRecord`. The Host record decoder is separate from the frozen historical decoder. A create record written before titles existed carries no `title`, so the historical decoder admits that absent member while the Host decoder still requires it. Historical events do not populate the storage domain or schedule delivery. Existing reminders in these events require explicit recreation through `schedule_create`; no implicit Session migration or conversion of old `at` records occurs.
+Version-1 `schedule/change` events remain decodable as historical Session data. Their create and fold types use `LegacyScheduleRecord`, which admits only After, At, and Every; Daily, Weekly, and Cron belong only to the current Host `ScheduleRecord`. The Host record decoder is separate from the frozen historical decoder. A create record written before titles existed carries no `title`, so the historical decoder admits that absent member while the Host decoder still requires it. Historical events do not populate the storage domain or schedule delivery. Existing reminders in these events require explicit recreation through `schedule_create`; no implicit Session migration or conversion of old `at` records occurs.
 
 ```ts type-equiv
 /**
@@ -262,7 +262,7 @@ type ScheduleView = ScheduleRecord & {
 }
 ```
 
-The [tool catalog](../tool-catalog.md#deepseek-aidsh-schedule) owns schemas for `schedule_create`, `schedule_list`, `schedule_delete`, and `schedule_update`. Create, delete, and update acknowledge the storage-domain write. A Host-wide queue serializes these mutations against due delivery; deleting a task does not remove an already queued message. Model tools address the current Session, while the shared Host create, list, update, and delete methods accept an explicit Session binding. Creation requires a `title` that must be non-empty after trimming and at most 120 characters; a missing, blank, or over-long title is rejected with `invalid_prompt`, and creation never derives one from the instruction. Create and list views carry the stored `title` alongside the instruction, and a stored record whose `title` is missing or invalid is rejected at decode.
+The [tool catalog](../tool-catalog.md#deepseek-aidsh-tool-schedule) owns schemas for `schedule_create`, `schedule_list`, `schedule_delete`, and `schedule_update`, which [`@deepseek-ai/dsh-tool-schedule`](../../packages/schedule/tool-schedule/README.md) contributes to each preset that mounts it; the Host service owns storage and delivery. Create, delete, and update acknowledge the storage-domain write. A Host-wide queue serializes these mutations against due delivery; deleting a task does not remove an already queued message. Model tools address the current Session, while the shared Host create, list, update, and delete methods accept an explicit Session binding. `create` and `update` refuse a Session a delegated child owns with `subagent_session` when its delegation depth is above zero, and delivery cannot reach such a Session. The four model tools refuse a delegated caller in the tool layer, while `list`, `catalog`, `history`, and `delete` still serve that Session. Creation requires a `title` that must be non-empty after trimming and at most 120 characters; a missing, blank, or over-long title is rejected with `invalid_prompt`, and creation never derives one from the instruction. Create and list views carry the stored `title` alongside the instruction, and a stored record whose `title` is missing or invalid is rejected at decode.
 
 ```ts type-equiv
 /** Reminder creation selector, shared by the model consumer and Host service. */
@@ -309,6 +309,14 @@ type ScheduleDeleteResult =
   | { readonly id: ScheduleId; readonly deleted: false; readonly code: 'schedule_not_found' }
 ```
 
+```ts type-equiv
+/** Successful Host-wide removal of every ended task, whether or not any remained. */
+interface ScheduleDeleteInactiveResult {
+  /** Ended task rows this call removed; zero when the Host held none. */
+  readonly deleted: number
+}
+```
+
 ## Web catalog
 
 The Remote `schedule.catalog()` method returns active and inactive Host tasks with their original Session bindings, ordered by `scheduledAt` ascending and then lexicographically by `id`. It reads only the Schedule domain, without activating Sessions or reading their history. Browser consumers receive this browser-safe type:
@@ -337,9 +345,9 @@ type ScheduleCatalogEntry = ScheduleRecord & {
 }
 ```
 
-The Remote `schedule.list({ sessionId })`, model `schedule_list`, and Session-header catalog return only active tasks. A model view's derived timing `state` remains distinct from stored lifecycle `status`. Deletion uses `schedule.delete({ sessionId, id })` with the entry's original binding; a mismatched binding returns not found. Model tools supply the current Agent's Session, whereas the global user interface supplies the selected task's binding. The binding check alone does not establish caller authorization. The payload-free `schedule/changed` event invalidates client lists; reconnecting clients fetch current state again.
+The Remote `schedule.list({ sessionId })`, model `schedule_list`, and Session-header catalog return only active tasks. A model view's derived timing `state` remains distinct from stored lifecycle `status`. Deletion uses `schedule.delete({ sessionId, id })` with the entry's original binding; a mismatched binding returns not found. Model tools supply the current Agent's Session, whereas the global user interface supplies the selected task's binding. The binding check alone does not establish caller authorization. `schedule.deleteInactive()` removes every ended (inactive) task across Sessions, with the saved delivery records each row carries; on success it answers `{ deleted }` with the count it removed; a normal failed batch rejects with nothing removed; an `unknown-state` failure may have removed rows and quarantines the Host schedule domain, so later schedule operations reject until it is reopened. Any rejection announces `schedule/changed`, and clients then re-read. The Automation tasks page's bulk cleanup uses it. An ended task never arms a timer, so the removal recomputes no target. The payload-free `schedule/changed` event invalidates client lists; reconnecting clients fetch current state again.
 
-The shipped Web composition carries no `ui-schedule` row; the optional experimental bundle `@deepseek-ai/dsh-experimental-schedule-bundle`, enabled from the Plugins page, inserts and mounts `ui-schedule` with the Host capability. The [client package](../../packages/client/ui-schedule/README.md) owns the catalog, empty state, and deletion controls. The page separately filters all, active, and inactive tasks, retains inactive details and an original-Session control in the detail tab strip, and requires explicit confirmed deletion. Rules and Delivery records separate task settings from lazily paged saved receipts. Neither a receipt nor inactive status confirms model execution.
+The shipped Web composition mounts `ui-schedule` with the Host capability. The [client package](../../packages/client/ui-schedule/README.md) owns the catalog, empty state, and deletion controls. The page separately filters all, active, and inactive tasks, retains inactive details and an original-Session control in the detail tab strip, and requires explicit confirmed deletion. The Rules and Records tabs separate task settings from lazily paged saved receipts. Neither a receipt nor inactive status confirms model execution.
 
 ## Timing edits
 
@@ -431,7 +439,7 @@ New tasks initialize an empty history. Older task rows without history expose on
 
 ## Host delivery
 
-The Host reads persisted tasks at startup and sets its timer to the earliest active target. Inactive tasks remain queryable but never schedule another delivery. At delivery it resolves the original Session through the Session controller, including cold Sessions. After restoration it samples the wall clock again and excludes members that are no longer due after a rollback; those tasks retain their timer obligation. Neither a Goal nor a separate Run completion record participates in dispatch.
+The Host reads persisted tasks at startup and sets its timer to the earliest active target. Inactive tasks remain queryable but never schedule another delivery. At delivery it resolves the original Session, including cold Sessions, through `schedule/resolve-agent`. The embedding owns activation: the SDK handler waits for initialization and retains its Session handle and model options; without a handler, the Web Session controller restores the Session. The composition waits for its activation provider before starting Schedule. After restoration it samples the wall clock again and excludes members that are no longer due after a rollback; those tasks retain their timer obligation. Neither a Goal nor a separate Run completion record participates in dispatch.
 
 Plugin-sourced `followup()` synchronously appends the message to the Session inbox. After a successful Session flush, one task-record put appends a saved delivery with its instruction snapshot and stores the latest `ScheduleDeliveryReceipt` together with the one-shot's `inactive` status or the recurring task's next target and status. Recurring tasks in the same batch share the receipt's `messageId`; each receipt retains that task's delivered occurrence time. Delivery never steers or cancels the current turn and does not wait for model completion.
 
@@ -459,6 +467,8 @@ Shared management service; reads, deletion, and timing edits never activate a Se
  *
  * The request must supply a title; a missing, blank-after-trim, or over-long
  * title rejects with `invalid_prompt` instead of deriving one from the prompt.
+ * A Session a delegated child owns rejects with `subagent_session`, because delivery
+ * can never reach it: the child is one whose delegation depth is above zero.
  * The record is built from the clock reading taken before the request joins the
  * serialized queue, so a create that waits behind a longer operation keeps its
  * request-time anchor and may already be due when the queue reaches it.
@@ -497,7 +507,9 @@ async create(sessionId: SessionId, request: ScheduleCreateRequest, signal?: Abor
  * Delete one task belonging to the selected Session, leaving queued messages intact.
  *
  * The row is removed: the task no longer schedules, leaves `list` and `catalog`, and its
- * saved delivery records go with it.
+ * saved delivery records go with it. A task bound to a Session a delegated child owns
+ * stays deletable even though creation and timing edits refuse that binding, so a task
+ * stored before that rule existed remains removable.
  * @param request - Session and exact task identity.
  * @param signal - Optional cancellation checked before persistence begins, including after FIFO waits.
  * @returns Whether that Session owned a deleted task. Cancellation does not roll back an in-flight write.
@@ -505,14 +517,33 @@ async create(sessionId: SessionId, request: ScheduleCreateRequest, signal?: Abor
 @Remote('delete') async delete(request: ScheduleDeleteRequest, signal?: AbortSignal): Promise<ScheduleDeleteResult>
 
 /**
+ * Delete every ended Host task, leaving active tasks armed.
+ *
+ * Ended tasks never schedule another delivery, so the removal changes no pending
+ * target and no timer is recomputed. Rows are enumerated and removed in one FIFO
+ * slot, so a delivery ordered behind this call ends its task after the
+ * enumeration rather than during it. The batch is one domain write: a normal
+ * failure rejects with every listed row still stored, while a backend
+ * `unknown-state` failure may have removed rows and quarantines the Host
+ * domain, so later schedule operations reject until the domain is reopened.
+ * Every rejection announces `schedule/changed` because it does not establish
+ * which rows landed, and clients then re-read the catalog.
+ * @returns Count of removed rows; zero when the Host held no ended task.
+ */
+@Remote('deleteInactive') async deleteInactive(): Promise<ScheduleDeleteInactiveResult>
+
+/**
  * Update the name, instruction, and timing of an active task within the original Session
  * binding without activating the Session or changing saved deliveries.
  *
  * Each supplied field replaces its stored value; an omitted field keeps it. A name or
- * instruction change alone does not reset the committed target.
+ * instruction change alone does not reset the committed target. A Session a delegated
+ * child owns returns the non-mutating `subagent_session` result, so an edit cannot
+ * re-arm a task bound to a Session delivery can never reach, and the Web editor can
+ * explain the refusal through the ordinary result it already renders.
  * @param request - Task binding, complete observed record, and any combination of timing, name, and instruction.
  * @param signal - Cancellation checked after domain readiness and FIFO waits, before persistence begins.
- * @returns The committed record, unchanged record for a no-op, or a non-mutating input/lookup/conflict result.
+ * @returns The committed record, unchanged record for a no-op, or a non-mutating input/lookup/conflict/refusal result.
  * Storage and lifecycle failures reject; cancellation after a write starts does not roll it back.
  */
 @Remote('update') async update(request: ScheduleUpdateRequest, signal?: AbortSignal): Promise<ScheduleUpdateResult>
@@ -540,4 +571,24 @@ Durable task set changed; clients refetch global task and Session-active catalog
 ```
 
 Source: [`packages/schedule/schedule/src/types.ts`](../../packages/schedule/schedule/src/types.ts)
+
+<a id="scheduleresolve-agent--waterfall"></a>
+
+#### `schedule/resolve-agent` — waterfall
+
+Restore a reminder's Session through its embedding's owning controller. Call next() to use the Web Session controller.
+
+```ts cordis-catalog
+/**
+ * Restore a reminder's Session through its embedding's owning controller.
+ * Call next() to use the Web Session controller.
+ * @param sessionId - Original Session receiving the reminder.
+ * @mode waterfall
+ */
+'schedule/resolve-agent'(sessionId: SessionId, next: () => Promise<Agent>): Promise<Agent>
+```
+
+Types: [Agent](core.md) · [SessionId](core.md)
+
+Source: [`packages/schedule/schedule/src/index.ts`](../../packages/schedule/schedule/src/index.ts)
 <!-- END GENERATED cordis-surface -->

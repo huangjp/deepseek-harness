@@ -2,13 +2,14 @@
 import { randomUUID } from 'node:crypto'
 import z from '@deepseek-ai/schemastery'
 import { Context, Service } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import type {} from '@deepseek-ai/dsh-api-session-controller'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
-import type {} from '@deepseek-ai/dsh-api-session-controller'
+import { delegationDepthOf } from '@deepseek-ai/dsh-subagent'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionActivity } from '@deepseek-ai/dsh-workspace'
 import { ScheduleRuntime } from './runtime.ts'
-import { registerScheduleTools } from './tools.ts'
 import { scheduleDomain } from './storage.ts'
 import { deliveryHistoryPage } from './delivery-history.ts'
 import { resolveScheduleUpdate } from './update.ts'
@@ -18,13 +19,12 @@ import {
   scheduleTitle,
 } from './domain.ts'
 import type {
-  DeliveryRetentionBounds, ScheduleCatalogEntry, ScheduleCreateRequest, ScheduleDeleteRequest, ScheduleDeleteResult,
-  ScheduleDeliveryHistoryRequest, ScheduleDeliveryHistoryResult, ScheduleListRequest, ScheduleRecord,
-  ScheduleUpdateRequest, ScheduleUpdateResult,
+  DeliveryRetentionBounds, ScheduleCatalogEntry, ScheduleCreateRequest, ScheduleDeleteInactiveResult,
+  ScheduleDeleteRequest, ScheduleDeleteResult, ScheduleDeliveryHistoryRequest, ScheduleDeliveryHistoryResult,
+  ScheduleListRequest, ScheduleRecord, ScheduleUpdateRequest, ScheduleUpdateResult, SubagentSessionError,
 } from './types.ts'
 
 export type * from './types.ts'
-export { registerScheduleTools } from './tools.ts'
 export { scheduleDomain } from './storage.ts'
 export type { ScheduleTask } from './storage.ts'
 export type { RecurringOccurrence } from './domain.ts'
@@ -32,6 +32,7 @@ export {
   SCHEDULE_CHANGE_VERSION,
   MIN_EVERY_INTERVAL_SECONDS,
   MAX_TITLE_LENGTH,
+  REQUIRED_TITLE_MESSAGE,
   ScheduleId,
   ScheduleInputError,
   ScheduleLogError,
@@ -63,6 +64,15 @@ export {
 
 
 declare module '@deepseek-ai/cordis' {
+  interface Events {
+    /**
+     * Restore a reminder's Session through its embedding's owning controller.
+     * Call next() to use the Web Session controller.
+     * @param sessionId - Original Session receiving the reminder.
+     * @mode waterfall
+     */
+    'schedule/resolve-agent'(sessionId: SessionId, next: () => Promise<Agent>): Promise<Agent>
+  }
   interface Context {
     /** Durable Host-wide reminder management. */
     schedule: ScheduleService
@@ -98,7 +108,7 @@ const DEFAULT_DELIVERY_HISTORY_RECORDS = 200
  * service is the plugin that registers that listener.
  */
 export class ScheduleService extends TypertRemoteService {
-  static inject = ['agents', 'sessions', 'tools', 'storageDomain', 'sessionController', 'sessionPersistence']
+  static inject = ['agents', 'sessions', 'storageDomain', 'sessionPersistence']
 
   static Config: z<Config> = z.object({
     deliveryHistoryDays: z.number().step(1).min(1).max(3650).default(DEFAULT_DELIVERY_HISTORY_DAYS),
@@ -111,6 +121,7 @@ export class ScheduleService extends TypertRemoteService {
   private readonly initialized: PromiseLike<unknown>
   private chain: Promise<unknown> = Promise.resolve()
   private runtime: ScheduleRuntime | undefined
+  private resolveWebAgent: ((sessionId: SessionId) => Promise<Agent>) | undefined
   private stopping = false
 
   /**
@@ -119,6 +130,18 @@ export class ScheduleService extends TypertRemoteService {
    */
   constructor(ctx: Context, config: Config) {
     super(ctx, 'schedule')
+    ctx.inject(['sessionController'], (webCtx) => {
+      webCtx.effect(() => {
+        this.resolveWebAgent = async (sessionId) => {
+          const resolved = await webCtx.sessionController.resolveAgent(sessionId)
+          if ('error' in resolved) throw resolved.error
+          return resolved.agent
+        }
+        // Resume overdue tasks when the Web activation provider becomes ready.
+        this.runtime?.requestDrive()
+        return () => { this.resolveWebAgent = undefined }
+      })
+    })
     this.retention = {
       days: config.deliveryHistoryDays ?? DEFAULT_DELIVERY_HISTORY_DAYS,
       records: config.deliveryHistoryRecords ?? DEFAULT_DELIVERY_HISTORY_RECORDS,
@@ -160,30 +183,13 @@ export class ScheduleService extends TypertRemoteService {
           await tasks.put(task.record.id, task)
           this.emitChanged()
         },
-        this.retention)
+        this.retention,
+        (sessionId) => {
+          if (this.resolveWebAgent === undefined) throw new Error('schedule: no Session activation provider')
+          return this.resolveWebAgent(sessionId)
+        })
       this.runtime.requestDrive()
       return cleanup
-    })
-    const registered = new WeakSet<object>()
-    const attached = new Map<import('@deepseek-ai/dsh-agent').Agent, () => Promise<void>>()
-    const attach = (agent: import('@deepseek-ai/dsh-agent').Agent): void => {
-      if (this.stopping || registered.has(agent) || !ctx.agents.roots().includes(agent)) return
-      registered.add(agent)
-      // The plugin-scope effect is what tears the Agent-scoped registration down when this
-      // plugin unloads, so it must also be disposed when the Agent itself is released.
-      attached.set(agent, ctx.effect(
-        () => agent.ctx.effect(() => registerScheduleTools(ctx, agent.ctx, agent)),
-      ))
-    }
-    ctx.on('agent/created', ({ agent }) => { attach(agent) })
-    ctx.on('agent/disposed', ({ agent }) => {
-      const detach = attached.get(agent)
-      if (detach === undefined) return
-      attached.delete(agent)
-      // `agent/disposed` declares a void listener, so the disposer promise is not returned;
-      // this teardown chain is synchronous, and a failure throws into
-      // `AgentRegistry.emitDisposed`, which reports it as a listener throw.
-      void detach()
     })
     ctx.on('session/created', (session) => {
       // Historical Schedule events remain readable but do not populate Host tasks.
@@ -226,7 +232,6 @@ export class ScheduleService extends TypertRemoteService {
         activity()
       }
     }, 'schedule.archiveAdmission()')
-    for (const agent of ctx.agents.roots()) attach(agent)
   }
 
   async [Service.init](): Promise<void> {
@@ -238,6 +243,8 @@ export class ScheduleService extends TypertRemoteService {
    *
    * The request must supply a title; a missing, blank-after-trim, or over-long
    * title rejects with `invalid_prompt` instead of deriving one from the prompt.
+   * A Session a delegated child owns rejects with `subagent_session`, because delivery
+   * can never reach it: the child is one whose delegation depth is above zero.
    * The record is built from the clock reading taken before the request joins the
    * serialized queue, so a create that waits behind a longer operation keeps its
    * request-time anchor and may already be due when the queue reaches it.
@@ -270,6 +277,8 @@ export class ScheduleService extends TypertRemoteService {
     else if (request.cron !== undefined) record = createCronScheduleRecord(id, request.prompt, request.cron, now, title)
     else throw new ScheduleInputError('invalid_selector', 'Exactly one reminder selector is required.')
     return this.serialize(async () => {
+      const refusal = this.reminderTargetRefusal(sessionId)
+      if (refusal !== undefined) throw new ScheduleInputError('subagent_session', refusal.message)
       const domain = await this.getDomain()
       signal?.throwIfAborted()
       await domain.table('tasks').put(id, {
@@ -334,7 +343,9 @@ export class ScheduleService extends TypertRemoteService {
    * Delete one task belonging to the selected Session, leaving queued messages intact.
    *
    * The row is removed: the task no longer schedules, leaves `list` and `catalog`, and its
-   * saved delivery records go with it.
+   * saved delivery records go with it. A task bound to a Session a delegated child owns
+   * stays deletable even though creation and timing edits refuse that binding, so a task
+   * stored before that rule existed remains removable.
    * @param request - Session and exact task identity.
    * @param signal - Optional cancellation checked before persistence begins, including after FIFO waits.
    * @returns Whether that Session owned a deleted task. Cancellation does not roll back an in-flight write.
@@ -356,19 +367,49 @@ export class ScheduleService extends TypertRemoteService {
   }
 
   /**
+   * Delete every ended Host task, leaving active tasks armed.
+   *
+   * Ended tasks never schedule another delivery, so the removal changes no pending
+   * target and no timer is recomputed. Rows are enumerated and removed in one FIFO
+   * slot, so a delivery ordered behind this call ends its task after the
+   * enumeration rather than during it. The batch is one domain write: a normal
+   * failure rejects with every listed row still stored, while a backend
+   * `unknown-state` failure may have removed rows and quarantines the Host
+   * domain, so later schedule operations reject until the domain is reopened.
+   * Every rejection announces `schedule/changed` because it does not establish
+   * which rows landed, and clients then re-read the catalog.
+   * @returns Count of removed rows; zero when the Host held no ended task.
+   */
+  @Remote('deleteInactive')
+  async deleteInactive(): Promise<ScheduleDeleteInactiveResult> {
+    return this.serialize<ScheduleDeleteInactiveResult>(async () => {
+      const tasks = (await this.getDomain()).table('tasks')
+      const ended = [...tasks.entries()]
+        .filter(([, task]) => task.status === 'inactive')
+        .map(([, task]) => task.record.id)
+      return { deleted: await this.removeRows(ended, 'schedule ended-task removal failed', false) }
+    })
+  }
+
+  /**
    * Update the name, instruction, and timing of an active task within the original Session
    * binding without activating the Session or changing saved deliveries.
    *
    * Each supplied field replaces its stored value; an omitted field keeps it. A name or
-   * instruction change alone does not reset the committed target.
+   * instruction change alone does not reset the committed target. A Session a delegated
+   * child owns returns the non-mutating `subagent_session` result, so an edit cannot
+   * re-arm a task bound to a Session delivery can never reach, and the Web editor can
+   * explain the refusal through the ordinary result it already renders.
    * @param request - Task binding, complete observed record, and any combination of timing, name, and instruction.
    * @param signal - Cancellation checked after domain readiness and FIFO waits, before persistence begins.
-   * @returns The committed record, unchanged record for a no-op, or a non-mutating input/lookup/conflict result.
+   * @returns The committed record, unchanged record for a no-op, or a non-mutating input/lookup/conflict/refusal result.
    * Storage and lifecycle failures reject; cancellation after a write starts does not roll it back.
    */
   @Remote('update')
   async update(request: ScheduleUpdateRequest, signal?: AbortSignal): Promise<ScheduleUpdateResult> {
     return this.serialize<ScheduleUpdateResult>(async () => {
+      const refusal = this.reminderTargetRefusal(request.sessionId)
+      if (refusal !== undefined) return refusal
       const tasks = (await this.getDomain()).table('tasks')
       signal?.throwIfAborted()
       const current = tasks.get(request.id)
@@ -408,6 +449,27 @@ export class ScheduleService extends TypertRemoteService {
   }
 
   /**
+   * Refuse a Session no delivery can reach because a delegated child owns it.
+   *
+   * Delivery uses `schedule/resolve-agent`; the Web fallback rejects the live Agent
+   * of a delegated child; a stored task for such a Session
+   * would stay permanently overdue and retry on every drive. Both operations that can
+   * arm a delivery read that same fact here instead of restating it: a delegated child
+   * is one whose {@link delegationDepthOf} is above zero, the accounting the delegation
+   * cap itself enforces, which survives a cold resume through the persisted header.
+   * @param sessionId - Session the task would be bound to.
+   * @returns The stable refusal for a delegated child's Session, or undefined when the Session is eligible.
+   */
+  private reminderTargetRefusal(sessionId: SessionId): SubagentSessionError | undefined {
+    const agent = this.ctx.agents.get(sessionId)
+    if (agent === undefined || delegationDepthOf(agent) === 0) return undefined
+    return {
+      code: 'subagent_session',
+      message: 'This Session belongs to subagent routing, which never receives reminder delivery.',
+    }
+  }
+
+  /**
    * Remove every active task stored for one Session, inside the queue the tools
    * use.
    *
@@ -425,30 +487,39 @@ export class ScheduleService extends TypertRemoteService {
         .filter(([, task]) => task.sessionId === sessionId && task.status === 'active')
         .map(([, task]) => task.record.id)
       if (active.length === 0) return
-      // One row per write: the domain table has no batch delete, and each row is
-      // durable on its own, so a failure partway through leaves the rows already
-      // removed committed. Observers hear about that change before the failure
-      // reaches the caller, which still receives it.
-      let removed = false
-      let failure: Error | undefined
-      for (const id of active) {
-        try {
-          await tasks.delete(id)
-          removed = true
-        } catch (error: unknown) {
-          // Every row is attempted: the archive has already landed, so a row this
-          // stop skipped would stay armed in a Session whose runtime then refuses
-          // its model steps. A rejection reason that carries no Error still has to
-          // report a failure, so it is wrapped before the first one is kept.
-          failure ??= error instanceof Error ? error : new Error(`schedule stop failed: ${String(error)}`)
-        }
-      }
-      if (removed) {
-        this.emitChanged()
-        this.runtime?.requestDrive()
-      }
-      if (failure !== undefined) throw failure
+      await this.removeRows(active, 'schedule stop failed', true)
     })
+  }
+
+  /**
+   * Remove rows as one durable batch inside the current queue slot.
+   *
+   * The batch is one domain write: on success every present row is removed and
+   * announced. Any rejection announces `schedule/changed` because it does not
+   * establish which rows landed; a normal failure leaves every row stored, and
+   * an `unknown-state` failure may have removed some. A rejection reason that
+   * carries no Error is wrapped with the operation label.
+   * @param ids - rows to remove.
+   * @param label - failure message prefix naming the operation that owned them.
+   * @param rearm - whether the rows were armed, so the pending timer must be recomputed.
+   * @returns the number of rows this call removed.
+   */
+  private async removeRows(ids: readonly ScheduleRecord['id'][], label: string, rearm: boolean): Promise<number> {
+    if (ids.length === 0) return 0
+    let removed: number
+    try {
+      removed = await (await this.getDomain()).table('tasks').deleteMany(ids)
+    } catch (error: unknown) {
+      // A rejection never establishes which rows landed, and the backend can
+      // report `unknown-state` after removing some of them. Announce the change
+      // so observers re-read instead of trusting their stale catalog.
+      this.emitChanged()
+      throw error instanceof Error ? error : new Error(`${label}: ${String(error)}`)
+    }
+    // Rows enumerated in this slot are present, so a non-empty batch always removed rows.
+    this.emitChanged()
+    if (rearm) this.runtime?.requestDrive()
+    return removed
   }
 
   private serialize<T>(work: () => Promise<T>): Promise<T> {

@@ -1,14 +1,10 @@
 /**
- * InputHub: the SessionInputResolver implementation (`ctx.conversation.input`) — one
- * SessionInputShell per session, created inside the uiSession provide
- * materialization (the 'input' standard-kit entry IS the
- * creation trigger) and torn down by the scope disposer (instance-and-scope
- * share one lifecycle). The hub registers the scoped input-mutation
- * listeners on each Session context and owns the default-sink choreography: every session is a
- * real host entity, so the sink is one unconditional prompt path.
+ * Session-bound input registry and default-send routing for Conversation.
+ * Each retained Session binding owns one shell, its input listeners, and its
+ * catalog subscription. Saved drafts enter the model before the first lookup
+ * returns; Session-scope disposal releases the shell and its resources.
  */
 import type {} from '@deepseek-ai/dsh-client-product-analytics/client'
-import type { ModelSelectionProjection } from '@deepseek-ai/dsh-api-session-controller/types'
 import type { PlanProjection } from '@deepseek-ai/dsh-plan-mode/types'
 import type { GoalProjection } from '@deepseek-ai/dsh-goal/types'
 import type { Context } from '@deepseek-ai/cordis'
@@ -18,16 +14,19 @@ import type {
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-locale/client'
 import type { InboxState } from '@deepseek-ai/dsh-agent/types'
+import type { ModelSelectionProjection } from '@deepseek-ai/dsh-agent/types'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type {
-  DraftAttachmentId, DraftAttachmentSerializationResult, InputTriggerController,
+  DraftAttachmentId, DraftAttachmentSerializationResult, DraftInitializationOptions, DraftInitializationResult, InputTriggerController,
   SessionInputResolver, SessionInput, SubmitOutcome,
 } from '../contract/input.ts'
 import type { ComposerKeyboard } from '../contract/draft-editor.ts'
+import type { ComposerBlocks } from '../contract/composer-blocks.ts'
 import type { InputSubmitMode } from '../contract/composer-submission.ts'
 import type { PopupDismissFace } from './facade.ts'
 import { SessionInputShell } from './facade.ts'
 import { reportMessageSubmission } from './submission-analytics.ts'
+import { readConversationDraft } from '../stores.ts'
 
 /** Structural command face for per-session popup resolution. */
 interface CommandFace {
@@ -42,6 +41,7 @@ interface InputTriggerServiceFace {
 
 /** Attachment-send face resolved lazily to keep hub/service construction acyclic. */
 interface ConversationAttachmentFace {
+  readonly blocks: ComposerBlocks
   sendSession(
     session: SessionFace,
     text: string,
@@ -81,11 +81,17 @@ export class InputHub implements SessionInputResolver {
     return this.shellFor(binding)
   }
 
+  requestDraftInitialization(binding: SessionBinding, options: DraftInitializationOptions): DraftInitializationResult {
+    if (this.sessions().binding(binding.sessionId) !== binding) {
+      throw new Error('conversation.input.requestDraftInitialization requires a retained Session binding')
+    }
+    return this.shellFor(binding).requestDraftInitialization(options)
+  }
+
   /**
-   * Resident shell for one session binding — the provide-channel entry
-   * (called during scope materialization, BEFORE the scope record is
-   * queryable, hence binding-fed and hence the thunked slash/popup deps).
-   * Wires the scoped event listeners + teardown into the session scope.
+   * Resolve the resident shell for an already-retained, addressable Session binding.
+   * Draft import completes before return. The Session scope owns input listeners,
+   * the inject-managed catalog subscription, and shell teardown.
    * @param binding - session assembly handle.
    * @returns the shell.
    */
@@ -100,6 +106,7 @@ export class InputHub implements SessionInputResolver {
         const model = session.projections.faceOf('modelSelection').getSnapshot() as ModelSelectionProjection | undefined
         const plan = session.projections.faceOf('plan').getSnapshot() as PlanProjection | undefined
         const goal = session.projections.faceOf('goal').getSnapshot() as GoalProjection | null | undefined
+        const agentPreset = session.projections.faceOf('agentPreset').getSnapshot()
         const selection = model?.next ?? model?.lastUsed
         return Object.freeze({
           ...state.blank ? {} : { sessionId: state.sessionId },
@@ -109,6 +116,8 @@ export class InputHub implements SessionInputResolver {
           }) },
           runMode: plan?.active ? 'plan' : goal?.goal.phase === 'active' ? 'goal' : 'default',
           running: state.running,
+          newSession: state.blank,
+          ...typeof agentPreset === 'string' ? { agentPreset } : {},
         })
       },
       messageSubmitted: (submission) => { reportMessageSubmission(this.rootCtx, submission) },
@@ -116,6 +125,13 @@ export class InputHub implements SessionInputResolver {
       popup: () => this.popup(actx),
       inbox: session.projections.faceOf('inbox') as ObservableSnapshot<InboxState | undefined>,
       defaultSink: (text, attachmentIds, mode, signal) => this.sink(session, text, attachmentIds, mode, signal),
+      quoteRemoveLabel: () => this.t('quote.remove'),
+      quoteInsertionAllowed: () => {
+        const state = session.getSnapshot()
+        return !state.removed && (state.subagent === null
+          || (state.subagent.address.mode === 'continuable' && state.subagent.parentAvailable === true))
+          && this.conversation().blocks.storeFor(session.sessionId).getSnapshot() === undefined
+      },
       steerQueue: () => { void this.steerQueue(session, shell) },
       commandAttachments: {
         serialize: async (ids) => {
@@ -157,6 +173,13 @@ export class InputHub implements SessionInputResolver {
         for (const attachmentId of drafts) conversation?.releaseDraftAttachment(attachmentId)
       }
     }, 'conversation.input: session shell')
+    actx.inject(['inputTriggers'], (scope) => {
+      scope.effect(() => {
+        shell.refreshLexiconSubscription()
+        return () => { shell.refreshLexiconSubscription() }
+      }, 'conversation.input: reference catalogs')
+    })
+    shell.setDraft(readConversationDraft(binding.sessionId))
     return shell
   }
 

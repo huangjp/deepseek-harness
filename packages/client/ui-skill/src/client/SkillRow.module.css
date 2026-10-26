@@ -12,6 +12,14 @@
   align-items: center;
   height: calc(24px + var(--dsh-content-font-delta, 0px));
   min-width: 0;
+  color: var(--dsw-alias-label-tertiary);
+  transition: color 100ms ease;
+}
+
+@media (hover: hover) {
+  .row:hover {
+    color: var(--dsw-alias-label-secondary);
+  }
 }
 
 .row[data-expandable] {
@@ -27,7 +35,7 @@
   align-items: center;
   justify-content: center;
   margin-right: 6px;
-  color: var(--dsw-alias-label-tertiary);
+  color: inherit;
 }
 
 .leading svg {
@@ -36,7 +44,7 @@
 }
 
 .chevron {
-  color: var(--dsw-alias-label-secondary);
+  color: inherit;
 }
 
 .iconIdle {
@@ -53,19 +61,20 @@
   transition: opacity 100ms ease;
 }
 
-.row:hover .iconIdle {
-  opacity: 0;
-}
+@media (hover: hover) {
+  .row:hover .iconIdle {
+    opacity: 0;
+  }
 
-.row:hover .chevronHover {
-  opacity: 1;
+  .row:hover .chevronHover {
+    opacity: 1;
+  }
 }
 
 .title {
   flex: none;
   font-size: var(--dsh-content-font-size-secondary, 13px);
   line-height: calc(24px + var(--dsh-content-font-delta, 0px));
-  color: var(--dsw-alias-label-secondary);
 }
 
 .separator {
@@ -85,7 +94,6 @@
   white-space: nowrap;
   font-size: var(--dsh-content-font-size-secondary, 13px);
   line-height: calc(24px + var(--dsh-content-font-delta, 0px));
-  color: var(--dsw-alias-label-tertiary);
 }
 
 .errorSummary {
@@ -169,14 +177,19 @@
   transition: opacity 100ms ease;
 }
 
-.card:hover .inspectButton,
 .inspectButton:focus-visible {
   opacity: 1;
 }
 
-.inspectButton:hover {
-  background: var(--dsw-alias-interactive-bg-hover-solid);
-  color: var(--dsw-alias-label-primary);
+@media (hover: hover) {
+  .card:hover .inspectButton {
+    opacity: 1;
+  }
+
+  .inspectButton:hover {
+    background: var(--dsw-alias-interactive-bg-hover-solid);
+    color: var(--dsw-alias-label-primary);
+  }
 }
 
 .visuallyHidden {
@@ -189,9 +202,14 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .row,
   .iconIdle,
   .chevronHover,
   .inspectButton {
     transition: none;
   }
+}
+
+@media (hover: none) {
+  .inspectButton { opacity: 1; }
 }

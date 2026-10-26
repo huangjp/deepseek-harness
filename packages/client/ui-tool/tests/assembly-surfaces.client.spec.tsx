@@ -15,6 +15,7 @@ import {
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import { SlotTestRuntime, usePinnedBrowserLanguages, stubConfigForm } from '@deepseek-ai/dsh-client-test-runtime'
 import { apply as applyConversation, inject as injectConversation } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import { PartialArguments } from '@deepseek-ai/dsh-util-values'
 import { apply as applyTool, inject as injectTool } from '../src/client/apply.ts'
 
 // The service reads its initial locale from the browser; these specs assert
@@ -51,19 +52,24 @@ const TODOS: TodoItem[] = [
 
 const todoResult = (seq: number): ToolResultNode => ({
   kind: 'tool-result', seq, time: seq * 1_000, callId: `todo-${seq}`,
+  name: 'todo_write', args: PartialArguments.fromText(JSON.stringify({ todos: TODOS })),
   call: { name: 'todo_write', argsRaw: JSON.stringify({ todos: TODOS }) },
   callTime: seq * 1_000 - 500,
   content: [], isError: false, subCalls: [],
 })
 
-const bashResult = (seq: number, callId: string, over?: Partial<ToolResultNode>): ToolResultNode => ({
-  kind: 'tool-result', seq, time: seq * 1_000, callId,
-  call: { name: 'bash', argsRaw: '{"command":"ls -la","description":"List files"}' },
-  callTime: seq * 1_000 - 500,
-  content: [{ type: 'text', text: 'total 2\ndemo.txt\n' }], isError: false,
-  subCalls: [],
-  ...over,
-})
+const bashResult = (seq: number, callId: string, over?: Partial<ToolResultNode>): ToolResultNode => {
+  const call = over?.call === undefined ? { name: 'bash', argsRaw: '{"command":"ls -la","description":"List files"}' } : over.call
+  return {
+    kind: 'tool-result', seq, time: seq * 1_000, callId,
+    name: call?.name ?? '', args: call === null ? PartialArguments.EMPTY : PartialArguments.fromText(call.argsRaw),
+    call,
+    callTime: seq * 1_000 - 500,
+    content: [{ type: 'text', text: 'total 2\ndemo.txt\n' }], isError: false,
+    subCalls: [],
+    ...over,
+  }
+}
 
 /** Test-owned AppFrame role: declares and renders the resident conversation area. */
 type AppRootProps = PropsRenderSlots<'main'>
@@ -77,12 +83,14 @@ const LAYOUT_CHILDREN = {
 
 async function bench(nodes: ToolResultNode[]) {
   const runtime = await SlotTestRuntime.create()
+  runtime.ctx.provide('fileDrag', { actions: { prepare: async () => ({ start: () => true, release: () => {} }), reportFailure: () => {} }, read: () => undefined } satisfies import('@deepseek-ai/cordis').Context['fileDrag'])
   runtime.remote.provideNamespaces({
     session: {
       openWorkspacePath: vi.fn(async () => ({ ok: true, value: { opened: true } })),
     },
   })
   runtime.ctx.provide('configForms', { developerTools: { enabled: createSnapshotStore(true) }, get: () => stubConfigForm().scope } as never)
+  runtime.ctx.provide('connection', { state: createSnapshotStore('connected') } as never)
   runtime.ctx.provide('layout', { openDetails: vi.fn(), closeDetails: vi.fn() })
   runtime.ctx.provide('sidebarRight', { openResource: vi.fn() } as never)
   runtime.ctx.provide('uiWorkspace', {

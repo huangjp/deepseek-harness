@@ -51,7 +51,13 @@
       "path": "../../core/tools"
     },
     {
+      "path": "../../interaction/user-questions"
+    },
+    {
       "path": "../../util/workspace-path"
+    },
+    {
+      "path": "../../core/tool-executor-ptc"
     }
   ]
 }

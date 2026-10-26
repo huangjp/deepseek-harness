@@ -21,7 +21,6 @@ import {
   loadProfileDirectory,
   PROFILE_COMPATIBILITY_FILENAME,
   PROFILE_PATCH_FILENAME,
-  PROFILE_TEMPLATES,
   readProfileManifest,
   readProfilePatches,
   removeLinkProjections,
@@ -32,6 +31,7 @@ import {
   type Profile,
   type RuntimeResolution,
 } from '../src/index.ts'
+import { PROFILE_TEMPLATES } from '@deepseek-ai/dsh-official-bundles'
 import { installRuntimeInterception } from '../src/profile-resolution/resolver.ts'
 
 const tempRoots: string[] = []
@@ -341,16 +341,6 @@ describe('loadProfile', () => {
     const home = tmp()
     expect(() => loadProfile('t', 'custom', anchor, home))
       .toThrow('profile "custom" does not exist')
-    expect(PROFILE_TEMPLATES.web?.bundles).toContain('@deepseek-ai/dsh-base')
-    expect(PROFILE_TEMPLATES.acp).toEqual({
-      bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-acp-app'],
-    })
-    expect(PROFILE_TEMPLATES.sdk).toEqual({
-      bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-sdk-app'],
-    })
-    expect(PROFILE_TEMPLATES['sdk-minimal']).toEqual({
-      bundles: ['@deepseek-ai/dsh-sdk-minimal'],
-    })
     loadProfile('t', 'web', anchor, home)
     expect(readProfileManifest('t', resolveProfileDir('web', home)).dsh?.profile?.bundles)
       .toEqual([...PROFILE_TEMPLATES.web?.bundles ?? []])
@@ -384,6 +374,23 @@ describe('loadProfile', () => {
     expect(readProfileManifest('t', custom).dsh?.profile?.bundles).toEqual([
       '@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', '@deepseek-ai/dsh-headless', 'custom-bundle',
     ])
+  })
+
+  it('removes a retired bundle from an application-owned profile and keeps the rest of the manifest', () => {
+    const anchor = stageInstallation({
+      '@deepseek-ai/dsh-base': { patch: '[]\n' },
+      'custom-bundle': { patch: '[]\n' },
+    })
+    const dir = join(tmp(), 'app-profile')
+    initProfile(dir, ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-experimental-schedule-bundle', 'custom-bundle'])
+    writeProfileManifest(dir, { ...readProfileManifest('t', dir), dependencies: { 'custom-bundle': '^1.0.0' } })
+    const profile = loadProfileDirectory('t', dir, anchor)
+    expect(profile.skippedBundles).toEqual([])
+    expect(profile.layers.map(layer => layer.packageName)).toEqual(['@deepseek-ai/dsh-base', 'custom-bundle'])
+    expect(readProfileManifest('t', dir)).toMatchObject({
+      dependencies: { 'custom-bundle': '^1.0.0' },
+      dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', 'custom-bundle'] } },
+    })
   })
 
   it.each(['missing package', 'invalid manifest', 'not a bundle', 'missing patch', 'invalid patch'])(
@@ -497,6 +504,7 @@ describe('createRuntimeResolution', () => {
     expect(resolution.entries.find(entry => entry.name === 'dep-of-a')?.packageDir).toBe(join(modules, 'dep-of-a'))
     expect(existsSync(join(home, 'profiles', 'node_modules'))).toBe(false)
     await expect(createRuntimeResolution({ installAnchor: anchor, home })).resolves.toEqual(resolution)
+    await expect(resolution.computeLatestResolution()).resolves.toEqual(resolution)
   })
 
   it('keeps selected bundle closures profile-local without overriding installation packages', async () => {
