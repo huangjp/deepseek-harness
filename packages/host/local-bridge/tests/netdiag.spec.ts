@@ -53,10 +53,11 @@ describe('readSystemProxy / probeSystemProxy', () => {
 
   it('reports reachability only when a proxy endpoint could be parsed', async () => {
     const proxy = await probeSystemProxy()
-    if (proxy.endpoint === null) {
-      expect(proxy.reachable).toBeNull()
-    } else {
+    // 只有「代理开着且地址能拆出来」时才会去探端口；否则 reachable 是 null。
+    if (proxy.enabled && proxy.endpoint !== null) {
       expect(typeof proxy.reachable).toBe('boolean')
+    } else {
+      expect(proxy.reachable).toBeNull()
     }
   })
 })

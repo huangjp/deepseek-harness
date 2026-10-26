@@ -301,6 +301,49 @@ export function looksLikeFalseCompletion(text) {
 }
 
 /**
+ * 模型的输出是不是「拿一段脚本代替了工具调用」。
+ *
+ * 实测（Copilot chatHub）：Copilot 的模型带着「我是在服务端沙箱里跑的」这个先验，
+ * 用户说「创建文档 docs/v2/100-test.md」，它回的是
+ *
+ *     ```python
+ *     from pathlib import Path
+ *     p = Path('/mnt/data/100-test.md')
+ *     p.write_text('…')
+ *     ```
+ *
+ * `/mnt/data/` 是服务端沙箱的路径，本机根本没有这个目录 —— 所以这段脚本**什么都不会落地**，
+ * 但对话看上去「有产出」。这是「偶尔能落地、偶尔不能」的另一半机制：
+ * 前一半是它声称做完了却没调用（{@link looksLikeFalseCompletion}），这一半是它写脚本代替调用。
+ *
+ * 判据要收窄，否则会误伤「帮我写个 python 脚本」这类正当请求：
+ * 必须**同时**出现代码块和「写文件 / 执行命令」的迹象（或沙箱路径）。
+ * 纯讲算法的代码块不在此列。
+ *
+ * @param {string} text 模型输出。
+ * @returns {boolean} 是否像一次「用脚本代替工具调用」。
+ */
+export function looksLikeScriptInsteadOfToolCall(text) {
+  const s = String(text ?? '');
+  if (!s) return false;
+  const fence = /```(python|py|bash|sh|shell|zsh|powershell|ps1|cmd|bat)\b/i.test(s);
+  if (!fence) return false;
+  // 服务端沙箱路径：一眼就能判定这段脚本跑不到本机。
+  if (/\/mnt\/data\//.test(s)) return true;
+  // 写文件 / 执行命令的迹象。
+  return /(write_text|write_bytes|open\s*\([^)]*['"][wax]?['"]|os\.makedirs|os\.remove|shutil\.|subprocess\.|os\.system|Path\s*\(|\bmkdir\b|Set-Content|Out-File|Add-Content|New-Item|Remove-Item|Copy-Item|Move-Item|cat\s+>|>\s*[\w./\\:-]+\.[A-Za-z0-9]{1,6}\b)/.test(s);
+}
+
+/**
+ * 上一条回答输出的是脚本而不是工具调用时，追加这段提示重试一次。
+ */
+export const TOOL_CALL_NOT_SCRIPT_REMINDER = [
+  '【重要】你上一条回答输出的是一段脚本代码，而不是一次工具调用 —— 那段脚本不会真的在本机创建任何文件。',
+  '写文件必须调用 write 工具，执行命令必须调用 pwsh 工具，读取文件用 read，查找文件用 glob。',
+  '请现在按规定的 JSON 格式发出一次工具调用，不要输出任何 python / shell / powershell 脚本。',
+].join('\n');
+
+/**
  * 声称完成了、却一次工具都没调时，追加这段提示重试一次。
  */
 export const TOOL_REQUIRED_REMINDER = [
@@ -415,6 +458,18 @@ export async function completeWithToolCalls({ invoke, systemPrompt, hasTools, lo
     if (hasTools && !decided.calls && looksLikeFalseCompletion(first.text)) {
       log('[warn] 模型声称完成了任务但没有调用任何工具，重试一次并强制使用工具');
       const retry = await invoke(`${systemPrompt}\n\n${TOOL_REQUIRED_REMINDER}`);
+      return {
+        outcome: resolveToolOutcome({ text: retry.text, hasTools }),
+        text: retry.text,
+        usage: retry.usage || first.usage,
+      };
+    }
+    // 脚本代替调用：模型写了一段 python/shell 脚本（而且路径是服务端的 /mnt/data/），
+    // 看上去有产出，实际什么都不会落地。这一类跟「假完成」不同 —— 它的措辞很诚实，
+    // 诚实到反而没人发现文件根本没建。
+    if (hasTools && !decided.calls && looksLikeScriptInsteadOfToolCall(first.text)) {
+      log('[warn] 模型用脚本代替了工具调用，重试一次并强制使用工具');
+      const retry = await invoke(`${systemPrompt}\n\n${TOOL_CALL_NOT_SCRIPT_REMINDER}`);
       return {
         outcome: resolveToolOutcome({ text: retry.text, hasTools }),
         text: retry.text,

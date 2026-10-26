@@ -12,7 +12,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import {
-  completeWithToolCalls, looksLikeFalseCompletion, looksLikeToolRefusal,
+  completeWithToolCalls, looksLikeFalseCompletion, looksLikeScriptInsteadOfToolCall, looksLikeToolRefusal,
 } from '../bridge/toolprompt.mjs'
 
 describe('拒答与假完成的判据', () => {
@@ -30,6 +30,35 @@ describe('拒答与假完成的判据', () => {
     expect(looksLikeFalseCompletion('已创建文件 `docs/v2/100-test.md`，内容为：…')).toBe(true)
     expect(looksLikeFalseCompletion('已经保存好了。')).toBe(true)
     expect(looksLikeFalseCompletion('这个架构分三层。')).toBe(false)
+  })
+})
+
+describe('用脚本代替工具调用的判据', () => {
+  it('认得出 Copilot 那种 /mnt/data 沙箱脚本', () => {
+    const script = [
+      '```python',
+      'from pathlib import Path',
+      "p = Path('/mnt/data/100-test.md')",
+      "p.write_text('这是工作的内容', encoding='utf-8')",
+      '```',
+    ].join('\n')
+    expect(looksLikeScriptInsteadOfToolCall(script)).toBe(true)
+  })
+
+  it('认得出没有沙箱路径、但明显在写文件或执行命令的脚本', () => {
+    expect(looksLikeScriptInsteadOfToolCall('```bash\nmkdir -p docs/v2\ncat > docs/v2/a.md\n```')).toBe(true)
+    expect(looksLikeScriptInsteadOfToolCall('```powershell\nSet-Content -Path a.md -Value x\n```')).toBe(true)
+  })
+
+  it('不把讲算法的代码块误判成「拿脚本代替调用」', () => {
+    // 用户真的在问算法时，输出代码块是完全正当的，不能逼它去调工具。
+    const snippet = '```python\ndef quicksort(xs):\n    return sorted(xs)\n```'
+    expect(looksLikeScriptInsteadOfToolCall(snippet)).toBe(false)
+  })
+
+  it('没有代码块就不是这一类', () => {
+    expect(looksLikeScriptInsteadOfToolCall('请用 write 工具写入 /mnt/data/a.md。')).toBe(false)
+    expect(looksLikeScriptInsteadOfToolCall('')).toBe(false)
   })
 })
 
@@ -67,5 +96,28 @@ describe('completeWithToolCalls 的重试', () => {
     const out = await completeWithToolCalls({ invoke, systemPrompt: 'SYS', hasTools: true })
     expect(invoke).toHaveBeenCalledTimes(1)
     expect(out.outcome.content).toBe('这个架构分三层。')
+  })
+
+  it('模型拿脚本代替调用时，重试一次并强制调用工具', async () => {
+    const invoke = vi.fn()
+      .mockResolvedValueOnce({
+        text: '```python\nfrom pathlib import Path\np = Path(\'/mnt/data/100-test.md\')\np.write_text(\'x\')\n```',
+      })
+      .mockResolvedValueOnce({ text: '{"bridge_tool_calls":[{"name":"write","arguments":{"file_path":"docs/v2/100-test.md","content":"x"}}]}' })
+    const out = await completeWithToolCalls({
+      invoke,
+      systemPrompt: 'SYS',
+      hasTools: true,
+    })
+    expect(invoke).toHaveBeenCalledTimes(2)
+    expect(out.outcome.calls?.[0]?.function?.name).toBe('write')
+    expect(String(invoke.mock.calls[1]?.[0])).toContain('而不是一次工具调用')
+  })
+
+  it('讲算法的代码块不触发重试', async () => {
+    const invoke = vi.fn().mockResolvedValue({ text: '```python\ndef quicksort(xs):\n    return sorted(xs)\n```' })
+    const out = await completeWithToolCalls({ invoke, systemPrompt: 'SYS', hasTools: true })
+    expect(invoke).toHaveBeenCalledTimes(1)
+    expect(out.outcome.content).toContain('quicksort')
   })
 })

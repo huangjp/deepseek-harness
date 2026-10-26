@@ -105,6 +105,16 @@ export function looksLikeToolRefusal(text: string | undefined): boolean
  */
 export function looksLikeFalseCompletion(text: string | undefined): boolean
 
+/**
+ * 模型的输出是不是「拿一段脚本代替了工具调用」。
+ * @param text - 模型输出。
+ * @returns 是否像一次用脚本代替工具调用。
+ */
+export function looksLikeScriptInsteadOfToolCall(text: string | undefined): boolean
+
+/** 用脚本代替工具调用时的重试提示。 */
+export const TOOL_CALL_NOT_SCRIPT_REMINDER: string
+
 /** 声称完成了却没调工具时的重试提示。 */
 export const TOOL_REQUIRED_REMINDER: string
 
