@@ -17,6 +17,7 @@ import { randomUUID, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createTokenGate } from './token-gate.mjs';
+import { describeSocketStack, formatProxyDiagnosis, probeSystemProxy } from './netdiag.mjs';
 import {
   buildToolInstruction, completeWithToolCalls, createToolCallGate, EXTERNAL_TOOLING_NOTICE,
   looksLikeToolRefusal, resolveToolOutcome, toolCallFailureText, toolTurnText, TOOL_CALL_REFUSAL_REMINDER,
@@ -456,7 +457,7 @@ async function runChat({ prompt, signal, onDelta }) {
       // 服务端对同一会话的建连有并发/频率限制，实测偶发 101 被拒。
       // 只在本轮**还没吐出任何内容**时重试，否则会重复输出。
       const retriable = (e.code === 'ws_error' || e.code === 'ws_closed') && !session.emitted;
-      if (!retriable || attempt === maxAttempts) throw withTokenAgeHint(e);
+      if (!retriable || attempt === maxAttempts) throw await withOutboundDiagnosis(withTokenAgeHint(e));
       // 实测服务端在关闭一条 Chathub 连接后有约 10 秒的冷却，
       // 期间新建连会被拒（non-101）。退避按 1s→2s→4s→8s 递增，覆盖整个冷却窗口。
       const delay = Math.min(8000, 1000 * 2 ** (attempt - 1));
@@ -464,7 +465,31 @@ async function runChat({ prompt, signal, onDelta }) {
       await new Promise((r) => setTimeout(r, delay));
     }
   }
-  throw withTokenAgeHint(lastErr);
+  throw await withOutboundDiagnosis(withTokenAgeHint(lastErr));
+}
+
+/**
+ * 给连接失败补上出站诊断。
+ *
+ * 光有「WebSocket 连接失败」是查不下去的：令牌过期、服务端限流、本机代理没在工作，
+ * 三种情况共用这句话。诊断只做只读探测（认 WebSocket 实现、读系统代理、探端口），
+ * 换来的是一句能直接指向动作的说明 —— 比如「系统代理指向 127.0.0.1:7890，
+ * 但该端口现在无人监听」。
+ *
+ * @param {Error} err - 原始错误。
+ * @returns {Promise<Error>} 补过诊断的同一个错误对象。
+ */
+async function withOutboundDiagnosis(err) {
+  if (!err || err.code !== 'ws_error') return err;
+  try {
+    const stack = describeSocketStack();
+    const proxy = await probeSystemProxy();
+    const diagnosis = formatProxyDiagnosis(stack, proxy);
+    if (diagnosis) err.message = `${err.message}。${diagnosis}`;
+  } catch {
+    // 诊断失败不影响原错误。
+  }
+  return err;
 }
 
 // ---------------------------------------------------------------- HTTP 工具

@@ -119,6 +119,19 @@ function spawnSyncCapture(cmd, args) {
 }
 
 /**
+ * 等一小会儿（毫秒）。
+ *
+ * @param {number} ms - 等待毫秒数。
+ * @returns {Promise<void>} 到点后 resolve。
+ */
+function delay(ms) {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    t.unref?.();
+  });
+}
+
+/**
  * UUIDv7 —— 云端那几个 id（conversation / request / trace）都是这个形态。
  * 顺序部分用毫秒时间戳，保证同一进程内单调递增。
  */
@@ -338,11 +351,11 @@ export class WorkBuddyCloudBackend {
     const toolAcc = new Map();
     try {
       const cred = await this.ensureToken();
-      let res = await this.post(body, this.buildHeaders({ token: cred.token, uid: cred.uid, model: useModel }), ctl.signal);
+      let res = await this.postWithRetry(body, this.buildHeaders({ token: cred.token, uid: cred.uid, model: useModel }), ctl.signal);
       if (res.status === 401 || res.status === 403) {
         // token 过期/被换：重新收割一次再试。
         const fresh = await this.ensureToken(true);
-        res = await this.post(body, this.buildHeaders({ token: fresh.token, uid: fresh.uid, model: useModel }), ctl.signal);
+        res = await this.postWithRetry(body, this.buildHeaders({ token: fresh.token, uid: fresh.uid, model: useModel }), ctl.signal);
       }
       if (!res.ok) {
         const raw = await res.text().catch(() => '');
@@ -405,6 +418,63 @@ export class WorkBuddyCloudBackend {
       body: JSON.stringify(body),
       signal,
     });
+  }
+
+  /**
+   * 发请求，网络层失败时重试。
+   *
+   * 云端偶尔会直接断连（DNS 抖动 / 连接被重置 / TLS 握手失败），这时 fetch 抛的是
+   * `fetch failed`，真正原因藏在 cause 里。直接把它当成最终失败，用户只会看到一句
+   * 「上游调用失败」——实测这种瞬时断连重试一次就通。
+   *
+   * @param {object} body 请求体。
+   * @param {object} headers 请求头。
+   * @param {AbortSignal} [signal] 取消信号。
+   * @param {number} [attempts] 最多尝试次数。
+   * @returns {Promise<Response>} 成功的响应（状态码可能非 2xx，由调用方判定）。
+   */
+  async postWithRetry(body, headers, signal, attempts = 3) {
+    let lastErr = null;
+    for (let i = 0; i < attempts; i += 1) {
+      try {
+        return await this.post(body, headers, signal);
+      } catch (e) {
+        lastErr = e;
+        // 取消/超时不是抖动，重试没有意义；原样抛出，让外层按超时处理。
+        if (e?.name === 'AbortError' || signal?.aborted) throw e;
+        if (i + 1 >= attempts) break;
+        await delay(400 * (i + 1));
+      }
+    }
+    throw this.mapNetworkError(lastErr);
+  }
+
+  /**
+   * 把网络层失败映射成带诊断信息的异常。
+   *
+   * @param {Error|null} err - fetch 抛出的错误。
+   * @returns {Error} 带 code / httpStatus / retriable 的异常。
+   */
+  mapNetworkError(err) {
+    const cause = err?.cause;
+    // Node 的 fetch 失败时 cause 可能是 AggregateError，真正的原因在 errors 数组里。
+    const candidates = [];
+    if (Array.isArray(cause?.errors)) candidates.push(...cause.errors);
+    if (cause) candidates.push(cause);
+    let detail = '';
+    for (const c of candidates) {
+      if (!c) continue;
+      const code = c.code || c.errno;
+      const msg = typeof c.message === 'string' ? c.message : '';
+      if (!code && !msg) continue;
+      detail = code && msg && !msg.includes(String(code)) ? `${code} ${msg}` : (msg || String(code));
+      break;
+    }
+    if (!detail) detail = err?.message || '未知错误';
+    return Object.assign(
+      new Error(`无法连接 WorkBuddy 云端（${detail.slice(0, 200)}）。这是网络层失败，不是账号或模型问题。`),
+      { code: 'upstream_network', httpStatus: 502, retriable: true, cause: err }
+    );
   }
 
   /** 把云端的错误响应映射成带诊断信息的异常。 */

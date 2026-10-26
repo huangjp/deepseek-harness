@@ -88,6 +88,63 @@ describe('WorkBuddyCloudBackend.mapError', () => {
   })
 })
 
+describe('WorkBuddyCloudBackend.postWithRetry', () => {
+  it('retries a network-layer failure and returns the eventual response', async () => {
+    const b = backend()
+    let calls = 0
+    b.post = async () => {
+      calls += 1
+      if (calls < 3) throw Object.assign(new Error('fetch failed'), { cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }) })
+      return new Response('ok')
+    }
+    const res = await b.postWithRetry({}, {})
+    expect(res.status).toBe(200)
+    expect(calls).toBe(3)
+  })
+
+  it('gives up after the attempts and reports the network cause', async () => {
+    const b = backend()
+    b.post = async () => {
+      throw Object.assign(new Error('fetch failed'), { cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }) })
+    }
+    // 报错里必须能看到真正的网络原因，而不是一句没有信息量的「上游调用失败」。
+    await expect(b.postWithRetry({}, {}, undefined, 2)).rejects.toMatchObject({
+      code: 'upstream_network',
+      httpStatus: 502,
+      retriable: true,
+    })
+    await expect(b.postWithRetry({}, {}, undefined, 2)).rejects.toThrow(/ECONNRESET/)
+  })
+
+  it('does not retry an aborted request', async () => {
+    const b = backend()
+    let calls = 0
+    b.post = async () => {
+      calls += 1
+      throw Object.assign(new Error('aborted'), { name: 'AbortError' })
+    }
+    await expect(b.postWithRetry({}, {})).rejects.toMatchObject({ name: 'AbortError' })
+    expect(calls).toBe(1)
+  })
+})
+
+describe('WorkBuddyCloudBackend.mapNetworkError', () => {
+  it('pulls the error code out of an AggregateError cause', () => {
+    const cause = Object.assign(new AggregateError([]), {
+      errors: [Object.assign(new Error('connect ETIMEDOUT'), { code: 'ETIMEDOUT' })],
+    })
+    const err = backend().mapNetworkError(Object.assign(new Error('fetch failed'), { cause }))
+    expect(err.message).toContain('ETIMEDOUT')
+    expect(err.code).toBe('upstream_network')
+  })
+
+  it('still produces a readable error when there is no cause at all', () => {
+    const err = backend().mapNetworkError(new Error('fetch failed'))
+    expect(err.message).toContain('fetch failed')
+    expect(err.httpStatus).toBe(502)
+  })
+})
+
 describe('WorkBuddyCloudBackend.consumeSse', () => {
   it('reads content deltas and skips the heartbeat comment', async () => {
     const body = [

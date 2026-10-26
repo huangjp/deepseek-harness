@@ -154,6 +154,33 @@ function sendJson(res, status, payload) {
   res.end(body);
 }
 
+/**
+ * 把网络错误的底层原因压成一句可读的后缀。
+ *
+ * Node 的 fetch 失败时抛的是 `fetch failed`，真正的原因藏在 `cause` 里
+ * （ECONNRESET / ETIMEDOUT / 证书错误…），有时 cause 还是 AggregateError，
+ * 得从 errors 数组里翻。不挖这层的话，日志里永远只有一句没信息量的 "fetch failed"。
+ *
+ * @param {unknown} cause - 错误的 cause 字段。
+ * @returns {string} 形如 "（ECONNRESET）" 的后缀，没有可用信息时返回空串。
+ */
+function describeCause(cause) {
+  if (!cause) return '';
+  const candidates = [];
+  if (Array.isArray(cause.errors)) candidates.push(...cause.errors);
+  candidates.push(cause);
+  for (const c of candidates) {
+    if (!c) continue;
+    const code = c.code || c.errno;
+    const msg = typeof c.message === 'string' ? c.message : '';
+    if (code || msg) {
+      const label = code && msg && !String(msg).includes(String(code)) ? `${code} ${msg}` : (msg || code);
+      return `（${label}）`;
+    }
+  }
+  return '';
+}
+
 /** 统一的错误响应；对 OpenAI 路径额外给出兼容的 error 结构。 */
 function sendError(res, err) {
   const status = err.httpStatus || 500;
@@ -913,7 +940,13 @@ function buildServer() {
     // 上游可能抛出非 Error（历史上出现过 throw null），先归一化再取字段，
     // 否则这里自己抛 TypeError，真实原因会被掩盖成一句无用的堆栈。
     const err = rawErr instanceof Error ? rawErr : new Error(String(rawErr));
-    const mapped = err.httpStatus ? err : Object.assign(err, classifyCliFailure(err.message));
+    // 只在错误**没有** httpStatus 时才做分类 —— 那说明它不是上游返回的 HTTP 错误，
+    // 而是网络层或代码抛的（fetch failed / TypeError 之类）。这类错误恰恰最需要留下
+    // 原始信息：直接套 classifyCliFailure 会把病因换成一句「上游调用失败」，
+    // 事后看日志完全猜不出到底是断连还是超时。
+    const mapped = err.httpStatus ? err : Object.assign(err, classifyCliFailure(err.message), {
+      message: `${classifyCliFailure(err.message).message}：${err.message}${describeCause(err.cause)}`,
+    });
     log(`${req.method} ${routePath} FAIL ${mapped.httpStatus || 500} ${Date.now() - t0}ms - ${mapped.message}`);
     if (!res.headersSent) sendError(res, mapped);
     else res.end();

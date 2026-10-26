@@ -34,6 +34,7 @@
     "bridge/toolprompt.mjs",
     "bridge/bridge.config.json",
     "bridge/copilot-bridge.mjs",
+    "bridge/netdiag.mjs",
     "bridge/token-gate.mjs",
     "bridge/copilot.config.json",
     "bridge/copilot-protocol-notes.md",

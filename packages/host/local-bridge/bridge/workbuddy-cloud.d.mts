@@ -104,6 +104,17 @@ export declare class WorkBuddyCloudBackend {
   /** 发请求。 */
   post(body: unknown, headers: Record<string, string>, signal?: AbortSignal): Promise<Response>
 
+  /** 发请求，网络层失败时自动重试。 */
+  postWithRetry(
+    body: unknown,
+    headers: Record<string, string>,
+    signal?: AbortSignal,
+    attempts?: number,
+  ): Promise<Response>
+
+  /** 把网络层失败映射成带诊断信息的异常。 */
+  mapNetworkError(err: Error | null): Error & { code?: string; httpStatus?: number; retriable?: boolean }
+
   /** 拿一份可用 token（内存缓存优先，否则重新收割）。 */
   ensureToken(force?: boolean): Promise<{ ok: boolean; token: string; uid: string; expiresAt: number }>
 
