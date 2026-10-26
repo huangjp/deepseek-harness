@@ -513,6 +513,32 @@ function authorized(req) {
 }
 
 /**
+ * chatHub 不返回 usage，所以按字符数估算一个。
+ *
+ * 不估的话 DSH 侧永远显示「用量 0 tok」，上下文预算也跟着失真（整段会话被当成没有
+ * 成本，压缩时机就没了参照）。中文按 1.5 字/token、其余按 4 字符/token 取折中值 ——
+ * 估得准不准不影响功能，只影响预算判断，所以够用即可。
+ *
+ * @param {string} prompt 本次送上去的提示词全文。
+ * @param {string} output 模型输出。
+ * @returns {{prompt_tokens: number, completion_tokens: number, total_tokens: number}}
+ */
+function estimateUsage(prompt, output) {
+  const count = (s) => {
+    const text = String(s ?? '');
+    const cjk = (text.match(/[\u3400-\u9fff\u3040-\u30ff]/g) || []).length;
+    return Math.max(0, Math.round(cjk / 1.5 + (text.length - cjk) / 4));
+  };
+  const promptTokens = count(prompt);
+  const completionTokens = count(output);
+  return {
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    total_tokens: promptTokens + completionTokens,
+  };
+}
+
+/**
  * OpenAI messages → 单条提示词（Copilot 只收纯文本 user 消息）。
  *
  * 图片：Copilot 的 SignalR chatHub 通道只接受纯文本 prompt，协议里没有附件 /
@@ -602,17 +628,22 @@ async function handleChatCompletions(req, res) {
     throw Object.assign(new Error('messages 为空'), { httpStatus: 400, code: 'invalid_request' });
   }
   // 工具协议：本通道没有原生 function calling，`tools` 只能渲染成提示词里的清单与格式
-  // 约定，模型的意图再解析回 OpenAI tool_calls。声明置顶，因为它是"最高优先级"的那条。
+  // 约定，模型的意图再解析回 OpenAI tool_calls。
   const toolInstruction = buildToolInstruction(body.tools, body.tool_choice);
   const hasTools = Boolean(toolInstruction);
-  const systemParts = [hasTools ? EXTERNAL_TOOLING_NOTICE : '', systemPrompt, toolInstruction];
+  // 声明置顶（它是"最高优先级"的那条），但**工具清单要排在用户请求之后**：
+  // chatHub 的服务端 system prompt 权重很高，清单若排在用户请求前面，模型最后看到的
+  // 就只有"用户要我建文件"，于是它会**直接声称建好了**而不去调工具（实测：整轮零调用，
+  // 回答是「已创建文件 docs/v2/100-test.md」）。放在请求之后，它最后看到的才是
+  // 「你可以用哪些工具、怎么表达」。
+  const systemParts = [hasTools ? EXTERNAL_TOOLING_NOTICE : '', systemPrompt];
   const system = systemParts.filter(Boolean).join('\n\n');
   // 多轮时在转录稿末尾划界：模型否则会顺着 `用户: / 助手: / 【外部执行结果…】` 的格式
   // 继续写下去，把上一轮的话和工具输出再吐一遍（线上表现像"内容重复了"）。
   const hasHistory = Array.isArray(body.messages) && body.messages.length > 1;
   const turnPrompt = hasHistory ? `${userPrompt}\n\n${TRANSCRIPT_TRAILER}` : userPrompt;
-  /** 把（可能被重试改写的）system 段与对话正文拼成这一条 prompt。 */
-  const compose = (systemText) => [systemText, turnPrompt].filter(Boolean).join('\n\n');
+  /** 把（可能被重试改写的）system 段、对话正文与工具清单拼成这一条 prompt。 */
+  const compose = (systemText) => [systemText, turnPrompt, toolInstruction].filter(Boolean).join('\n\n');
   const prompt = compose(system);
 
   const model = body.model || 'copilot';
@@ -631,7 +662,7 @@ async function handleChatCompletions(req, res) {
         return sendJson(res, 200, {
           id, object: 'chat.completion', created, model,
           choices: [{ index: 0, message: { role: 'assistant', content: r.text }, finish_reason: 'stop' }],
-          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+          usage: estimateUsage(prompt, r.text),
         });
       }
       const out = await completeWithToolCalls({
@@ -650,7 +681,7 @@ async function handleChatCompletions(req, res) {
             : { role: 'assistant', content: broken ? toolCallFailureText(out.text) : content },
           finish_reason: calls ? 'tool_calls' : 'stop',
         }],
-        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        usage: estimateUsage(prompt, out.text),
       });
     }
 
@@ -670,7 +701,7 @@ async function handleChatCompletions(req, res) {
       if (!body.stream_options?.include_usage) return;
       res.write(`data: ${JSON.stringify({
         id, object: 'chat.completion.chunk', created, model, choices: [],
-        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        usage: estimateUsage(prompt, ''),
       })}\n\n`);
     };
 

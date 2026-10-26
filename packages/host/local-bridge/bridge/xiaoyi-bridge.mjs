@@ -31,7 +31,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { parseToolCalls } from './toolcalls.mjs';
 import {
-  buildCompactToolInstruction, EXTERNAL_TOOLING_NOTICE, looksLikeToolRefusal, TOOL_CALL_REFUSAL_REMINDER,
+  buildCompactToolInstruction, EXTERNAL_TOOLING_NOTICE, looksLikeToolRefusal,
+  toolCallTurnText, toolResultTurnText, TOOL_CALL_REFUSAL_REMINDER,
 } from './toolprompt.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -581,18 +582,14 @@ export function buildPrompt(messages) {
     }
     if (m.role === 'tool') {
       if (content) {
-        const id = m.tool_call_id ? ` ${m.tool_call_id}` : '';
-        turns.push({ kind: 'tool', text: `【外部执行结果${id} 开始】\n${content}\n【外部执行结果 结束】` });
+        turns.push({ kind: 'tool', text: toolResultTurnText(m.tool_call_id, content) });
       }
       continue;
     }
     if (m.role === 'assistant') {
       const calls = Array.isArray(m.tool_calls) ? m.tool_calls : null;
       if (calls && calls.length) {
-        const desc = calls
-          .map((tc) => `${tc?.function?.name || '?'}(${tc?.function?.arguments || '{}'})`)
-          .join('、');
-        turns.push({ kind: 'toolcall', text: `助手（上一轮表达的工具调用意图：${desc}）` });
+        turns.push({ kind: 'toolcall', text: toolCallTurnText('', calls) });
       }
       continue;
     }

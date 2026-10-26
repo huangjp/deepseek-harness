@@ -99,6 +99,16 @@ export function buildToolCallFormatHint(tools: WireTool[] | undefined): string
 export function looksLikeToolRefusal(text: string | undefined): boolean
 
 /**
+ * 模型的输出是不是「声称完成了任务，但一次工具都没调」。
+ * @param text - 模型输出。
+ * @returns 是否像一次假完成。
+ */
+export function looksLikeFalseCompletion(text: string | undefined): boolean
+
+/** 声称完成了却没调工具时的重试提示。 */
+export const TOOL_REQUIRED_REMINDER: string
+
+/**
  * 助手表达过的调用回放成对话文本。
  * @param content - 该条消息正文。
  * @param toolCalls - OpenAI 风格 tool_calls。

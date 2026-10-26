@@ -117,11 +117,14 @@ export function buildToolInstruction(tools, toolChoice) {
     '  8. **输出的 JSON 必须能被 JSON.parse 解析**：字符串内的双引号要转义为 \\"，',
     '     括号必须成对且嵌套正确；arguments 里如果要写代码/函数字符串，把它当成普通字符串',
     '     处理并转义引号。输出前请逐层核对一遍括号是否闭合。',
+    '  9. 读写文件、执行命令**必须**通过上面这些工具完成。',
+    '     **不要**输出 python / shell / powershell 脚本文本来代替调用 —— 脚本文案不会被执行，',
+    '     外部只认上面那种 JSON。',
   ];
   if (toolChoice === 'required') {
-    lines.push('  9. 本次必须以上述 bridge_tool_calls 格式表达一次工具调用意图，不允许只回复文字。');
+    lines.push('  10. 本次必须以上述 bridge_tool_calls 格式表达一次工具调用意图，不允许只回复文字。');
   } else if (toolChoice === 'none') {
-    lines.push('  9. 本次不允许表达任何工具调用意图，只用自然语言回答。');
+    lines.push('  10. 本次不允许表达任何工具调用意图，只用自然语言回答。');
   }
   return lines.join('\n');
 }
@@ -132,6 +135,15 @@ export function buildToolInstruction(tools, toolChoice) {
  * 不回放这一段，多轮工具调用就断了：模型看不到自己上一轮要过什么，会重复要同一个
  * 工具，或者把已经拿到的结果当成还没发生。
  *
+ * 两个要点（都是实测踩出来的）：
+ *
+ * 1. **用第一人称**。早期写成「助手（上一轮表达的工具调用意图：…）」，那是第三方
+ *    旁白口吻 —— 模型读起来像"环境里出现了一段别人的话"，于是判定"工具其实没执行"，
+ *    转而在最终回答里补一段 python/shell 脚本来"真正完成"。这正是「偶尔能落地、
+ *    偶尔不能、且不能持续工作」的表现。
+ * 2. **参数要截断**。把整个 arguments 原样塞回去，等于把刚写完的整篇文档正文又喂
+ *    了一遍（写一份文档轻易上万字符），模型会被自己的旧参数带跑。
+ *
  * 措辞刻意不写 `bridge_tool_calls` 这个键名：那段文本是我们自己塞进去的，模型一旦
  * 复述它，就会被"看起来像工具调用"的判据命中，把一句正常回答替换成错误。
  * @param {string} content 该条助手消息的正文（可能为空）。
@@ -139,10 +151,15 @@ export function buildToolInstruction(tools, toolChoice) {
  * @returns {string} 一行对话文本。
  */
 export function toolCallTurnText(content, toolCalls) {
-  const desc = toolCalls
-    .map((tc) => `${tc?.function?.name || '?'}(${tc?.function?.arguments || '{}'})`)
+  const desc = (toolCalls ?? [])
+    .map((tc) => {
+      const name = tc?.function?.name || '?';
+      const args = String(tc?.function?.arguments ?? '{}');
+      const brief = args.length > 120 ? `${args.slice(0, 120)}…` : args;
+      return `${name}(${brief})`;
+    })
     .join('、');
-  return `助手${content ? `: ${content}\n` : ': '}（上一轮表达的工具调用意图：${desc}）`;
+  return `你上一轮调用了工具 ${desc}${content ? `，并给出了这段说明：${content}` : ''}`;
 }
 
 /**
@@ -161,9 +178,9 @@ export function toolCallTurnText(content, toolCalls) {
 export function toolResultTurnText(toolCallId, content) {
   const id = toolCallId ? ` ${toolCallId}` : '';
   return [
-    `【外部执行结果${id} 开始】`,
+    `【工具执行结果${id} 开始】（这是你刚才那次调用的返回）`,
     content,
-    `【外部执行结果${id} 结束】`,
+    `【工具执行结果${id} 结束】`,
   ].join('\n');
 }
 
@@ -255,12 +272,42 @@ export function buildCompactToolInstruction(tools, toolChoice) {
     '   {"bridge_tool_calls":[{"name":"工具名","arguments":{参数对象}}]}',
     '除这段 JSON 外不要输出任何文字、解释或 Markdown 代码围栏。',
     '你确实拥有上面这些工具，执行由外部完成 —— 不要回答「我无法访问文件」。',
+    '读写文件、执行命令**必须**通过上面这些工具完成，**不要**输出 python / shell 脚本文本来代替调用。',
   ];
   if (toolChoice === 'required') {
     lines.push('本次必须以上述 JSON 格式表达一次工具调用意图，不允许只回复文字。');
   }
   return lines.join('\n');
 }
+
+/**
+ * 模型的输出是不是「声称已经做完了，但其实一次工具都没调」。
+ *
+ * 实测（Copilot chatHub）：用户说「请创建文档 X」，模型会直接回
+ * 「已创建文件 `docs/v2/100-test.md`，内容为：…」—— **一次工具都没调**。
+ * 下游 agent 看不到任何文件被创建，但对话里已经有一句「已完成」，于是用户看到的就是
+ * 「模型说做完了，磁盘上什么都没有」。这正是「偶尔能落地、偶尔不能」的机制。
+ *
+ * 判据要配合「本次带了工具且模型没给出调用」一起看，单独用会误伤
+ * 「该文档已存在，无需修改」这类正当回答。
+ *
+ * @param {string} text 模型输出。
+ * @returns {boolean} 是否像一次「假完成」。
+ */
+export function looksLikeFalseCompletion(text) {
+  const s = String(text ?? '');
+  if (!s) return false;
+  return /(已(经)?(创建|写入|写好|保存|生成|完成|更新|修改|删除|新增)|已经(创建|写入|保存|生成|完成|修改|删除)|完成(了)?(创建|写入|保存|生成))/.test(s);
+}
+
+/**
+ * 声称完成了、却一次工具都没调时，追加这段提示重试一次。
+ */
+export const TOOL_REQUIRED_REMINDER = [
+  '【重要】你上一条回答声称任务已经完成，但你**一次工具都没有调用** —— 实际什么都没做。',
+  '要真正完成它，必须调用下面清单里的工具：写文件用 write，执行命令用 pwsh，读文件用 read，查找文件用 glob。',
+  '请现在调用工具真的把这件事做掉，不要只描述结果。',
+].join('\n');
 
 /**
  * 模型**拒绝了**工具任务时，追加这段提示重试一次。
@@ -354,16 +401,27 @@ export async function completeWithToolCalls({ invoke, systemPrompt, hasTools, lo
   if (!decided.broken) {
     // 拒答：模型不认为该调工具（"我无法访问你本机上的文件"）。这种要**再试一次**，
     // 换成强制给出工具意图的说法 —— 它不是不会写 JSON，是没打算写。
-    if (!hasTools || !looksLikeToolRefusal(first.text)) {
-      return { outcome: decided, text: first.text, usage: first.usage };
+    if (hasTools && looksLikeToolRefusal(first.text)) {
+      log('[warn] 模型拒绝了工具任务，重试一次并强制给出工具意图');
+      const retry = await invoke(`${systemPrompt}\n\n${TOOL_CALL_REFUSAL_REMINDER}`);
+      return {
+        outcome: resolveToolOutcome({ text: retry.text, hasTools }),
+        text: retry.text,
+        usage: retry.usage || first.usage,
+      };
     }
-    log('[warn] 模型拒绝了工具任务，重试一次并强制给出工具意图');
-    const retry = await invoke(`${systemPrompt}\n\n${TOOL_CALL_REFUSAL_REMINDER}`);
-    return {
-      outcome: resolveToolOutcome({ text: retry.text, hasTools }),
-      text: retry.text,
-      usage: retry.usage || first.usage,
-    };
+    // 假完成：模型声称做完了，却一次工具都没调。这种比拒答更隐蔽 —— 对话里已经有一句
+    // 「已完成」，下游却什么都没发生。必须重试并明确要求它真的调工具。
+    if (hasTools && !decided.calls && looksLikeFalseCompletion(first.text)) {
+      log('[warn] 模型声称完成了任务但没有调用任何工具，重试一次并强制使用工具');
+      const retry = await invoke(`${systemPrompt}\n\n${TOOL_REQUIRED_REMINDER}`);
+      return {
+        outcome: resolveToolOutcome({ text: retry.text, hasTools }),
+        text: retry.text,
+        usage: retry.usage || first.usage,
+      };
+    }
+    return { outcome: decided, text: first.text, usage: first.usage };
   }
   log(`[warn] 工具调用解析失败，疑似 JSON 非法（输出 ${String(first.text || '').length} 字），重试一次`);
   const retry = await invoke(`${systemPrompt}\n\n${TOOL_CALL_REPAIR_REMINDER}`);

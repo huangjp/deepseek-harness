@@ -66,13 +66,13 @@ describe('工具轮次回放', () => {
   it('助手带 tool_calls 时连同正文一起回放', () => {
     const calls = [{ type: 'function', function: { name: 'read', arguments: '{"path":"a"}' } }]
     expect(toolCallTurnText('我看一下', calls)).toBe(
-      '助手: 我看一下\n（上一轮表达的工具调用意图：read({"path":"a"})）',
+      '你上一轮调用了工具 read({"path":"a"})，并给出了这段说明：我看一下',
     )
   })
 
   it('助手正文为空时不留空档', () => {
     const calls = [{ type: 'function', function: { name: 'read', arguments: '{}' } }]
-    expect(toolCallTurnText('', calls)).toBe('助手: （上一轮表达的工具调用意图：read({})）')
+    expect(toolCallTurnText('', calls)).toBe('你上一轮调用了工具 read({})')
   })
 
   it('回放文本里不出现调用键名', () => {
@@ -99,13 +99,13 @@ describe('工具轮次回放', () => {
     // 成对包住是必要的：工具输出本身多行，里面可能含有像对话的文本；只给前缀时模型
     // 分不清哪句是结果、哪句是新内容，线上表现就是回答里混进半截输出。
     expect(toolResultTurnText('call_1', '结果')).toBe(
-      '【外部执行结果 call_1 开始】\n结果\n【外部执行结果 call_1 结束】',
+      '【工具执行结果 call_1 开始】（这是你刚才那次调用的返回）\n结果\n【工具执行结果 call_1 结束】',
     )
   })
 
   it('没有 id 时也能回放', () => {
     expect(toolResultTurnText(undefined, '结果')).toBe(
-      '【外部执行结果 开始】\n结果\n【外部执行结果 结束】',
+      '【工具执行结果 开始】（这是你刚才那次调用的返回）\n结果\n【工具执行结果 结束】',
     )
   })
 })
@@ -113,13 +113,13 @@ describe('工具轮次回放', () => {
 describe('toolTurnText', () => {
   it('工具结果消息走结果格式', () => {
     expect(toolTurnText({ role: 'tool', tool_call_id: 'c1' }, 'ok')).toBe(
-      '【外部执行结果 c1 开始】\nok\n【外部执行结果 c1 结束】',
+      '【工具执行结果 c1 开始】（这是你刚才那次调用的返回）\nok\n【工具执行结果 c1 结束】',
     )
   })
 
   it('助手带 tool_calls 走调用格式，即使正文为空', () => {
     const message = { role: 'assistant', content: '', tool_calls: [{ function: { name: 'x', arguments: '{}' } }] }
-    expect(toolTurnText(message, '')).toContain('工具调用意图')
+    expect(toolTurnText(message, '')).toContain('你上一轮调用了工具')
   })
 
   it('助手没有 tool_calls 时不算工具轮次', () => {

@@ -285,8 +285,8 @@ describe('WorkBuddy 反代的提示词组装', () => {
     const sent = payload.choices[0]?.message.content ?? ''
     // 工具轮次回放：助手表达过的意图连同参数，结果连同它的调用 id。
     expect(sent).toContain('我读一下')
-    expect(sent).toContain('工具调用意图：read({"path":"a.txt"})')
-    expect(sent).toContain('【外部执行结果 c1 开始】\n文件内容\n【外部执行结果 c1 结束】')
+    expect(sent).toContain('你上一轮调用了工具 read({"path":"a.txt"})')
+    expect(sent).toContain('【工具执行结果 c1 开始】（这是你刚才那次调用的返回）\n文件内容\n【工具执行结果 c1 结束】')
     // 划界：告诉模型这是记录、不要续写。
     expect(sent).toContain('不要复述')
   })
