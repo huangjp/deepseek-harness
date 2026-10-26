@@ -17,7 +17,6 @@ import { randomUUID, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createTokenGate } from './token-gate.mjs';
-import { describeSocketStack, formatProxyDiagnosis, probeSystemProxy } from './netdiag.mjs';
 import {
   buildToolInstruction, completeWithToolCalls, createToolCallGate, EXTERNAL_TOOLING_NOTICE,
   looksLikeToolRefusal, resolveToolOutcome, toolCallFailureText, toolTurnText, TOOL_CALL_REFUSAL_REMINDER,
@@ -25,6 +24,31 @@ import {
 } from './toolprompt.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * 把打包环境下的 ASAR 虚拟路径改写成 ASAR 之外的真实磁盘路径。
+ *
+ * 打包后本模块的 URL 在 `app.asar/` 里，而相对 import 会解析到 asar 内部 —— 新加的
+ * netdiag.mjs 不在 asar 头里（头是打包时按文件清单生成的），于是模块找不到，
+ * 整个反代加载失败。绝对路径 + asar→unpacked 映射指向真实的解包副本，与 asar 头无关。
+ *
+ * @param {string} filePath - 从模块位置推导出的文件系统路径。
+ * @returns {string} 真实磁盘路径。
+ */
+function resolveUnpackedPath(filePath) {
+  const marker = /([\\/])app\.asar\1/;
+  const match = marker.exec(filePath);
+  if (!match) return filePath;
+  const separator = match[1];
+  const head = filePath.slice(0, match.index);
+  const tail = filePath.slice(match.index + match[0].length);
+  return `${head}${separator}app.asar.unpacked${separator}${tail}`;
+}
+
+// 诊断模块必须用绝对路径动态导入（原因见 resolveUnpackedPath 上方的说明）。
+const { describeSocketStack, formatProxyDiagnosis, probeSystemProxy } = await import(
+  pathToFileURL(resolveUnpackedPath(path.join(__dirname, 'netdiag.mjs'))).href
+);
 
 /**
  * 令牌年龄超过它就视为需要更换（毫秒以外一律用秒）。
