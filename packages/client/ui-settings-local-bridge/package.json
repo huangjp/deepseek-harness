@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-client-ui-settings-local-bridge",
   "description": "Settings page for the two locally bundled model relays: their listeners, the Copilot access token's age, the refresh prerequisites, and the manual token refresh",
-  "version": "0.2.0-rc.1",
+  "version": "0.2.1-rc.3",
   "publishConfig": {
     "access": "public"
   },

@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-host-local-bridge",
   "description": "In-process local model bridge: OpenAI-compatible reverse proxy over the WorkBuddy gateway or CodeBuddy CLI, plus WeFlow session summarization; shipped with the desktop installer",
-  "version": "0.2.0-rc.1",
+  "version": "0.2.1-rc.3",
   "publishConfig": {
     "access": "public"
   },
