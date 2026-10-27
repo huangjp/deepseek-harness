@@ -303,6 +303,37 @@ describe('model list editing', () => {
     }])
   })
 
+  it('keeps the model fields the card does not edit when a row changes', async () => {
+    // A pi-ai route declares more than this card models: `compat` carries the
+    // wire switches (adaptive thinking, temperature) and `input` the modalities.
+    // A rebuild that dropped them would un-adapt the route silently, while the
+    // card still shows the reasoning levels and capacities it read.
+    const declared = {
+      id: 'minimax',
+      name: 'MiniMax',
+      input: ['text', 'image'],
+      contextWindow: 1_000_000,
+      maxTokens: 128_000,
+      reasoningEfforts: { low: 'low', high: 'high', max: 'max' },
+      compat: { forceAdaptiveThinking: true, supportsTemperature: false },
+    }
+    const { mutate } = await mountSection({
+      providers: { acme: { baseURL: 'https://gw.example/v1', models: [declared] } },
+    })
+    openEditor('acme')
+    expandModel(1)
+    fireEvent.change(screen.getByLabelText(`${en.modelName} 1`), { target: { value: 'MiniMax M3' } })
+    fireEvent.click(within(screen.getByRole('group', { name: `${en.modelInputTypes} 1` })).getByRole('checkbox', { name: en.modelInputImage }))
+    fireEvent.click(screen.getByText(en.apply))
+
+    await waitFor(() => { expect(mutate).toHaveBeenCalled() })
+    expect(firstMutate(mutate).ops).toEqual([{
+      op: 'set',
+      path: ['providers', 'acme', 'models'],
+      value: [{ ...declared, name: 'MiniMax M3', input: ['text'] }],
+    }])
+  })
+
   it('adds, edits, and removes rows without storing emptied optional fields', async () => {
     const { mutate } = await mountSection()
     openEditor('openai')
