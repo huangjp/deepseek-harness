@@ -6,17 +6,17 @@ import { apply, toRouteRule, type Config, type RuleConfig } from '../src/index.t
 /** A context stub that records the listeners the plugin installs. */
 function fakeContext(options: { readonly listProvidersFails?: boolean } = {}): {
   readonly ctx: Context
-  readonly emit: (event: string, payload: unknown) => void
+  readonly emit: (event: string, ...args: unknown[]) => void
   readonly logger: { debug: ReturnType<typeof vi.fn>; info: ReturnType<typeof vi.fn>; warn: ReturnType<typeof vi.fn> }
 } {
-  const listeners = new Map<string, ((payload: unknown) => void)[]>()
+  const listeners = new Map<string, ((...args: unknown[]) => void)[]>()
   const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn() }
   const ctx = {
     logger,
     effect: (fn: () => unknown) => {
       fn()
     },
-    on: (event: string, listener: (payload: unknown) => void) => {
+    on: (event: string, listener: (...args: unknown[]) => void) => {
       const list = listeners.get(event) ?? []
       list.push(listener)
       listeners.set(event, list)
@@ -53,17 +53,25 @@ function fakeContext(options: { readonly listProvidersFails?: boolean } = {}): {
   return {
     ctx,
     logger,
-    emit: (event: string, payload: unknown) => {
-      for (const listener of listeners.get(event) ?? []) listener(payload)
+    emit: (event: string, ...args: unknown[]) => {
+      for (const listener of listeners.get(event) ?? []) listener(...args)
     },
   }
 }
 
+/** The health knobs a configuration declares. */
+interface HealthConfig {
+  readonly failureThreshold?: number
+  readonly cooldownMs?: number
+}
+
 /** A configuration with the given rules, read through volatile references. */
-function fakeConfig(rules: readonly RuleConfig[], enabled = true): Config {
+function fakeConfig(rules: readonly RuleConfig[], enabled = true, health: HealthConfig = {}): Config {
   return {
     enabled: { get: () => enabled },
     rules: { get: () => rules },
+    failureThreshold: { get: () => health.failureThreshold ?? 2 },
+    cooldownMs: { get: () => health.cooldownMs ?? 300_000 },
   }
 }
 
@@ -221,5 +229,88 @@ describe('model-router routing', () => {
     const { ctx, logger } = fakeContext({ listProvidersFails: true })
     await apply(ctx, fakeConfig([LONG_FORM]))
     expect(logger.warn).toHaveBeenCalled()
+  })
+})
+
+describe('model-router route health', () => {
+  const FALLBACK: RuleConfig = {
+    name: 'fallback',
+    keywords: [],
+    hasImage: false,
+    provider: 'p2',
+    model: 'm2',
+  }
+
+  /** Report one failed request against a provider route. */
+  function fail(emit: (event: string, ...args: unknown[]) => void, provider: string): void {
+    emit('agent/request-error', { provider }, () => Promise.resolve(undefined))
+  }
+
+  /** Report one answered request from a provider route. */
+  function answer(emit: (event: string, ...args: unknown[]) => void, provider: string): void {
+    emit('session/event', {}, {
+      type: 'assistant/message',
+      data: { message: { source: { provider } } },
+    })
+  }
+
+  it('routes around a provider that keeps failing', async () => {
+    const { ctx, emit, logger } = fakeContext()
+    await apply(ctx, fakeConfig([LONG_FORM, FALLBACK]))
+    fail(emit, 'p1')
+    fail(emit, 'p1')
+    const { agent, select } = fakeAgent()
+    emit('agent/inbox/claimed', { agent, message: claimed('写一部小说') })
+    expect(select).toHaveBeenCalledWith({ provider: 'p2', model: 'm2' })
+    expect(logger.warn).toHaveBeenCalled()
+  })
+
+  it('keeps a route that has not failed enough', async () => {
+    const { ctx, emit } = fakeContext()
+    await apply(ctx, fakeConfig([LONG_FORM, FALLBACK]))
+    fail(emit, 'p1')
+    const { agent, select } = fakeAgent()
+    emit('agent/inbox/claimed', { agent, message: claimed('写一部小说') })
+    expect(select).toHaveBeenCalledWith({ provider: 'p1', model: 'm1', reasoningEffort: 'max' })
+  })
+
+  it('keeps every route eligible when the failure threshold is zero', async () => {
+    const { ctx, emit } = fakeContext()
+    await apply(ctx, fakeConfig([LONG_FORM, FALLBACK], true, { failureThreshold: 0 }))
+    fail(emit, 'p1')
+    fail(emit, 'p1')
+    const { agent, select } = fakeAgent()
+    emit('agent/inbox/claimed', { agent, message: claimed('写一部小说') })
+    expect(select).toHaveBeenCalledWith({ provider: 'p1', model: 'm1', reasoningEffort: 'max' })
+  })
+
+  it('makes a route eligible again once it answers', async () => {
+    const { ctx, emit } = fakeContext()
+    await apply(ctx, fakeConfig([LONG_FORM, FALLBACK]))
+    fail(emit, 'p1')
+    fail(emit, 'p1')
+    answer(emit, 'p1')
+    const { agent, select } = fakeAgent()
+    emit('agent/inbox/claimed', { agent, message: claimed('写一部小说') })
+    expect(select).toHaveBeenCalledWith({ provider: 'p1', model: 'm1', reasoningEffort: 'max' })
+  })
+
+  it('leaves the route alone when every matching route is failing', async () => {
+    const { ctx, emit } = fakeContext()
+    await apply(ctx, fakeConfig([LONG_FORM]))
+    fail(emit, 'p1')
+    fail(emit, 'p1')
+    const { agent, select } = fakeAgent()
+    emit('agent/inbox/claimed', { agent, message: claimed('写一部小说') })
+    expect(select).not.toHaveBeenCalled()
+  })
+
+  it('ignores a session event that carries no answer', async () => {
+    const { ctx, emit } = fakeContext()
+    await apply(ctx, fakeConfig([LONG_FORM]))
+    emit('session/event', {}, { type: 'turn/end', data: { turn: 1 } })
+    const { agent, select } = fakeAgent()
+    emit('agent/inbox/claimed', { agent, message: claimed('写一部小说') })
+    expect(select).toHaveBeenCalledWith({ provider: 'p1', model: 'm1', reasoningEffort: 'max' })
   })
 })

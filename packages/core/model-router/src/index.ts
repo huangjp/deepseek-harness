@@ -15,19 +15,24 @@
  *
  * The plugin never changes what a task does; it only changes which route
  * answers it. A rule that cannot be honored is passed over in favour of the
- * next rule, and the Agent keeps the route it had when no rule applies.
+ * next rule, and the Agent keeps the route it had when no rule applies. A
+ * route that keeps failing is passed over as well, so the tasks after a
+ * failure land on a route that can answer.
  *
  * @module @deepseek-ai/dsh-model-router
  */
 import type { Context, Volatile } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type {} from '@deepseek-ai/dsh-agent'
+import type { RequestErrorAction } from '@deepseek-ai/dsh-agent'
 import { ModelCatalog } from './catalog.ts'
+import { ProviderHealth } from './health.ts'
 import { matchesRule, type RouteRule } from './rules.ts'
 import { signalsOf } from './signals.ts'
 
 export { ModelCatalog } from './catalog.ts'
 export type { RouteTarget } from './catalog.ts'
+export { ProviderHealth } from './health.ts'
+export type { HealthPolicy } from './health.ts'
 export { matchesRule } from './rules.ts'
 export type { RouteRule, RouteSignals } from './rules.ts'
 export { signalsOf } from './signals.ts'
@@ -63,6 +68,15 @@ export interface Config {
   enabled: Volatile<boolean>
   /** The rule table, evaluated in declaration order. */
   rules: Volatile<readonly RuleConfig[]>
+  /**
+   * Consecutive failures after which a provider route is skipped.
+   *
+   * Zero keeps every route eligible: the router then never routes around a
+   * failing route, and the harness's own retry policy stays in charge.
+   */
+  failureThreshold: Volatile<number>
+  /** How long a skipped provider route stays skipped, in milliseconds. */
+  cooldownMs: Volatile<number>
 }
 
 /** Runtime schema for {@link Config}. */
@@ -76,6 +90,8 @@ export const Config = z.object({
     model: z.string().required(),
     reasoningEffort: z.string(),
   })).default([]).volatile(),
+  failureThreshold: z.number().step(1).min(0).default(2).volatile(),
+  cooldownMs: z.number().step(1).min(0).default(300_000).volatile(),
 }) as unknown as z<Config>
 
 /**
@@ -114,11 +130,19 @@ function delay(ms: number): Promise<void> {
  * session is exactly the one that must not fall back to the Agent's own
  * route. Waiting is bounded, so a rule naming a route that never registers
  * delays the startup rather than blocking it.
+ *
+ * The plugin also watches the routes' own outcomes. A route that keeps failing
+ * cannot answer the tasks the table sends it, so the next decision routes
+ * around it instead of paying for the same failure again.
  * @param ctx - the plugin context.
  * @param config - the deployment configuration.
  */
 export async function apply(ctx: Context, config: Config): Promise<void> {
   const catalog = new ModelCatalog(ctx)
+  const health = new ProviderHealth(() => ({
+    failureThreshold: config.failureThreshold.get(),
+    cooldownMs: config.cooldownMs.get(),
+  }))
   let refreshing = false
   const refresh = async (): Promise<void> => {
     if (refreshing) return
@@ -141,11 +165,32 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }
   await waitForRoutes()
   ctx.on('llm/adapters-updated', () => { void refresh() })
+  ctx.on('agent/request-error', (payload, next: () => Promise<RequestErrorAction>) => {
+    if (health.recordFailure(payload.provider)) {
+      ctx.logger.warn(
+        'model-router: provider "%s" keeps failing; routing around it',
+        payload.provider,
+      )
+    }
+    return next()
+  })
+  ctx.on('session/event', (_session, event) => {
+    if (event.type !== 'assistant/message') return
+    health.recordSuccess(event.data.message.source.provider)
+  })
   ctx.on('agent/inbox/claimed', ({ agent, message }) => {
     if (!config.enabled.get()) return
     const signals = signalsOf(message)
     for (const rule of config.rules.get().map(toRouteRule)) {
       if (!matchesRule(rule, signals)) continue
+      if (health.isSkipped(rule.provider)) {
+        // The route kept failing, so the next rule that fits the task gets it.
+        ctx.logger.info(
+          'model-router: rule "%s" names %s, which is currently failing',
+          rule.name, rule.provider,
+        )
+        continue
+      }
       if (!catalog.has(rule.provider, rule.model)) {
         // The catalog is cold for this route: read it again so the next turn
         // of this session can honor the rule.

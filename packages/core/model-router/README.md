@@ -56,6 +56,10 @@ Mount the plugin in a composition that has more than one provider route register
         hasImage: true
         provider: dpv41f
         model: deepseek-v4.1-flash
+    # 连续失败几次后暂时绕开这条通道；0 = 永不绕开
+    failureThreshold: 2
+    # 绕开后的冷却时长（毫秒）
+    cooldownMs: 300000
 ```
 
 Routing is **off by default**. A rule matches when every condition it states holds: `keywords` are matched case-insensitively against the claimed message's text, and `hasImage` constrains whether the message carries an image. A rule that states neither condition matches nothing, so an unconditional rule cannot silently capture every task. The rules are read top to bottom and the first match wins, so the most specific rule belongs first.
@@ -63,6 +67,8 @@ Routing is **off by default**. A rule matches when every condition it states hol
 A target is honored only when the deployment registers that provider and model. A rule whose target is not registered, or whose target does not accept the image the task carries, cannot be honored: it is passed over with a debug log and the next rule is considered, so a later rule that names a usable route still gets its turn. A requested `reasoningEffort` is applied when the target route offers that effort; otherwise the target keeps its own default.
 
 Because a rule that states no condition matches nothing, a deployment expresses "everything else" as the two `hasImage` rules shown above: one for a task without an image, one for a task with an image.
+
+A route that cannot answer is worse than no route at all: an exhausted quota, a revoked credential and an unreachable relay all make the request fail. The plugin therefore watches each route's own outcomes and routes around a route that keeps failing. `failureThreshold` consecutive failures — two by default — skip that route for `cooldownMs` milliseconds (five minutes by default), and the next rule that fits the task takes the task instead. A route that answers again becomes eligible at once, and a threshold of zero never routes around anything.
 
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
@@ -74,6 +80,8 @@ The plugin calls `agent.model.select()`, the same public seam the Models page us
 Two pieces make the decision synchronous. The rule table and the signals come from the message the loop already holds. The **catalog** of the routes the rule table names is read asynchronously and cached, because the decision cannot await a lookup between the claim and the selection. The cache is refreshed when `llm/adapters-updated` fires, and a rule whose target is not cached is passed over — routing to an unregistered route would fail the request instead of falling back.
 
 The catalog resolves each rule's exact model rather than listing a route's models. A route's own listing reports the route as empty while that route's credential does not resolve, and a route that cannot answer yet is still the route a rule names. The plugin's own startup waits, for a bounded time, for the routes its rules name to register, so the first turn of a session is routed instead of falling back to the Agent's own route.
+
+Failures are read from the `agent/request-error` waterfall, which every failed request attempt passes through, and answers are read from the `assistant/message` session event, which names the provider that produced them. The state is held per plugin rather than per session: a route that cannot answer for one session cannot answer for another either, so the next session's decision does not pay for the failure the last one already paid for.
 
 <a id="further-exploration"></a>
 ## Further Exploration
@@ -103,4 +111,4 @@ The routed route replaces the request's provider and model, so the cached prefix
 - **Rules read the message only.** A rule sees the claimed message's text and whether it carries an image. It does not see the Agent's preset, its tool set, the task's history length, or the deployment's own notion of what kind of work is running, so two tasks that ask for the same thing in different words can land on different routes.
 - **A route change drops the previous provider's replay state.** The harness keeps assistant history in a form only its owning adapter can replay, so switching routes sends the history without that state. A task whose earlier turns carried provider-specific replay data may lose it mid-conversation.
 - **Effort is not validated against the deployment's credentials.** The plugin checks that the target route offers the requested effort and declines one it does not, but a target whose credential is missing fails at request time with the provider's own error rather than at routing time.
-- **No cross-provider fallback.** A route that fails after the decision is not retried on another route; the harness's own retry policy stays with the route it selected.
+- **No cross-provider fallback.** A route that fails after the decision is not retried on another route; the harness's own retry policy stays with the route it selected. The next decision routes around a route that keeps failing, so the tasks after it land elsewhere — but the task that hit the failure still fails.
