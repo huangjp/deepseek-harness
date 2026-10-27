@@ -244,6 +244,8 @@ const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
     'bridge/toolprompt.mjs',
     'bridge/bridge.config.json',
     'bridge/copilot-bridge.mjs',
+    // 出站诊断：只读的连通性体检，由反代在报错时调用。
+    'bridge/netdiag.mjs',
     'bridge/token-gate.mjs',
     'bridge/copilot.config.json',
     'bridge/copilot-protocol-notes.md',
@@ -256,6 +258,10 @@ const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
     'bridge/xiaoyi.config.json',
     'bridge/xiaoyi-harvest.py',
     'bridge/xiaoyi-protocol-notes.md',
+    // WorkBuddy 云端直连后端与它的令牌脚本：同样是零依赖纯 Node ESM + 一个
+    // 由外部 python 进程读取的脚本，按 URL 在运行时加载。
+    'bridge/workbuddy-cloud.mjs',
+    'bridge/workbuddy-token.py',
   ],
   '@deepseek-ai/dsh-skill-badge': ['assets'],
   '@deepseek-ai/dsh-skill-office': ['assets'],

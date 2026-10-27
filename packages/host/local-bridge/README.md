@@ -88,7 +88,7 @@ Two decisions are load-bearing:
 - **The routes live in a child fiber.** `webServer` and `connection` are declared in a nested `ctx.inject`, not in the plugin's own `inject`. A composition with no web server still starts the relays, and a composition with no trust fence registers no route at all — a refresh must never be reachable by an unauthenticated caller.
 - **The refresh decision is made here, the refresh work is not.** `bridge/preflight.mjs` exports the harvest probe, the application probe, the certificate probe, and the refresh trigger; this package's control plane reads those facts and decides which prerequisite codes are unmet. It never parses the operator prose those functions return.
 
-`bridge/refresh-token.ps1` performs the refresh: it raises a local interception proxy, points the system proxy at it, drives the Copilot window to open a connection, harvests the access token from that connection's handshake, and restores the proxy in a `finally` block. A backup file makes a killed attempt recoverable at the next run.
+`bridge/refresh-token.ps1` performs the refresh: it raises a local interception proxy, points the system proxy at it, drives the Copilot window to open a connection, harvests the access token from that connection's handshake, and restores the proxy in a `finally` block. A backup file makes a killed attempt recoverable at the next run. A proxy an earlier attempt left listening is reused only while it still runs the current harvest script; one started before that script was replaced is stopped and started again, because mitmproxy unloads a watched script when it changes and does not always load the replacement, leaving the port listening with nothing harvesting.
 
 ### Tool calls over a text-only upstream
 

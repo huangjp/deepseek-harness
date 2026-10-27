@@ -213,7 +213,38 @@ if ($tokenUnusable) {
     Write-Host "  （本工具不会再犯；这一份需要靠本次收割重建。）" -ForegroundColor DarkGray
 }
 
-# ---- 1. 起 mitmdump（挂了就不再起）----
+# ---- 1. 起 mitmdump ----
+# 端口有监听不等于收割还活着。mitmproxy 监视 --scripts 指向的文件，热重载时先输出
+# 「Removing script / Un-loading script」，随后不一定把新插件装回去。升级安装替换
+# bridge 目录里的 token-harvester.py 正好触发这一次重载 —— 结果端口照旧监听、Copilot
+# 流量照旧通过、却没有任何插件解析握手 URL，每一轮都只报「未收到新令牌」。
+# 所以判据不能只有端口：跑着的 mitmdump 必须是用**当前这份插件**启动的。
+function Get-MitmPids {
+    Get-CimInstance Win32_Process -Filter "Name='mitmdump.exe' or Name='python.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -and $_.CommandLine -match "--listen-port\s+$MitmPort(\s|$)" }
+}
+
+if (Test-MitmPort) {
+    $harvesterTime = (Get-Item $Harvester).LastWriteTime
+    $stale = @()
+    foreach ($mp in Get-MitmPids) {
+        $olderThanScript = $mp.CreationDate -lt $harvesterTime
+        $otherScript = $mp.CommandLine -notmatch [regex]::Escape($Harvester)
+        if ($olderThanScript -or $otherScript) {
+            $why = if ($olderThanScript) { '进程早于当前收割插件，热重载已把它卸掉' } else { '进程加载的不是当前收割插件' }
+            Write-Host "重启 mitmdump（PID $($mp.ProcessId)）：$why" -ForegroundColor Yellow
+            $stale += $mp.ProcessId
+        }
+    }
+    foreach ($stalePid in $stale) { Stop-Process -Id $stalePid -Force -ErrorAction SilentlyContinue }
+    if ($stale.Count -gt 0) {
+        for ($i = 0; $i -lt 10; $i++) {
+            Start-Sleep -Milliseconds 300
+            if (-not (Test-MitmPort)) { break }
+        }
+    }
+}
+
 if (-not (Test-MitmPort)) {
     Write-Host "启动 mitmdump（$MitmPort → $Upstream）..."
     $allow = 'cr\.m365copilotapp\.svc\.cloud\.microsoft|substrate\.office\.com|copilot\.microsoft\.com|roaming\.svc\.cloud\.microsoft|m365\.cloud\.microsoft|login\.live\.com|ic3-consumers\.teams\.office\.com'
