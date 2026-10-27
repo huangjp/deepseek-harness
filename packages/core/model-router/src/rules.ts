@@ -48,19 +48,3 @@ export function matchesRule(rule: RouteRule, signals: RouteSignals): boolean {
   if (rule.keywords.length === 0) return rule.hasImage !== undefined
   return rule.keywords.some(keyword => signals.text.includes(keyword.toLowerCase()))
 }
-
-/**
- * The first matching rule, in declaration order.
- *
- * Declaration order is the precedence: a deployment reads the table top to
- * bottom, so the most specific rule belongs first.
- * @param rules - the configured rules.
- * @param signals - the observed task signals.
- * @returns the first matching rule, or undefined when none matches.
- */
-export function firstMatchingRule(
-  rules: readonly RouteRule[],
-  signals: RouteSignals,
-): RouteRule | undefined {
-  return rules.find(rule => matchesRule(rule, signals))
-}

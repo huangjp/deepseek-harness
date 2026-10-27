@@ -11,7 +11,7 @@ English | [中文](README.zh.md)
 
 `@deepseek-ai/dsh-model-router` picks the provider route a task runs on. A harness deployment registers several routes — one that thinks before it answers, one that accepts images, one tuned for code — but the harness keeps exactly one model selection per Agent, so every task runs on whichever route the user last picked. This plugin reads the task that is about to run and applies the route the deployment's rule table names for it.
 
-The plugin never changes what a task does; it only changes which route answers it. A rule it cannot honor is declined, and the Agent keeps the route it had.
+The plugin never changes what a task does; it only changes which route answers it. A rule it cannot honor is passed over in favour of the next rule, and the Agent keeps the route it had when no rule applies.
 
 ## Table of Contents
 
@@ -47,11 +47,22 @@ Mount the plugin in a composition that has more than one provider route register
         keywords: ['实现', '修复', '重构']
         provider: slefgpt56
         model: copilot
+      # 兜底：两条 hasImage 规则合起来覆盖「其余所有任务」。
+      - name: fallback-text
+        hasImage: false
+        provider: dpv41f
+        model: deepseek-v4.1-flash
+      - name: fallback-image
+        hasImage: true
+        provider: dpv41f
+        model: deepseek-v4.1-flash
 ```
 
-Routing is **off by default**. A rule matches when every condition it states holds: `keywords` are matched case-insensitively against the claimed message's text, and `hasImage` constrains whether the message carries an image. A rule that states neither condition matches nothing, so an unconditional rule cannot silently capture every task. The first matching rule wins, so the most specific rule belongs first.
+Routing is **off by default**. A rule matches when every condition it states holds: `keywords` are matched case-insensitively against the claimed message's text, and `hasImage` constrains whether the message carries an image. A rule that states neither condition matches nothing, so an unconditional rule cannot silently capture every task. The rules are read top to bottom and the first match wins, so the most specific rule belongs first.
 
-A target is honored only when the deployment registers that provider and model. A rule that names an unregistered route is declined with a debug log rather than applied, and a rule whose target does not accept images is declined when the task carries one. A requested `reasoningEffort` is applied when the target route offers that effort; otherwise the target keeps its own default.
+A target is honored only when the deployment registers that provider and model. A rule whose target is not registered, or whose target does not accept the image the task carries, cannot be honored: it is passed over with a debug log and the next rule is considered, so a later rule that names a usable route still gets its turn. A requested `reasoningEffort` is applied when the target route offers that effort; otherwise the target keeps its own default.
+
+Because a rule that states no condition matches nothing, a deployment expresses "everything else" as the two `hasImage` rules shown above: one for a task without an image, one for a task with an image.
 
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
@@ -60,7 +71,9 @@ The decision happens on `agent/inbox/claimed`, which the agent loop emits at `pa
 
 The plugin calls `agent.model.select()`, the same public seam the Models page uses. The selection is recorded in the session log as a `model/selection` event, so a routed session reads back the route each step actually used.
 
-Two pieces make the decision synchronous. The rule table and the signals come from the message the loop already holds. The **catalog** of registered routes and their models is read asynchronously and cached, because the decision cannot await a lookup between the claim and the selection. The cache is refreshed when `llm/adapters-updated` fires, and a rule whose target is not cached is declined — routing to an unregistered route would fail the request instead of falling back.
+Two pieces make the decision synchronous. The rule table and the signals come from the message the loop already holds. The **catalog** of the routes the rule table names is read asynchronously and cached, because the decision cannot await a lookup between the claim and the selection. The cache is refreshed when `llm/adapters-updated` fires, and a rule whose target is not cached is passed over — routing to an unregistered route would fail the request instead of falling back.
+
+The catalog resolves each rule's exact model rather than listing a route's models. A route's own listing reports the route as empty while that route's credential does not resolve, and a route that cannot answer yet is still the route a rule names. The plugin's own startup waits, for a bounded time, for the routes its rules name to register, so the first turn of a session is routed instead of falling back to the Agent's own route.
 
 <a id="further-exploration"></a>
 ## Further Exploration

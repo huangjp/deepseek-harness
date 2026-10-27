@@ -14,8 +14,8 @@
  * the very first step uses, not the one after it.
  *
  * The plugin never changes what a task does; it only changes which route
- * answers it. A rule that cannot be honored is declined, and the Agent keeps
- * the route it had.
+ * answers it. A rule that cannot be honored is passed over in favour of the
+ * next rule, and the Agent keeps the route it had when no rule applies.
  *
  * @module @deepseek-ai/dsh-model-router
  */
@@ -23,17 +23,23 @@ import type { Context, Volatile } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-agent'
 import { ModelCatalog } from './catalog.ts'
-import { firstMatchingRule, type RouteRule } from './rules.ts'
+import { matchesRule, type RouteRule } from './rules.ts'
 import { signalsOf } from './signals.ts'
 
 export { ModelCatalog } from './catalog.ts'
 export type { RouteTarget } from './catalog.ts'
-export { firstMatchingRule, matchesRule } from './rules.ts'
+export { matchesRule } from './rules.ts'
 export type { RouteRule, RouteSignals } from './rules.ts'
 export { signalsOf } from './signals.ts'
 
 export const name = 'model-router'
 export const inject = ['llm']
+
+/** How long the plugin waits for a rule's provider to register, per attempt. */
+const REGISTRATION_WAIT_MS = 50
+
+/** How many times the plugin waits for a rule's provider to register. */
+const REGISTRATION_ATTEMPTS = 20
 
 /** One rule as the deployment declares it. */
 export interface RuleConfig {
@@ -92,45 +98,84 @@ export function toRouteRule(entry: RuleConfig): RouteRule {
 }
 
 /**
+ * Wait for a delay.
+ * @param ms - milliseconds to wait.
+ * @returns a promise that settles after the delay.
+ */
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+/**
  * Install the routing table and the listener that applies it.
+ *
+ * The plugin's own startup waits for the routes its rules name: a decision
+ * whose target is not cached yet cannot be honored, and the first turn of a
+ * session is exactly the one that must not fall back to the Agent's own
+ * route. Waiting is bounded, so a rule naming a route that never registers
+ * delays the startup rather than blocking it.
  * @param ctx - the plugin context.
  * @param config - the deployment configuration.
  */
-export function apply(ctx: Context, config: Config): void {
+export async function apply(ctx: Context, config: Config): Promise<void> {
   const catalog = new ModelCatalog(ctx)
-  const refresh = (): void => {
-    void catalog.refresh().catch((error: unknown) => {
+  let refreshing = false
+  const refresh = async (): Promise<void> => {
+    if (refreshing) return
+    refreshing = true
+    try {
+      await catalog.refresh(config.rules.get().map(toRouteRule))
+    } catch (error: unknown) {
       ctx.logger.warn('model-router: could not read the provider catalog: %s', String(error))
-    })
+    } finally {
+      refreshing = false
+    }
   }
-  ctx.effect(() => {
-    refresh()
-    return () => {}
-  })
-  ctx.on('llm/adapters-updated', refresh)
+  const waitForRoutes = async (): Promise<void> => {
+    const rules = config.rules.get().map(toRouteRule)
+    for (let attempt = 0; attempt < REGISTRATION_ATTEMPTS; attempt++) {
+      if (catalog.covers(rules)) break
+      await delay(REGISTRATION_WAIT_MS)
+    }
+    await refresh()
+  }
+  await waitForRoutes()
+  ctx.on('llm/adapters-updated', () => { void refresh() })
   ctx.on('agent/inbox/claimed', ({ agent, message }) => {
     if (!config.enabled.get()) return
     const signals = signalsOf(message)
-    const rule = firstMatchingRule(config.rules.get().map(toRouteRule), signals)
-    if (rule === undefined) return
-    const target = catalog.resolve(rule, signals.hasImage)
-    if (target === undefined) {
-      ctx.logger.debug(
-        'model-router: rule "%s" names %s/%s, which this deployment does not register',
-        rule.name, rule.provider, rule.model,
+    for (const rule of config.rules.get().map(toRouteRule)) {
+      if (!matchesRule(rule, signals)) continue
+      if (!catalog.has(rule.provider, rule.model)) {
+        // The catalog is cold for this route: read it again so the next turn
+        // of this session can honor the rule.
+        void refresh()
+        ctx.logger.debug(
+          'model-router: rule "%s" names %s/%s, which this deployment does not register',
+          rule.name, rule.provider, rule.model,
+        )
+        continue
+      }
+      const target = catalog.resolve(rule, signals.hasImage)
+      if (target === undefined) {
+        ctx.logger.debug(
+          'model-router: rule "%s" names %s/%s, which this deployment cannot honor',
+          rule.name, rule.provider, rule.model,
+        )
+        continue
+      }
+      const current = agent.model.current()
+      if (
+        current?.provider === target.provider
+        && current.model === target.model
+        && current.reasoningEffort === target.reasoningEffort
+      ) return
+      ctx.logger.info(
+        'model-router: rule "%s" routes this task to %s/%s',
+        rule.name, target.provider, target.model,
       )
+      agent.model.select(target)
       return
     }
-    const current = agent.model.current()
-    if (
-      current?.provider === target.provider
-      && current.model === target.model
-      && current.reasoningEffort === target.reasoningEffort
-    ) return
-    ctx.logger.info(
-      'model-router: rule "%s" routes this task to %s/%s',
-      rule.name, target.provider, target.model,
-    )
-    agent.model.select(target)
   })
 }

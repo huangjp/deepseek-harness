@@ -1,5 +1,5 @@
 /**
- * A cached view of the registered provider routes, used to validate a routing
+ * A cached view of the routes the rule table names, used to validate a routing
  * decision before the harness acts on it.
  *
  * @module @deepseek-ai/dsh-model-router/catalog
@@ -28,13 +28,20 @@ export interface RouteTarget {
 }
 
 /**
- * The registered routes and their models, cached for synchronous lookup.
+ * The routes the rule table names, cached for synchronous lookup.
  *
  * A routing decision happens between a message being claimed and the step
  * capturing its model selection, so the decision cannot await a catalog
  * lookup. The cache is refreshed when the registry changes, and a decision
  * whose target is not cached is declined rather than guessed: routing to an
  * unregistered route would fail the request instead of falling back.
+ *
+ * The cached routes are the ones the rule table names, resolved one exact
+ * model at a time. A route's own model listing is not the source: that listing
+ * reports a route as empty while the route's credential does not resolve, and
+ * a route that cannot answer yet is still the route a rule names. Resolving the
+ * exact model reads the route's configuration instead, which no credential
+ * gates.
  */
 export class ModelCatalog {
   /** Provider route to model id to that model's capabilities. */
@@ -46,30 +53,56 @@ export class ModelCatalog {
   constructor(private readonly ctx: Context) {}
 
   /**
-   * Re-read every registered route and its models.
+   * Re-read the capabilities of every route the rule table names.
    *
-   * A route whose catalog cannot be read is skipped: the registry keeps the
-   * route registered, and a later refresh may find it serviceable.
+   * A rule whose provider is not registered yet is skipped: the route may
+   * register later, and a later refresh reads it. A rule whose provider is
+   * registered but whose model is unknown is skipped as well, because the
+   * deployment named a model that route does not serve.
+   * @param rules - the rule table the deployment declared.
    * @returns a promise that settles once the cache is replaced.
    */
-  async refresh(): Promise<void> {
+  async refresh(rules: readonly RouteRule[]): Promise<void> {
     const next = new Map<string, Map<string, CatalogEntry>>()
-    for (const provider of this.ctx.llm.listProviders()) {
-      const entries = new Map<string, CatalogEntry>()
-      try {
-        for (const model of await this.ctx.llm.listModels(provider.id)) {
-          const resolved = await this.ctx.llm.resolveModelInfo(provider.id, model.id).catch(() => undefined)
-          entries.set(model.id, {
-            modalities: model.inputModalities,
-            efforts: resolved?.reasoning?.efforts.map(effort => effort.id) ?? [],
-          })
-        }
-      } catch {
-        continue
-      }
-      next.set(provider.id, entries)
+    const registered = new Set(this.ctx.llm.listProviders().map(provider => provider.id))
+    for (const rule of rules) {
+      if (!registered.has(rule.provider)) continue
+      const entries = next.get(rule.provider) ?? new Map<string, CatalogEntry>()
+      if (entries.has(rule.model)) continue
+      const resolved = await this.ctx.llm.resolveModelInfo(rule.provider, rule.model).catch(() => undefined)
+      if (resolved === undefined) continue
+      entries.set(rule.model, {
+        modalities: resolved.inputModalities,
+        efforts: resolved.reasoning?.efforts.map(effort => effort.id) ?? [],
+      })
+      next.set(rule.provider, entries)
     }
     this.routes = next
+  }
+
+  /**
+   * Whether the catalog holds the capabilities of one exact route.
+   * @param provider - provider route to look up.
+   * @param model - model id on that route.
+   * @returns true when the route's capabilities are cached.
+   */
+  has(provider: string, model: string): boolean {
+    return this.routes.get(provider)?.has(model) === true
+  }
+
+  /**
+   * Whether every provider the rule table names is registered.
+   * @param rules - the rule table the deployment declared.
+   * @returns true when no rule names an unregistered route.
+   */
+  covers(rules: readonly RouteRule[]): boolean {
+    let registered: Set<string>
+    try {
+      registered = new Set(this.ctx.llm.listProviders().map(provider => provider.id))
+    } catch {
+      return false
+    }
+    return rules.every(rule => registered.has(rule.provider))
   }
 
   /**

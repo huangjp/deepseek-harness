@@ -93,6 +93,11 @@
         provider: deepseek-official
         model: deepseek-flash
 
+    # Routes a task to the provider route its rule table names. The table is
+    # empty and routing is off until a deployment declares its own rules.
+    - id: model-router
+      name: '@deepseek-ai/dsh-model-router'
+
     - id: jobs
       name: '@deepseek-ai/dsh-jobs-local'
 
