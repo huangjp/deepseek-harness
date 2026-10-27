@@ -468,7 +468,14 @@ async function main(): Promise<void> {
   const backend = new DesktopBackendController((onFailure) => {
     const hostInspectPort = developmentHostInspectPort(development)
     const host = new DesktopHostProcess(resources.node, resources.dsh, activeProject,
-      hostInspectPort, { ...hostEnvironment, DSH_CLIENT_VERSION: desktopClientVersion() }, onFailure,
+      hostInspectPort, {
+        ...hostEnvironment,
+        DSH_CLIENT_VERSION: desktopClientVersion(),
+        // The bundled skills ship as ordinary files under `runtime/skills`, so every
+        // install discovers them without the user copying anything. Workspace and
+        // user roots outrank this directory, so a project can still override them.
+        ...(development ? {} : { DSH_BUNDLED_SKILL_DIR: join(process.resourcesPath, 'runtime', 'skills') }),
+      }, onFailure,
       primaryRuntime,
       resources, (next) => { platformView.setSession(next) })
     return {
