@@ -54,7 +54,7 @@ const WINDOWS_TARGET: DesktopPackageTarget = {
 describe('clearPreviousElectronOutput', () => {
   it('leaves a missing output directory alone', () => {
     const root = workspace()
-    expect(() => clearPreviousElectronOutput(root, WINDOWS_TARGET)).not.toThrow()
+    expect(() => { clearPreviousElectronOutput(root, WINDOWS_TARGET) }).not.toThrow()
   })
 
   it('removes the previous output directory', () => {
@@ -84,6 +84,6 @@ describe('clearPreviousElectronOutput', () => {
       await new Promise(resolve => setTimeout(resolve, 100))
     }
     expect(existsSync(ready)).toBe(true)
-    expect(() => clearPreviousElectronOutput(root, WINDOWS_TARGET)).toThrow(/删不掉/)
+    expect(() => { clearPreviousElectronOutput(root, WINDOWS_TARGET) }).toThrow(/删不掉/)
   })
 })

@@ -77,7 +77,7 @@ describe('probeTcp', () => {
       // （实测与并行的端到端探测一起跑时失败过一次）。
       expect(await probeTcp('127.0.0.1', port, 3000)).toBe(true)
     } finally {
-      await new Promise<void>(resolve => server.close(() => resolve()))
+      await new Promise<void>((resolve) => { server.close(() => { resolve() }) })
     }
   })
 })
