@@ -7,19 +7,22 @@ import { apply, toRouteRule, type Config, type RuleConfig } from '../src/index.t
 function fakeContext(options: { readonly listProvidersFails?: boolean } = {}): {
   readonly ctx: Context
   readonly emit: (event: string, ...args: unknown[]) => void
+  readonly options: Map<string, unknown>
   readonly logger: { debug: ReturnType<typeof vi.fn>; info: ReturnType<typeof vi.fn>; warn: ReturnType<typeof vi.fn> }
 } {
   const listeners = new Map<string, ((...args: unknown[]) => void)[]>()
+  const registered = new Map<string, unknown>()
   const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn() }
   const ctx = {
     logger,
     effect: (fn: () => unknown) => {
       fn()
     },
-    on: (event: string, listener: (...args: unknown[]) => void) => {
+    on: (event: string, listener: (...args: unknown[]) => void, listenerOptions?: unknown) => {
       const list = listeners.get(event) ?? []
       list.push(listener)
       listeners.set(event, list)
+      registered.set(event, listenerOptions)
       return () => {}
     },
     llm: {
@@ -53,6 +56,7 @@ function fakeContext(options: { readonly listProvidersFails?: boolean } = {}): {
   return {
     ctx,
     logger,
+    options: registered,
     emit: (event: string, ...args: unknown[]) => {
       for (const listener of listeners.get(event) ?? []) listener(...args)
     },
@@ -312,5 +316,11 @@ describe('model-router route health', () => {
     const { agent, select } = fakeAgent()
     emit('agent/inbox/claimed', { agent, message: claimed('写一部小说') })
     expect(select).toHaveBeenCalledWith({ provider: 'p1', model: 'm1', reasoningEffort: 'max' })
+  })
+
+  it('listens ahead of the retry policy so it sees every failed attempt', async () => {
+    const { ctx, options } = fakeContext()
+    await apply(ctx, fakeConfig([LONG_FORM]))
+    expect(options.get('agent/request-error')).toEqual({ prepend: true })
   })
 })

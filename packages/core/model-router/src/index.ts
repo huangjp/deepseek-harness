@@ -133,7 +133,9 @@ function delay(ms: number): Promise<void> {
  *
  * The plugin also watches the routes' own outcomes. A route that keeps failing
  * cannot answer the tasks the table sends it, so the next decision routes
- * around it instead of paying for the same failure again.
+ * around it instead of paying for the same failure again. The plugin listens
+ * ahead of the retry policy on the failure waterfall, so it sees every failed
+ * attempt rather than only the ones the retry policy passes on.
  * @param ctx - the plugin context.
  * @param config - the deployment configuration.
  */
@@ -165,6 +167,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }
   await waitForRoutes()
   ctx.on('llm/adapters-updated', () => { void refresh() })
+  // The failure waterfall runs outermost listener first, and the retry policy
+  // ends the chain when it owns a recovery. Listening ahead of it therefore
+  // sees every failed attempt, including the ones the retry policy answers.
   ctx.on('agent/request-error', (payload, next: () => Promise<RequestErrorAction>) => {
     if (health.recordFailure(payload.provider)) {
       ctx.logger.warn(
@@ -173,7 +178,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       )
     }
     return next()
-  })
+  }, { prepend: true })
   ctx.on('session/event', (_session, event) => {
     if (event.type !== 'assistant/message') return
     health.recordSuccess(event.data.message.source.provider)

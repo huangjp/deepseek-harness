@@ -81,7 +81,7 @@ Two pieces make the decision synchronous. The rule table and the signals come fr
 
 The catalog resolves each rule's exact model rather than listing a route's models. A route's own listing reports the route as empty while that route's credential does not resolve, and a route that cannot answer yet is still the route a rule names. The plugin's own startup waits, for a bounded time, for the routes its rules name to register, so the first turn of a session is routed instead of falling back to the Agent's own route.
 
-Failures are read from the `agent/request-error` waterfall, which every failed request attempt passes through, and answers are read from the `assistant/message` session event, which names the provider that produced them. The state is held per plugin rather than per session: a route that cannot answer for one session cannot answer for another either, so the next session's decision does not pay for the failure the last one already paid for.
+Failures are read from the `agent/request-error` waterfall, which every failed request attempt passes through, and answers are read from the `assistant/message` session event, which names the provider that produced them. The plugin listens ahead of the retry policy on that waterfall, so it sees every failed attempt rather than only the ones the retry policy passes on. The state is held per plugin rather than per session: a route that cannot answer for one session cannot answer for another either, so the next session's decision does not pay for the failure the last one already paid for.
 
 <a id="further-exploration"></a>
 ## Further Exploration
