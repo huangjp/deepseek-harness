@@ -21,6 +21,7 @@
  *
  * @module @deepseek-ai/dsh-model-router
  */
+import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type { Context, Volatile } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { RequestErrorAction } from '@deepseek-ai/dsh-agent'
@@ -167,6 +168,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }
   await waitForRoutes()
   ctx.on('llm/adapters-updated', () => { void refresh() })
+  // A rule table edited in the settings page reaches the plugin as a volatile
+  // update. The catalog must follow it, or a rule naming a route the cached
+  // view has not seen yet would be passed over.
+  ctx.on('loader/volatile-update', () => { void refresh() })
   // The failure waterfall runs outermost listener first, and the retry policy
   // ends the chain when it owns a recovery. Listening ahead of it therefore
   // sees every failed attempt, including the ones the retry policy answers.

@@ -218,6 +218,16 @@ describe('model-router routing', () => {
     expect(select).toHaveBeenCalled()
   })
 
+  it('re-reads the catalog when the settings page edits the rule table', async () => {
+    const { ctx, emit } = fakeContext()
+    await apply(ctx, fakeConfig([LONG_FORM]))
+    emit('loader/volatile-update', [['rules']])
+    await flush()
+    const { agent, select } = fakeAgent()
+    emit('agent/inbox/claimed', { agent, message: claimed('写一部小说') })
+    expect(select).toHaveBeenCalled()
+  })
+
   it('skips a catalog refresh that is already running', async () => {
     const { ctx, emit } = fakeContext()
     await apply(ctx, fakeConfig([LONG_FORM]))

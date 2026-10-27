@@ -64,11 +64,13 @@ Mount the plugin in a composition that has more than one provider route register
 
 Routing is **off by default**. A rule matches when every condition it states holds: `keywords` are matched case-insensitively against the claimed message's text, and `hasImage` constrains whether the message carries an image. A rule that states neither condition matches nothing, so an unconditional rule cannot silently capture every task. The rules are read top to bottom and the first match wins, so the most specific rule belongs first.
 
+The table is also editable at runtime. The `dsh-client-ui-settings-model-router` companion package puts it on the web client's Plugins page, so a deployment can retune which model answers which kind of work without editing YAML. The plugin reads the table as a volatile value and refreshes its cached route view when it changes, so a table edited in the page applies to the next task.
+
 A target is honored only when the deployment registers that provider and model. A rule whose target is not registered, or whose target does not accept the image the task carries, cannot be honored: it is passed over with a debug log and the next rule is considered, so a later rule that names a usable route still gets its turn. A requested `reasoningEffort` is applied when the target route offers that effort; otherwise the target keeps its own default.
 
-Because a rule that states no condition matches nothing, a deployment expresses "everything else" as the two `hasImage` rules shown above: one for a task without an image, one for a task with an image.
+Because a rule that states no condition matches nothing, a deployment expresses "everything else" as the two `hasImage` rules shown above: one for a task without an image, one for a task with an image. Those same two rules are what lets the breaker move a task: when a rule's route is skipped, the next rule that **fits** the task takes it, and a table without a rule that fits leaves the Agent on the route it already had — the one that just failed.
 
-A route that cannot answer is worse than no route at all: an exhausted quota, a revoked credential and an unreachable relay all make the request fail. The plugin therefore watches each route's own outcomes and routes around a route that keeps failing. `failureThreshold` consecutive failures — two by default — skip that route for `cooldownMs` milliseconds (five minutes by default), and the next rule that fits the task takes the task instead. A route that answers again becomes eligible at once, and a threshold of zero never routes around anything.
+A route that cannot answer is worse than no route at all: an exhausted quota, a revoked credential and an unreachable relay all make the request fail. The plugin therefore watches each route's own outcomes and routes around a route that keeps failing. `failureThreshold` consecutive failures — two by default — skip that route for `cooldownMs` milliseconds (five minutes by default), and the next rule that fits the task takes the task instead. A route that answers again becomes eligible at once, and a threshold of zero never routes around anything. The cooldown is a **wall-clock window**, not a retry budget: once it expires the route is eligible again and the next matching task tries it once more, and a fresh failure skips it again at once — the failure count is kept, so an expired cooldown does not clear it.
 
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
@@ -87,6 +89,7 @@ Failures are read from the `agent/request-error` waterfall, which every failed r
 ## Further Exploration
 
 - The rules themselves are data: `packages/core/model-router/src/rules.ts` holds the matcher, and `packages/core/model-router/src/catalog.ts` holds the cached registry view.
+- `packages/client/ui-settings-model-router` is the browser half that edits this table from the Plugins page.
 - The seam the plugin writes to is `agent.model.select()` in `packages/core/agent/src/runtime-types.ts`; the loop's capture point is `packages/core/agent-loop/src/agent.ts`.
 - `packages/llm/llm-local-bridge` registers the bundled local relay routes this plugin usually routes between.
 
