@@ -1,0 +1,43 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/core/model-router/README.md
+/:
+  en: 102a460797ac8d15
+  zh: eae724a7ded42446
+/deepseek-ai-dsh-model-router:
+  en: 121627188689278d
+  zh: ff086db171112441
+/deepseek-ai-dsh-model-router/summary:
+  en: 8ce7fbae760f2b21
+  zh: bfcb9c9314bdb255
+/deepseek-ai-dsh-model-router/table-of-contents:
+  en: b563e4ec4727d0de
+  zh: 53bc178a9c9491e8
+/deepseek-ai-dsh-model-router/use-this-package:
+  en: a0b4b65f37f1d70f
+  zh: 67ad7d719836f8cb
+/deepseek-ai-dsh-model-router/understand-the-implementation:
+  en: e465ffaf88107108
+  zh: 6ab0d091aa336eaa
+/deepseek-ai-dsh-model-router/further-exploration:
+  en: 7a1dbaa5b5a0bc08
+  zh: dfd6f3acc27c8add
+/deepseek-ai-dsh-model-router/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-model-router/model-experience/route-selection-before-the-first-request:
+  en: 3b48754b85bbc9e0
+  zh: 5879dd2aeb990cd9
+/deepseek-ai-dsh-model-router/model-experience/route-selection-before-the-first-request/what-the-model-sees:
+  en: 4f54b8a3b2f0e2d9
+  zh: 94e5c26f413b1878
+/deepseek-ai-dsh-model-router/model-experience/route-selection-before-the-first-request/token-effect:
+  en: bce388eac555726d
+  zh: 75baf6d377238e8d
+/deepseek-ai-dsh-model-router/model-experience/route-selection-before-the-first-request/kv-cache-effect:
+  en: 63f3b7200724f56a
+  zh: 18fa4e997fdd7882
+/deepseek-ai-dsh-model-router/known-limitations-and-deferred-work:
+  en: f4d6efabaecd58af
+  zh: 332e30ab463dfc28
