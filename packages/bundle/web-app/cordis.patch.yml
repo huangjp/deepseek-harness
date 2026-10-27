@@ -527,6 +527,9 @@
     - id: ui-settings-agent-loop
       name: '@deepseek-ai/dsh-client-ui-settings-agent-loop'
 
+    - id: ui-settings-model-router
+      name: '@deepseek-ai/dsh-client-ui-settings-model-router'
+
     - id: ui-settings-subagent
       name: '@deepseek-ai/dsh-client-ui-settings-subagent'
 

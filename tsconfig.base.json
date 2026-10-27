@@ -328,6 +328,7 @@
       "@deepseek-ai/dsh-cua/client": ["./packages/experimental/cua/src/client/index.ts"],
       "@deepseek-ai/dsh-cua/types": ["./packages/experimental/cua/src/remote-types.ts"],
       "@deepseek-ai/dsh-client-ui-settings-agent-loop": ["./packages/client/ui-settings-agent-loop/src"],
+      "@deepseek-ai/dsh-client-ui-settings-model-router": ["./packages/client/ui-settings-model-router/src"],
       "@deepseek-ai/dsh-client-ui-settings-session-log": ["./packages/client/ui-settings-session-log/src"],
       "@deepseek-ai/dsh-client-ui-settings-subagent": ["./packages/client/ui-settings-subagent/src"],
       "@deepseek-ai/dsh-client-ui-settings-web-search": ["./packages/client/ui-settings-web-search/src"],

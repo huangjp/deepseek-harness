@@ -109,6 +109,7 @@
     "@deepseek-ai/dsh-client-ui-settings-plugins": "workspace:*",
     "@deepseek-ai/dsh-client-ui-settings-shell": "workspace:*",
     "@deepseek-ai/dsh-client-ui-settings-agent-loop": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-settings-model-router": "workspace:*",
     "@deepseek-ai/dsh-client-ui-settings-subagent": "workspace:*",
     "@deepseek-ai/dsh-client-ui-settings-web-search": "workspace:*",
     "@deepseek-ai/dsh-client-ui-sidebar": "workspace:*",
