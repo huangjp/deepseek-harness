@@ -463,6 +463,29 @@ describe('Web session model selection', () => {
     await ctx.fiber.dispose()
   })
 
+  it('offers the automatic-routing choice only while the deployment enables the router', async () => {
+    const { ctx } = await harness()
+    await createSessionTestRemote(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+
+    const withoutRouter = await buildModelCatalog(ctx)
+    expect(withoutRouter.routingAvailable).toBe(false)
+    expect(withoutRouter.defaultRoutingMode).toBe('auto')
+
+    let namespaces: { ns: string; value: unknown }[] = []
+    ctx.provide('settings', { describe: () => namespaces } as never)
+    expect((await buildModelCatalog(ctx)).routingAvailable).toBe(false)
+
+    namespaces = [{ ns: 'model-router', value: { enabled: true } }]
+    expect((await buildModelCatalog(ctx)).routingAvailable).toBe(true)
+
+    namespaces = [{ ns: 'model-router', value: { enabled: false } }]
+    expect((await buildModelCatalog(ctx)).routingAvailable).toBe(false)
+    await ctx.fiber.dispose()
+  })
+
   it('preserves optional catalog metadata and string provider failures', async () => {
     const { ctx } = await harness()
     ctx.llm.registerAdapter(['plain'], new CatalogAdapter('Plain', [
