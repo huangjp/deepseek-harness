@@ -334,6 +334,156 @@ describe('model list editing', () => {
     }])
   })
 
+  it('writes a model compatibility switch and keeps the fields the card cannot show', async () => {
+    // A route whose wire differs from the default protocol: the adapter must
+    // force adaptive thinking on and name its tool results, while the field
+    // naming the max-token parameter stays where the user put it.
+    const declared = {
+      id: 'minimax',
+      name: 'MiniMax',
+      input: ['text', 'image'],
+      contextWindow: 1_000_000,
+      maxTokens: 128_000,
+      compat: { forceAdaptiveThinking: true, supportsTemperature: false, maxTokensField: 'max_tokens' },
+    }
+    const { mutate } = await mountSection({
+      providers: { acme: { baseURL: 'https://gw.example/v1', models: [declared] } },
+    })
+    openEditor('acme')
+    expandModel(1)
+    const group = screen.getByRole('group', { name: `${en.modelCompat} 1` })
+    fireEvent.click(within(group).getByRole('checkbox', { name: en.modelCompatSupportsReasoningEffort }))
+    fireEvent.click(screen.getByText(en.apply))
+
+    await waitFor(() => { expect(mutate).toHaveBeenCalled() })
+    expect(firstMutate(mutate).ops).toEqual([{
+      op: 'set',
+      path: ['providers', 'acme', 'models'],
+      value: [{ ...declared, compat: { ...declared.compat, supportsReasoningEffort: true } }],
+    }])
+  })
+
+  it('drops a model compatibility object once the last switch it shows is off', async () => {
+    // An absent `compat` and an all-off `compat` resolve the same way, so the
+    // object leaves the profile instead of being stored as empty noise.
+    const declared = { id: 'minimax', name: 'MiniMax', compat: { forceAdaptiveThinking: true } }
+    const { mutate } = await mountSection({
+      providers: { acme: { baseURL: 'https://gw.example/v1', models: [declared] } },
+    })
+    openEditor('acme')
+    expandModel(1)
+    const group = screen.getByRole('group', { name: `${en.modelCompat} 1` })
+    fireEvent.click(within(group).getByRole('checkbox', { name: en.modelCompatForceAdaptiveThinking }))
+    fireEvent.click(screen.getByText(en.apply))
+
+    await waitFor(() => { expect(mutate).toHaveBeenCalled() })
+    expect(firstMutate(mutate).ops).toEqual([{
+      op: 'set',
+      path: ['providers', 'acme', 'models'],
+      value: [{ id: 'minimax', name: 'MiniMax' }],
+    }])
+  })
+
+  it('writes a route compatibility switch without touching the models', async () => {
+    const { mutate } = await mountSection({
+      providers: { acme: { baseURL: 'https://gw.example/v1', compat: { supportsStore: false } } },
+    })
+    openEditor('acme')
+    const group = screen.getByRole('group', { name: en.modelCompat })
+    fireEvent.click(within(group).getByRole('checkbox', { name: en.modelCompatSupportsStore }))
+    fireEvent.click(screen.getByText(en.apply))
+
+    await waitFor(() => { expect(mutate).toHaveBeenCalled() })
+    expect(firstMutate(mutate).ops).toEqual([{
+      op: 'set',
+      path: ['providers', 'acme', 'compat'],
+      value: { supportsStore: true },
+    }])
+  })
+
+  it('keeps a model compatibility object that still carries a field the card cannot show', async () => {
+    // Every offered switch is off, but the field naming the max-token
+    // parameter is one this card does not show: the object must survive.
+    const declared = { id: 'minimax', name: 'MiniMax', compat: { maxTokensField: 'max_tokens' } }
+    const { mutate } = await mountSection({
+      providers: { acme: { baseURL: 'https://gw.example/v1', models: [declared] } },
+    })
+    openEditor('acme')
+    expandModel(1)
+    const group = screen.getByRole('group', { name: `${en.modelCompat} 1` })
+    fireEvent.click(within(group).getByRole('checkbox', { name: en.modelCompatSupportsTemperature }))
+    fireEvent.click(within(group).getByRole('checkbox', { name: en.modelCompatSupportsTemperature }))
+    fireEvent.click(screen.getByText(en.apply))
+
+    await waitFor(() => { expect(mutate).toHaveBeenCalled() })
+    expect(firstMutate(mutate).ops).toEqual([{
+      op: 'set',
+      path: ['providers', 'acme', 'models'],
+      value: [{ ...declared, compat: { maxTokensField: 'max_tokens', supportsTemperature: false } }],
+    }])
+  })
+
+  it.each([
+    ['null', null],
+    ['an array', ['max_tokens']],
+    ['a string', 'not-an-object'],
+  ])('reads %s as no model compatibility switches', async (_label, malformed) => {
+    // A value the schema would never produce still has to render, and the
+    // first switch the user touches replaces it with a usable object.
+    const declared = { id: 'minimax', name: 'MiniMax', compat: malformed }
+    const { mutate } = await mountSection({
+      providers: { acme: { baseURL: 'https://gw.example/v1', models: [declared] } },
+    })
+    openEditor('acme')
+    expandModel(1)
+    const group = screen.getByRole('group', { name: `${en.modelCompat} 1` })
+    fireEvent.click(within(group).getByRole('checkbox', { name: en.modelCompatSupportsFinishReason }))
+    fireEvent.click(screen.getByText(en.apply))
+
+    await waitFor(() => { expect(mutate).toHaveBeenCalled() })
+    expect(firstMutate(mutate).ops).toEqual([{
+      op: 'set',
+      path: ['providers', 'acme', 'models'],
+      value: [{ id: 'minimax', name: 'MiniMax', compat: { supportsFinishReason: true } }],
+    }])
+  })
+
+  it('drops a route compatibility object once the last switch it shows is off', async () => {
+    const { mutate } = await mountSection({
+      providers: { acme: { baseURL: 'https://gw.example/v1', compat: { supportsStore: true } } },
+    })
+    openEditor('acme')
+    const group = screen.getByRole('group', { name: en.modelCompat })
+    fireEvent.click(within(group).getByRole('checkbox', { name: en.modelCompatSupportsStore }))
+    fireEvent.click(screen.getByText(en.apply))
+
+    await waitFor(() => { expect(mutate).toHaveBeenCalled() })
+    expect(firstMutate(mutate).ops).toEqual([{
+      op: 'unset',
+      path: ['providers', 'acme', 'compat'],
+    }])
+  })
+
+  it('changes one model compatibility without touching the other rows', async () => {
+    const first = { id: 'kept', name: 'Kept' }
+    const second = { id: 'minimax', name: 'MiniMax', compat: { forceAdaptiveThinking: true } }
+    const { mutate } = await mountSection({
+      providers: { acme: { baseURL: 'https://gw.example/v1', models: [first, second] } },
+    })
+    openEditor('acme')
+    expandModel(2)
+    const group = screen.getByRole('group', { name: `${en.modelCompat} 2` })
+    fireEvent.click(within(group).getByRole('checkbox', { name: en.modelCompatSupportsTemperature }))
+    fireEvent.click(screen.getByText(en.apply))
+
+    await waitFor(() => { expect(mutate).toHaveBeenCalled() })
+    expect(firstMutate(mutate).ops).toEqual([{
+      op: 'set',
+      path: ['providers', 'acme', 'models'],
+      value: [first, { ...second, compat: { forceAdaptiveThinking: true, supportsTemperature: true } }],
+    }])
+  })
+
   it('adds, edits, and removes rows without storing emptied optional fields', async () => {
     const { mutate } = await mountSection()
     openEditor('openai')
@@ -668,7 +818,9 @@ describe('endpoint interrogation', () => {
     fireEvent.click(screen.getByText(en.fetchModels))
     await screen.findByText(en.fetchTitle)
     expect(screen.queryByRole('checkbox', { name: 'Fresh' })).toBeNull()
-    const boxes = [...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
+    // The picker owns its checkboxes; the page carries others of its own.
+    const picker = await screen.findByRole('dialog')
+    const boxes = [...picker.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
     expect(boxes.map(box => box.checked)).toEqual([true, false])
     fireEvent.click(screen.getByRole<HTMLInputElement>('checkbox', { name: 'fresh' }))
     fireEvent.click(screen.getByText(en.fetchAdopt))
@@ -726,7 +878,9 @@ describe('endpoint interrogation', () => {
     fireEvent.click(screen.getByRole('button', { name: en.addModel }))
     fireEvent.change(screen.getByLabelText(`${en.modelId} 2`), { target: { value: 'b' } })
     await act(async () => { reply.resolve(ok([{ id: 'a' }, { id: 'b' }, { id: 'c' }])) })
-    const boxes = [...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
+    // The picker owns its checkboxes; the page carries others of its own.
+    const picker = await screen.findByRole('dialog')
+    const boxes = [...picker.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
     expect(boxes.map(box => box.checked)).toEqual([true, true, false])
     fireEvent.click(screen.getByText(en.fetchAdopt))
     fireEvent.click(screen.getByText(en.apply))
@@ -871,7 +1025,9 @@ describe('endpoint interrogation', () => {
 
     fireEvent.click(screen.getByText(en.fetchModels))
     await screen.findByText(en.fetchTitle)
-    const boxes = [...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
+    // The picker owns its checkboxes; the page carries others of its own.
+    const picker = await screen.findByRole('dialog')
+    const boxes = [...picker.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
     const first = boxes[0] as HTMLInputElement
     fireEvent.click(first)
     fireEvent.click(first)

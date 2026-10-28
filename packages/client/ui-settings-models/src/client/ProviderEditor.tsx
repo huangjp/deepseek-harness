@@ -32,6 +32,7 @@ import {
 import type { DeepSeekModelsValidationFailure } from './DeepSeekModelsEditor.tsx'
 import { apiKeyFailure } from './apiKey.ts'
 import { EditorFooter } from './EditorFooter.tsx'
+import { ModelCompat } from './ModelCompat.tsx'
 import { ModelListEditor } from './ModelListEditor.tsx'
 import { validateReasoningEfforts } from './ModelReasoningEfforts.tsx'
 import type { ReasoningEffortsFailure } from './ModelReasoningEfforts.tsx'
@@ -509,6 +510,22 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
                     {protocols.map(choice => <option key={choice} value={choice}>{protocolLabel(t, choice)}</option>)}
                   </select>
                 </div>
+              )
+              : null}
+            {/* The route's own compatibility switches apply to every model
+                under it that declares none of its own. */}
+            {family === 'pi-ai'
+              ? (
+                <ModelCompat
+                  value={schema.getPath(draft, ['compat'])}
+                  disabled={disabled}
+                  t={t}
+                  onChange={(compat) => {
+                    setDraft(current => compat === undefined
+                      ? schema.deletePath(current, ['compat'])
+                      : schema.setPath(current, ['compat'], compat))
+                  }}
+                />
               )
               : null}
             {/* Both families edit the same rows through the same contract; only

@@ -7,6 +7,8 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { DeepSeekModelDraft } from './DeepSeekModelsEditor.tsx'
 import type { ModelsKey } from './locales.ts'
+import { ModelCompat } from './ModelCompat.tsx'
+import type { ModelCompatBinding } from './ModelCompat.tsx'
 import { ModelInputTypes } from './ModelInputTypes.tsx'
 import { ModelReasoningEfforts } from './ModelReasoningEfforts.tsx'
 import type { ModelRowOrder } from './useModelRows.ts'
@@ -31,6 +33,11 @@ interface ModelRowProps {
   inputLoading?: boolean
   /** Levels the row's `reasoningEfforts` may declare; absent or empty shows no reasoning control. */
   reasoningLevels?: readonly string[] | undefined
+  /**
+   * Wire-compatibility editing for this row; absent on adapters whose models
+   * declare no `compat` object.
+   */
+  compat?: ModelCompatBinding | undefined
   expanded: boolean
   disabled: boolean
   t: (key: ModelsKey) => string
@@ -172,6 +179,13 @@ export function ModelRow(props: ModelRowProps): ReactNode {
                 />
               )
               : null}
+            {props.compat === undefined
+              ? null
+              : (
+                <ModelCompat
+                  value={props.compat.value} position={position} disabled={disabled} t={t} onChange={props.compat.onChange}
+                />
+              )}
           </div>
         )
         : null}

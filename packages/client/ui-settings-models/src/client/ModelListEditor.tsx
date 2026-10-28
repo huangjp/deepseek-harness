@@ -356,6 +356,18 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
             inputFallback={inputDefaults.get(textOf(model, 'id')) ?? props.defaultInput}
             inputLoading={catalogProvider !== undefined && catalog === undefined}
             reasoningLevels={props.reasoningLevels}
+            compat={{
+              value: model.compat,
+              onChange: (compat) => {
+                // The row is rebuilt rather than spread over, so a cleared
+                // compatibility object leaves the profile instead of being
+                // stored as an empty one.
+                const next = { ...model }
+                if (compat === undefined) Reflect.deleteProperty(next, 'compat')
+                else next.compat = compat
+                onChange(models.map((row, at) => at === index ? next : row))
+              },
+            }}
             expanded={expanded}
             disabled={disabled}
             t={t}
