@@ -86,15 +86,20 @@ export function ModelCompat({ value, position, disabled, t, onChange }: ModelCom
   const toggle = (key: string, checked: boolean): void => {
     // The object is spread rather than rebuilt, so a field this card does not
     // show — the wire spellings, the numeric budgets — survives the edit.
-    const next = { ...stored, [key]: checked }
-    // The object survives while it carries something this card does not
-    // describe. Once every offered switch is off and nothing else is stored,
-    // the object itself goes: an absent `compat` and an all-off `compat`
-    // resolve the same way, and the profile reads better without the noise.
-    const enabled = SWITCHES.some(option => next[option.key] === true)
-    const carried = Object.entries(next).some(([field, entry]) =>
-      !SWITCHES.some(option => option.key === field) && entry !== undefined)
-    onChange(enabled || carried ? next : undefined)
+    const next = { ...stored }
+    // A switch that goes off is REMOVED rather than written as `false`.
+    // llm-pi-ai reads the PRESENCE of a compat key as "this switch is
+    // configured" and refuses a route that names one its wire protocol does
+    // not take, so a written `false` would leave the profile unsaveable
+    // after one switch had been tried and undone. An absent boolean resolves
+    // as false all the same: the adapter materializes it.
+    if (checked) next[key] = true
+    else Reflect.deleteProperty(next, key)
+    // The object survives while it carries anything at all. Once nothing is
+    // left, the object itself goes: an absent `compat` and an all-off
+    // `compat` resolve the same way, and the profile reads better without
+    // the noise.
+    onChange(Object.keys(next).length === 0 ? undefined : next)
   }
   return (
     <fieldset className={styles['modelInputTypes']} aria-label={label}>

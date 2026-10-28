@@ -402,24 +402,52 @@ describe('model list editing', () => {
   })
 
   it('keeps a model compatibility object that still carries a field the card cannot show', async () => {
-    // Every offered switch is off, but the field naming the max-token
-    // parameter is one this card does not show: the object must survive.
-    const declared = { id: 'minimax', name: 'MiniMax', compat: { maxTokensField: 'max_tokens' } }
+    // One offered switch goes off, but the field naming the max-token parameter
+    // is one this card does not show: the object must survive that edit.
+    const declared = {
+      id: 'minimax',
+      name: 'MiniMax',
+      compat: { maxTokensField: 'max_tokens', supportsStrictTools: true },
+    }
     const { mutate } = await mountSection({
       providers: { acme: { baseURL: 'https://gw.example/v1', models: [declared] } },
     })
     openEditor('acme')
     expandModel(1)
     const group = screen.getByRole('group', { name: `${en.modelCompat} 1` })
-    fireEvent.click(within(group).getByRole('checkbox', { name: en.modelCompatSupportsTemperature }))
-    fireEvent.click(within(group).getByRole('checkbox', { name: en.modelCompatSupportsTemperature }))
+    fireEvent.click(within(group).getByRole('checkbox', { name: en.modelCompatSupportsStrictTools }))
     fireEvent.click(screen.getByText(en.apply))
 
     await waitFor(() => { expect(mutate).toHaveBeenCalled() })
     expect(firstMutate(mutate).ops).toEqual([{
       op: 'set',
       path: ['providers', 'acme', 'models'],
-      value: [{ ...declared, compat: { maxTokensField: 'max_tokens', supportsTemperature: false } }],
+      value: [{ ...declared, compat: { maxTokensField: 'max_tokens' } }],
+    }])
+  })
+
+  it('removes a model compatibility switch that is turned off instead of writing it as false', async () => {
+    // llm-pi-ai reads the PRESENCE of a compat key as "this switch is
+    // configured" and refuses a route naming one its wire protocol does not
+    // take. A switch written back as `false` would therefore leave the
+    // profile unsaveable after it had been tried and undone.
+    const declared = { id: 'minimax', name: 'MiniMax', compat: { forceAdaptiveThinking: true } }
+    const { mutate } = await mountSection({
+      providers: { acme: { baseURL: 'https://gw.example/v1', models: [declared] } },
+    })
+    openEditor('acme')
+    expandModel(1)
+    const group = screen.getByRole('group', { name: `${en.modelCompat} 1` })
+    fireEvent.click(within(group).getByRole('checkbox', { name: en.modelCompatSupportsStore }))
+    fireEvent.click(within(group).getByRole('checkbox', { name: en.modelCompatSupportsStore }))
+    fireEvent.click(within(group).getByRole('checkbox', { name: en.modelCompatSupportsStrictTools }))
+    fireEvent.click(screen.getByText(en.apply))
+
+    await waitFor(() => { expect(mutate).toHaveBeenCalled() })
+    expect(firstMutate(mutate).ops).toEqual([{
+      op: 'set',
+      path: ['providers', 'acme', 'models'],
+      value: [{ ...declared, compat: { forceAdaptiveThinking: true, supportsStrictTools: true } }],
     }])
   })
 
