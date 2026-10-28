@@ -55,7 +55,12 @@ function resolveRequest(ctx: Context, input: WebhookSessionRequest): ResolvedWeb
   }
   let agentOptions: AgentOptions
   if (model === undefined) {
-    agentOptions = { ...ctx.agentDefaultModel.currentSelection() }
+    // The routing mode belongs to the deployment's default model, so a request
+    // that follows the default follows the mode the deployment declares.
+    agentOptions = {
+      ...ctx.agentDefaultModel.currentSelection(),
+      routingMode: ctx.agentDefaultModel.currentRoutingMode(),
+    }
   } else {
     const modelRecord = model as Record<string, unknown>
     const provider = requiredString(modelRecord, 'provider')
@@ -65,10 +70,13 @@ function resolveRequest(ctx: Context, input: WebhookSessionRequest): ResolvedWeb
       && (typeof maxTokens !== 'number' || !Number.isSafeInteger(maxTokens) || maxTokens <= 0)) {
       throw new TypeError('webhook Session request model.maxTokens must be a positive safe integer')
     }
+    // A named route does not change who picks the route: the deployment's
+    // declared mode still decides whether a router may answer instead.
     agentOptions = {
       provider,
       model: modelId,
       ...(maxTokens === undefined ? {} : { maxTokens }),
+      routingMode: ctx.agentDefaultModel.currentRoutingMode(),
     }
   }
   return { workspacePath, title, prompt, agentPreset, permissionPreset, agentOptions }

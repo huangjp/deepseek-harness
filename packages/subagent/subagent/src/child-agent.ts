@@ -105,11 +105,15 @@ export function resolveChildAgentOptions(
   const parentModel = parentOptions.model
   const parentReasoningEffort = parentOptions.reasoningEffort
   const parentMaxTokens = parentOptions.maxTokens
+  // The child follows the parent's Session mode: a parent that pinned a route
+  // delegates a pinned route, and an automatic parent delegates an automatic one.
+  const parentRoutingMode = parent.model.routingMode()
   const resolved: AgentOptions = {
     ...parentProvider !== undefined ? { provider: parentProvider } : {},
     ...parentModel !== undefined ? { model: parentModel } : {},
     ...parentReasoningEffort !== undefined ? { reasoningEffort: parentReasoningEffort } : {},
     ...parentMaxTokens !== undefined ? { maxTokens: parentMaxTokens } : {},
+    routingMode: parentRoutingMode,
     ...requested,
     subagentDepth: childDepth,
   }

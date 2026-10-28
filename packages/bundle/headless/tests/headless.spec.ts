@@ -68,6 +68,8 @@ interface BenchOptions {
   onWhenIdle?: (agent: Agent) => void
   /** Release child cleanup after the observed parent activity ends. */
   afterIdle?: () => void
+  /** Routing mode the deployment's default model declares. */
+  routingMode?: 'auto' | 'fixed'
 }
 
 const frameStates = new WeakMap<Agent, { attemptId: ReturnType<typeof LlmAttemptId>; revision: number; index: number }>()
@@ -200,7 +202,11 @@ async function bench(script: Script, options: BenchOptions = {}): Promise<{
   await ctx.plugin(SessionStore)
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(AgentRegistry)
-  await ctx.plugin(AgentDefaultModelConfig, { provider: 'test-provider', model: 'test-model' })
+  await ctx.plugin(AgentDefaultModelConfig, {
+    provider: 'test-provider',
+    model: 'test-model',
+    ...options.routingMode === undefined ? {} : { routingMode: options.routingMode },
+  })
   ctx.agents.setFactory({
     async createAgent(ownerCtx: Context, createOptions: CreateAgentOptions): Promise<AgentHandle> {
       const session = ctx.sessions.create(createOptions.sessionId, {
@@ -254,6 +260,19 @@ async function bench(script: Script, options: BenchOptions = {}): Promise<{
 }
 
 describe('headless runner', () => {
+  it('runs the task under the routing mode the deployment default declares', async () => {
+    let mode: string | undefined
+    const test = await bench({ afterPrompt(session, message, agent) {
+      mode = agent.options.routingMode
+      appendTurn(session, 1, message, 'answer', true)
+    } }, { routingMode: 'fixed' })
+    try {
+      const result = await test.run()
+      expect(result.code).toBe(0)
+      expect(mode).toBe('fixed')
+    } finally { await test.ctx.fiber.dispose() }
+  })
+
   it('does not reuse an earlier completed reason when the final turn has no terminal event', async () => {
     const test = await bench({ afterPrompt(session, message) {
       appendTurn(session, 1, message, 'earlier answer', true)
@@ -1274,7 +1293,7 @@ describe('headless runner', () => {
     const exited = new Promise<number>((resolve) => {
       ctx.provide('appExit', resolve)
     })
-    ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'p', model: 'm' }) } as never)
+    ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'p', model: 'm' }), currentRoutingMode: () => 'auto' as const } as never)
     ctx.provide('sessions', { flush: () => Promise.resolve(true) } as never)
     ctx.provide('agents', { create: () => Promise.reject(new Error('factory exploded')) } as never)
     apply(ctx, { task: 't' })
@@ -1291,7 +1310,7 @@ describe('headless runner', () => {
     const exited = new Promise<number>((resolve) => {
       ctx.provide('appExit', resolve)
     })
-    ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'p', model: 'm' }) } as never)
+    ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'p', model: 'm' }), currentRoutingMode: () => 'auto' as const } as never)
     ctx.provide('sessions', { flush: () => Promise.resolve(true) } as never)
     const rejected = {
       then(_resolve: (value: never) => void, reject: (reason: unknown) => void): void {
@@ -1312,7 +1331,7 @@ describe('headless runner', () => {
     internals.stderr = { write: () => true }
     ctx.provide('appExit', () => { exited = true })
     const services = ctx.plugin((child: Context) => {
-      child.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'p', model: 'm' }) } as never)
+      child.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'p', model: 'm' }), currentRoutingMode: () => 'auto' as const } as never)
       child.provide('sessions', {} as never)
       child.provide('agents', {} as never)
     })

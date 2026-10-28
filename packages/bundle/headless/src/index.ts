@@ -363,7 +363,9 @@ async function run(ctx: Context, config: Config, io: HeadlessIo): Promise<void> 
   }
 
   const selection = defaultModel.currentSelection()
-  const agentOptions: AgentOptions = { ...selection }
+  // The routing mode belongs to the deployment's default model, so a run that
+  // follows the default follows the mode the deployment declares with it.
+  const agentOptions: AgentOptions = { ...selection, routingMode: defaultModel.currentRoutingMode() }
   // This bundle composes no preset roster, so the model-facing rows sit in the
   // host plane and the agent reads them from the global layer. A deployment
   // that DOES configure one has to join it here first

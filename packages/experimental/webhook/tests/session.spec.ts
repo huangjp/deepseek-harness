@@ -93,6 +93,10 @@ function harness(options: HarnessOptions = {}): SessionHarness {
         calls.push('default-model')
         return { provider: 'default-provider', model: 'default-model', reasoningEffort: 'high' }
       },
+      currentRoutingMode() {
+        calls.push('default-routing-mode')
+        return 'fixed' as const
+      },
     },
     agentPresets: {
       async resolve(name: string) {
@@ -179,6 +183,7 @@ describe('webhook Session creation', () => {
     await create(test)
     expect(test.calls).toEqual([
       'default-model',
+      'default-routing-mode',
       'permission-resolve:read-only',
       'preset-resolve:standard',
       'standing:standard',
@@ -200,22 +205,22 @@ describe('webhook Session creation', () => {
     })
   })
 
-  it('uses a complete explicit model without consulting the default', async () => {
+  it('uses a complete explicit model without consulting the default selection', async () => {
     const test = harness()
     await create(test, { ...test.request, model: { provider: 'p', model: 'm', maxTokens: 10 } })
     expect(test.calls).not.toContain('default-model')
     const withoutCap = harness()
     await create(withoutCap, { ...withoutCap.request, model: { provider: 'p', model: 'm' } })
     expect(withoutCap.calls).not.toContain('default-model')
-    expect(withoutCap.agentOptions).toEqual({ provider: 'p', model: 'm' })
-    expect(test.agentOptions).toEqual({ provider: 'p', model: 'm', maxTokens: 10 })
+    expect(withoutCap.agentOptions).toEqual({ provider: 'p', model: 'm', routingMode: 'fixed' })
+    expect(test.agentOptions).toEqual({ provider: 'p', model: 'm', maxTokens: 10, routingMode: 'fixed' })
   })
 
-  it('passes the default route and reasoning effort as initial Agent options', async () => {
+  it('passes the default route, reasoning effort, and routing mode as initial Agent options', async () => {
     const test = harness()
     await create(test)
     expect(test.agentOptions).toEqual({
-      provider: 'default-provider', model: 'default-model', reasoningEffort: 'high',
+      provider: 'default-provider', model: 'default-model', reasoningEffort: 'high', routingMode: 'fixed',
     })
   })
 

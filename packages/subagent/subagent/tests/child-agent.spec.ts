@@ -14,6 +14,7 @@ function parentAgent(): Agent {
       reasoningEffort: ReasoningEffortId('high'),
       maxTokens: 512,
     },
+    model: { routingMode: () => 'auto' as const },
     session: Session.create(id),
   } as Agent
 }
@@ -25,8 +26,15 @@ describe('child Agent options', () => {
       model: 'parent-model',
       reasoningEffort: 'high',
       maxTokens: 512,
+      routingMode: 'auto',
       subagentDepth: 1,
     })
+  })
+
+  it('inherits the parent routing mode so a pinned parent delegates a pinned route', () => {
+    const parent = parentAgent()
+    parent.model.routingMode = () => 'fixed'
+    expect(resolveChildAgentOptions(parent, undefined, 1)).toMatchObject({ routingMode: 'fixed' })
   })
 
   it('clears an inherited effort when the child route changes', () => {
@@ -34,6 +42,7 @@ describe('child Agent options', () => {
       provider: 'parent-provider',
       model: 'child-model',
       maxTokens: 512,
+      routingMode: 'auto',
       subagentDepth: 1,
     })
   })
@@ -48,6 +57,7 @@ describe('child Agent options', () => {
       model: 'child-model',
       reasoningEffort: 'max',
       maxTokens: 512,
+      routingMode: 'auto',
       subagentDepth: 1,
     })
   })
@@ -70,6 +80,7 @@ describe('child Agent options', () => {
       model: 'current-model',
       reasoningEffort: 'low',
       maxTokens: 512,
+      routingMode: 'auto',
       subagentDepth: 1,
     })
   })

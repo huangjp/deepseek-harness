@@ -222,6 +222,7 @@ describe('WebhookRuntime', () => {
     const attachSession = vi.fn(async () => {})
     ctx.provide('agentDefaultModel', {
       currentSelection: () => ({ provider: 'p', model: 'm' }),
+      currentRoutingMode: () => 'auto' as const,
     } as never)
     ctx.provide('permissionPresets', {
       resolve: () => ({}),
