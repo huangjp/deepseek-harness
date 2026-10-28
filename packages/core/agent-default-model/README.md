@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Give newly created agents a shared default provider and model when their sessions do not specify one. Provider, model, and reasoning effort are live Config fields. Saved selections update the active profile patch and apply to subsequent reads; per-session selection belongs to the [Agent model API](../agent/README.md).
+Give newly created agents a shared default provider and model when their sessions do not specify one. Provider, model, reasoning effort, and routing mode are live Config fields. Saved selections update the active profile patch and apply to subsequent reads; per-session selection belongs to the [Agent model API](../agent/README.md).
 
 ## Table of Contents
 
@@ -42,6 +42,7 @@ The composition requires a provider and model. Consumers read the live reference
 |---|---|---|
 | `provider` | required | Registered provider route for fresh agents |
 | `model` | required | Provider-owned model id for fresh agents |
+| `routingMode` | `auto` | Routing mode fresh agents follow while they record none of their own: `auto` leaves the route to the deployment's router, `fixed` pins the session to its own model |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-agent-default-model) lists every accepted field. `reasoningEffort` is optional; saving a selection without it removes that field from the profile’s complete config override.
 
@@ -54,7 +55,14 @@ const selection = ctx.agentDefaultModel.currentSelection()
 await ctx.agentDefaultModel.saveSelection({ provider, model, reasoningEffort: 'high' })
 ```
 
-Without a configuration editor, `saveSelection()` is a no-op. The service does not validate catalog membership; the consumer opening a model request owns availability diagnostics.
+`currentRoutingMode()` returns the deployment's default routing mode; `saveRoutingMode()` stores that default for later agents. The mode outlives the Session that chose it, so a Session that pinned a model keeps that choice in the Sessions that follow.
+
+```text
+const mode = ctx.agentDefaultModel.currentRoutingMode()
+await ctx.agentDefaultModel.saveRoutingMode('fixed')
+```
+
+Without a configuration editor, `saveSelection()` and `saveRoutingMode()` are no-ops. The service does not validate catalog membership; the consumer opening a model request owns availability diagnostics.
 
 -----
 
@@ -68,7 +76,7 @@ This section explains how the service realizes the behavior above; the observabl
 
 ### Design concept
 
-The service retains its validated Config references and samples them in `currentSelection()`. `saveSelection()` captures the submitted values and serializes profile writes in submission order, including overlapping callers. Each caller observes its own write failure; a rejected write does not prevent later saves. Session-specific selection takes precedence in the consumer.
+The service retains its validated Config references and samples them in `currentSelection()` and `currentRoutingMode()`. `saveSelection()` and `saveRoutingMode()` capture the submitted values and serialize profile writes in submission order, including overlapping callers. Each caller observes its own write failure; a rejected write does not prevent later saves. Session-specific selection takes precedence in the consumer.
 
 ### Source map
 
@@ -78,7 +86,7 @@ The service retains its validated Config references and samples them in `current
 
 ### Behavior notes
 
-`currentSelection()` returns a detached selection. A captured selection stays stable while later operations read updated Config references.
+`currentSelection()` returns a detached selection. A captured selection stays stable while later operations read updated Config references. A saved selection keeps the other keys of its profile entry, so saving a route does not drop the entry's routing mode.
 
 </details>
 

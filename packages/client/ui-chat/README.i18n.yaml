@@ -12,8 +12,8 @@
   en: 4f2d50107db6c4f8
   zh: ea7ccfcce8f1849e
 /deepseek-ai-dsh-client-ui-chat/table-of-contents:
-  en: 41cd21266011d571
-  zh: 3172d1a2acbb27b7
+  en: 6673d5bdb49dc7a0
+  zh: 61be236040515d9a
 /deepseek-ai-dsh-client-ui-chat/reference-previews:
   en: a05d85ff4949b526
   zh: 7261ffc98665e9e7
@@ -27,8 +27,11 @@
   en: cfdfe3d99d3f4e09
   zh: 9330bad3d3f7a689
 /deepseek-ai-dsh-client-ui-chat/completed-turn-footer:
-  en: 382821ca3ffa60dd
-  zh: 9840ffa07c13082a
+  en: b0b43eb3101b2e8f
+  zh: 6813792b8a245fb0
+/deepseek-ai-dsh-client-ui-chat/route-attribution:
+  en: ff767f9fcc3be714
+  zh: 8f37ed787452d345
 /deepseek-ai-dsh-client-ui-chat/turn-process-folding:
   en: b0d806604bc17006
   zh: 18dabe5dc2d0d419
@@ -39,8 +42,8 @@
   en: 009ecb4fecd4ee9e
   zh: ec2714337a1102c5
 /deepseek-ai-dsh-client-ui-chat/model-experience:
-  en: c17b4dd43a61c569
-  zh: f7414309810c3a08
+  en: deda113be9a001b1
+  zh: 889abe1a16c86092
 /deepseek-ai-dsh-client-ui-chat/model-experience/kv-cache-effect:
   en: 15a7151ff9268f15
   zh: 6eae68c718be579b

@@ -70,6 +70,14 @@
   line-height: 18px;
 }
 
+/* Route attribution: names the provider/model route that answered this reply.
+   Quieter than the body, and one tier below it on the font ladder. */
+.route {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+}
+
 /* Finalized footer offset (figma 43:32997); chrome lives in MessageIconActions. */
 .actions {
   margin-top: 16px;

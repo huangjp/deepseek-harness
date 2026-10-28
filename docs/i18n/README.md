@@ -63,6 +63,7 @@ Generated English sources omit the language switcher that ordinary authored sour
 - [translation-prompt.md](translation-prompt.md) — the automated pipeline's prompt template; its body is machine-consumed verbatim, so a paired translation would change pipeline behavior.
 - [review-ownership/README.md](../../.github/review-ownership/README.md) — repository-internal approval policy maintained in English only.
 - `.agents/notes/archived/` — frozen historical triplets. [`verify-archived-agent-notes`](../../scripts/verify-archived-agent-notes.ts) validates their completeness and content seals; translation maintenance must never rewrite them.
+- [apps/desktop/resources/skills/fiction-crafter/README.md](../../apps/desktop/resources/skills/fiction-crafter/README.md) — a bundled third-party skill's own README, shipped verbatim from its upstream; translating a vendored document would fork it from its source.
 
 **Universal requirement**: every current or future document in scope must merge as a complete bilingual pair. [scripts/translation-pairing.manifest.json](../../scripts/translation-pairing.manifest.json) contains only explicit exclusions; there is no per-file rollout list, date cutoff, or README-specific policy class.
 

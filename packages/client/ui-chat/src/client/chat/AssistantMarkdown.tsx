@@ -5,7 +5,7 @@ import type { ReactNode } from 'react'
 import { JsonBlock, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MarkdownFileMentions, MarkdownPathImages } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatNodeOwnerProps, ChatViewSlotProps, UseDisclosure, UsePresentation, UseGroupAction } from '../contract/slots.ts'
-import type { AssistantBlock } from '../contract/snapshot.ts'
+import type { AssistantBlock, AssistantProviderMetadataView } from '../contract/snapshot.ts'
 import { markdownLabels } from '../markdown-labels.ts'
 import { ReasoningRow } from './ReasoningRow.tsx'
 import css from './AssistantMarkdown.module.css'
@@ -50,6 +50,8 @@ export interface AssistantMarkdownProps extends
   revealProcess?: (() => void) | undefined
   /** Resolved prose file mentions for this Assistant's closing turn. */
   mentions?: MarkdownFileMentions | undefined
+  /** Provider/model route that answered this reply; absent when the source names none. */
+  providerMetadata?: AssistantProviderMetadataView | undefined
   /** The owning view's locale seat, passed down as a plain prop. */
   t: ChatViewSlotProps['t']
 }
@@ -57,7 +59,7 @@ export interface AssistantMarkdownProps extends
 /** Renders non-blank reasoning blocks as independent disclosures alongside the response. */
 export const AssistantMarkdown = memo(function AssistantMarkdown({
   blocks, streaming, textInteractionSource = false, interrupted, loadImage, groupPart, useDisclosure,
-  reasoningHidden = false, usePresentation, revealProcess, mentions, renderSlot, useGroupAction, t,
+  reasoningHidden = false, usePresentation, revealProcess, mentions, providerMetadata, renderSlot, useGroupAction, t,
 }: AssistantMarkdownProps) {
   // Stable per locale revision (t identity changes on switch): a fresh object
   // per render would rebuild MarkdownText's component table every chunk.
@@ -152,6 +154,11 @@ export const AssistantMarkdown = memo(function AssistantMarkdown({
         {interrupted && (groupPart === undefined || groupPart === 'response'
           || !blocks.some(block => block.kind !== 'reasoning' && block.kind !== 'tool-call'))
           && <span className={css.stopped}>{t('message.stopped')}</span>}
+        {providerMetadata !== undefined && groupPart !== 'reasoning' && (
+          <span className={css.route} data-chat-route>
+            {t('message.route', { route: `${providerMetadata.provider}/${providerMetadata.model}` })}
+          </span>
+        )}
       </div>
     </div>
   )

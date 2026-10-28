@@ -35,6 +35,7 @@ import {
 import { createPortal } from 'react-dom'
 import clsx from 'clsx'
 import type { ModelReasoningEffort, ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
+import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import {
   IconCheckOutlineRegular, IconChevronDownOutlineRegular, IconChevronRightOutlineRegular, IconCloseFillRegular,
   IconDataOutlineRegular, IconWarningOutlineRegular, Input, isMobileDevice, rankByName, StateDot, Toast,
@@ -64,7 +65,7 @@ const MEASURE_STYLE: CSSProperties = { visibility: 'hidden', left: 0, top: 0 }
  * @returns the trigger and, while open, the two-level menu.
  */
 export function ModelSelect(
-  { locked, available, directory, load, select, t, renderSlot }:
+  { locked, available, directory, load, select, selectAuto, t, renderSlot }:
   ModelSelectInjected & Pick<PropsRuntime<'conversation.input.model'>, 'locked'> & PropsLocale<'model'>
     & Omit<PropsRenderSlots<'conversation.input.model.label'>, 'SessionProvider'>,
 ) {
@@ -150,6 +151,15 @@ export function ModelSelect(
     ], [reasoning, t])
   const { pending } = state
   const busy = pending !== null
+  const pendingSelection = pending?.selection ?? null
+  // `auto` leaves the route to the Host's router; `fixed` pins the model the
+  // session selected, and no router may answer with another route. Without a
+  // router to route with, the session counts as pinned.
+  const automatic = state.routingAvailable && state.routingMode === 'auto'
+  // The deployment offers automatic routing, so the entry belongs in the menu.
+  const routingEntry = state.routingAvailable
+  // The routing entry takes the first item slot, so the model rows shift by one.
+  const modelItemOffset = routingEntry ? 1 : 0
 
   const reload = (): void => {
     lastActionRef.current = 'load'
@@ -211,9 +221,9 @@ export function ModelSelect(
 
   useLayoutEffect(() => {
     if (open && pane === 'model' && activeModelIndex >= 0) {
-      itemRefs.current[activeModelIndex]?.scrollIntoView({ block: 'nearest' })
+      itemRefs.current[activeModelIndex + modelItemOffset]?.scrollIntoView({ block: 'nearest' })
     }
-  }, [open, pane, activeModelIndex, visibleModels])
+  }, [open, pane, activeModelIndex, visibleModels, modelItemOffset])
 
   // The portal needs viewport coordinates from the trigger and the menu's
   // measured size before paint. Slot content can resize without parent renders.
@@ -391,20 +401,35 @@ export function ModelSelect(
     })
   }
 
-  const submit = (selection: ModelSelection): void => {
+  const submitChange = (run: () => Promise<RemoteResult<void> | undefined>): void => {
     lastActionRef.current = 'select'
     // Disabled option rows cannot retain focus while a selection is pending.
     setSelectionFocus(true)
     triggerRef.current?.focus()
-    void select(selection).then(settleSelection)
+    void run().then(settleSelection)
+  }
+
+  const submit = (selection: ModelSelection): void => {
+    submitChange(() => select(selection))
   }
 
   const choose = (selection: ModelSelection): void => {
-    if (state.current?.provider === selection.provider && state.current.model === selection.model) {
+    // While the session routes automatically, picking the route it happens to
+    // use still pins it: the user asked for that model, not for the router.
+    if (!automatic && state.current?.provider === selection.provider && state.current.model === selection.model) {
       closeAfterSelection()
       return
     }
     submit(selection)
+  }
+
+  /** Hand the route back to the Host's router; the pinned model stops applying. */
+  const chooseAuto = (): void => {
+    if (automatic) {
+      closeAfterSelection()
+      return
+    }
+    submitChange(() => selectAuto())
   }
 
   const chooseEffort = (effort: string | undefined): void => {
@@ -424,16 +449,20 @@ export function ModelSelect(
   const waiting = currentChoice === undefined && state.status === 'loading'
   const modelLabel = waiting
     ? t('trigger.loading')
-    : currentChoice?.model.name
-      ?? t('trigger.fallback')
-  const triggerLabel = effortLabel === undefined ? modelLabel : `${modelLabel} · ${effortLabel}`
+    : automatic
+      ? t('routing.label')
+      : currentChoice?.model.name
+        ?? t('trigger.fallback')
+  const triggerLabel = automatic || effortLabel === undefined ? modelLabel : `${modelLabel} · ${effortLabel}`
   const triggerAria = waiting
     ? t('trigger.loading')
-    : currentChoice === undefined
-      ? t('trigger.selectAria')
-      : effortLabel === undefined
-        ? t('trigger.aria', { model: modelLabel })
-        : t('trigger.ariaEffort', { model: modelLabel, effort: effortLabel })
+    : automatic
+      ? t('routing.aria')
+      : currentChoice === undefined
+        ? t('trigger.selectAria')
+        : effortLabel === undefined
+          ? t('trigger.aria', { model: modelLabel })
+          : t('trigger.ariaEffort', { model: modelLabel, effort: effortLabel })
   const renderModelLabel = (
     provider: ModelLabelOwner['provider'], model: ModelLabelOwner['model'],
     placement: ModelLabelOwner['placement'], selected: boolean,
@@ -485,9 +514,11 @@ export function ModelSelect(
       >
         <IconDataOutlineRegular className={css.triggerIcon} size={16} />
         <span className={css.triggerLabel}>
-          {currentChoice === undefined ? modelLabel : renderModelLabel(currentChoice.group.provider, currentChoice.model, 'trigger', true)}
+          {automatic
+            ? t('routing.label')
+            : currentChoice === undefined ? modelLabel : renderModelLabel(currentChoice.group.provider, currentChoice.model, 'trigger', true)}
         </span>
-        {effortLabel !== undefined && <span className={css.triggerEffort}>{effortLabel}</span>}
+        {!automatic && effortLabel !== undefined && <span className={css.triggerEffort}>{effortLabel}</span>}
         {busy
           ? <StateDot state="ongoing" />
           : <IconChevronDownOutlineRegular className={clsx(css.chevron, open && css.chevronOpen)} />}
@@ -511,11 +542,13 @@ export function ModelSelect(
               <button ref={itemRef()} type="button" role="menuitem" className={css.cell} onClick={() => { drill('model') }}>
                 <span className={css.cellLabel}>{t('menu.model')}</span>
                 <span className={css.cellValue}>
-                  {currentChoice === undefined ? modelLabel : renderModelLabel(currentChoice.group.provider, currentChoice.model, 'menu', true)}
+                  {automatic
+                    ? t('routing.label')
+                    : currentChoice === undefined ? modelLabel : renderModelLabel(currentChoice.group.provider, currentChoice.model, 'menu', true)}
                 </span>
                 <IconChevronRightOutlineRegular className={css.cellChevron} />
               </button>
-              {reasoning !== undefined && (
+              {reasoning !== undefined && !automatic && (
                 <button ref={itemRef()} type="button" role="menuitem" className={css.cell} onClick={() => { drill('effort') }}>
                   <span className={css.cellLabel}>{t('menu.effort')}</span>
                   <span className={css.cellValue}>{effortLabel}</span>
@@ -577,14 +610,36 @@ export function ModelSelect(
                 className={clsx(css.groups, 'scrollable')}
                 role="menu"
                 aria-label={t('menu.model')}
-                hidden={filteredGroups.length === 0}
+                hidden={filteredGroups.length === 0 && !routingEntry}
               >
+                {routingEntry && (
+                  <button
+                    ref={itemRef()}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={automatic}
+                    className={clsx(css.option, css.modelOption, automatic && css.selected)}
+                    tabIndex={showSearch ? -1 : 0}
+                    disabled={busy}
+                    onClick={() => { chooseAuto() }}
+                  >
+                    <span className={css.optionCopy}>
+                      <span className={css.modelName}>{t('routing.label')}</span>
+                    </span>
+                    <span className={css.check}>
+                      {pending?.mode === 'auto'
+                        ? <StateDot state="ongoing" />
+                        : automatic ? <IconCheckOutlineRegular /> : null}
+                    </span>
+                  </button>
+                )}
                 {filteredGroups.map((group) => {
                   return (
                     <MenuGroup key={group.id} label={group.provider.name}>
                       {group.models.map((model) => {
                         const index = modelIndex++
-                        const selected = state.current?.provider === group.id && state.current.model === model.id
+                        const selected = !automatic
+                          && state.current?.provider === group.id && state.current.model === model.id
                         return (
                           <button
                             ref={itemRef()}
@@ -600,7 +655,7 @@ export function ModelSelect(
                             )}
                             onMouseMove={busy || index === activeModelIndex ? undefined : () => {
                               if (showSearch) setHighlightedIndex(index)
-                              else itemRefs.current[index]?.focus()
+                              else itemRefs.current[index + modelItemOffset]?.focus()
                             }}
                             key={model.id}
                             title={model.name}
@@ -611,7 +666,7 @@ export function ModelSelect(
                               <span className={css.modelName}>{renderModelLabel(group.provider, model, 'option', selected)}</span>
                             </span>
                             <span className={css.check}>
-                              {pending?.provider === group.id && pending.model === model.id
+                              {pendingSelection?.provider === group.id && pendingSelection.model === model.id
                                 ? <StateDot state="ongoing" />
                                 : selected ? <IconCheckOutlineRegular /> : null}
                             </span>
@@ -653,8 +708,8 @@ export function ModelSelect(
                       <span className={css.modelName}>{level.label}</span>
                     </span>
                     <span className={css.check}>
-                      {pending !== null && pending.provider === state.current?.provider
-                        && pending.model === state.current.model && pending.reasoningEffort === level.effort
+                      {pendingSelection !== null && pendingSelection.provider === state.current?.provider
+                        && pendingSelection.model === state.current.model && pendingSelection.reasoningEffort === level.effort
                         ? <StateDot state="ongoing" />
                         : effectiveEffort === level.effort ? <IconCheckOutlineRegular /> : null}
                     </span>

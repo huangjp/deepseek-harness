@@ -1,6 +1,7 @@
 /** Browser-safe request, result, and lifecycle vocabulary for the Session Remote service. */
 
 import type {} from '@deepseek-ai/dsh-agent/types'
+import type { RoutingMode } from '@deepseek-ai/dsh-agent/types'
 import type { NativeFileApplication } from '@deepseek-ai/dsh-native-command/types'
 import type {
   AttachmentIdType, ImageAttachmentLimits, ImageAttachmentRef, ImageMediaType,
@@ -129,6 +130,10 @@ export interface ModelCatalogFailure {
 /** Host-generation model catalog and the default used by unconfigured Sessions. */
 export interface ModelCatalog {
   readonly default: ModelSelection
+  /** Routing mode a Session follows while it records none of its own. */
+  readonly defaultRoutingMode: RoutingMode
+  /** Whether the deployment offers automatic routing, so a Session may pick it. */
+  readonly routingAvailable: boolean
   /** Provider routes with at least one currently available catalog model. */
   readonly routableProviders: readonly string[]
   readonly groups: readonly ModelProviderGroup[]
@@ -275,14 +280,35 @@ export interface SessionCreateValue {
   readonly agentPreset?: string
 }
 
-/** Session model-selection request. */
-export interface SessionSelectModelRequest extends ModelSelection {
+/**
+ * Session model-selection request.
+ *
+ * A request that names a provider and a model pins that route and switches the
+ * Session to the `fixed` routing mode. A request that carries only a routing
+ * mode changes the mode and leaves the named route alone.
+ */
+export interface SessionSelectModelRequest {
   readonly sessionId: SessionId
+  /** Provider route; absent when the request only changes the routing mode. */
+  readonly provider?: string
+  /** Provider-owned model id; absent when the request only changes the routing mode. */
+  readonly model?: string
+  /** Adapter-owned reasoning effort. */
+  readonly reasoningEffort?: string
+  /** Routing mode to apply; absent keeps the Session's current mode. */
+  readonly routingMode?: RoutingMode
 }
 
-/** Accepted model selection after Host resolution. */
+/**
+ * Accepted model selection after Host resolution.
+ *
+ * `selected` is null when the request only changed the routing mode: no route
+ * was named, so none was chosen.
+ */
 export interface SessionSelectModelValue {
-  readonly selected: ModelSelection
+  readonly selected: ModelSelection | null
+  /** Routing mode the Session follows from its next model step. */
+  readonly routingMode: RoutingMode
 }
 
 /** Session rename request. */

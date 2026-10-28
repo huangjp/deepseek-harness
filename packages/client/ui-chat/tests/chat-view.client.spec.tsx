@@ -1848,6 +1848,28 @@ describe('ChatView', () => {
       ])
   })
 
+  it('names the route that answered an assistant message', () => {
+    const h = makeHarness({
+      nodes: [
+        user(1, 'do the thing'),
+        {
+          ...assistant(2, 'routed answer'),
+          providerMetadata: { provider: 'minimax', model: 'MiniMax-M3.1-Flash' },
+        },
+      ],
+    })
+    const view = render(<h.ChatView {...h.props} />)
+    expect(view.getByText('routed answer')).toBeTruthy()
+    expect(view.getByText('由 minimax/MiniMax-M3.1-Flash 返回')).toBeTruthy()
+  })
+
+  it('omits the route attribution for an assistant message that names none', () => {
+    const h = makeHarness({ nodes: [user(1, 'do the thing'), assistant(2, 'plain answer')] })
+    const view = render(<h.ChatView {...h.props} />)
+    expect(view.getByText('plain answer')).toBeTruthy()
+    expect(view.container.querySelector('[data-chat-route]')).toBeNull()
+  })
+
   it('renders Host-pending steering at the flow tail and hands off to the durable node', withClock(2_000, () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', {

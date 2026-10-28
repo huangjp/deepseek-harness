@@ -68,6 +68,7 @@ function fakeAgent(current = { provider: 'p0', model: 'm0' }): { readonly agent:
       select: (target: { provider: string; model: string }) => {
         selected.push(`${target.provider}/${target.model}`)
       },
+      routingMode: () => 'auto',
     },
   } as unknown as Agent
   return { agent, selected }

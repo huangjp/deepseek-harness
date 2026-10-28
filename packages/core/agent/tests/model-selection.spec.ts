@@ -74,7 +74,8 @@ describe('Session model selection', () => {
     expect(h.current()).toBeUndefined()
     h.agent.options.model = 'a0'
     expect(h.current()).toEqual(INITIAL)
-    expect(h.ctx.sessionProjections.snapshot(h.session).values.modelSelection).toEqual({ lastUsed: null, next: null })
+    expect(h.ctx.sessionProjections.snapshot(h.session).values.modelSelection)
+      .toEqual({ lastUsed: null, next: null, routingMode: null })
 
     h.record(INITIAL)
     expect(h.session.snapshotEvents()).toMatchObject([{ type: 'model/selection', data: INITIAL }])
@@ -108,7 +109,7 @@ describe('Session model selection', () => {
     const restoredModel = new AgentModel(() => projection.stateOf(restored), restored, {})
     expect(restoredModel.current()).toEqual(selected)
     h.header(selected)
-    expect(h.state()).toEqual({ lastUsed: selected, pending: null })
+    expect(h.state()).toEqual({ lastUsed: selected, pending: null, routingMode: null })
     expect(h.current()).toEqual(selected)
     const state = h.state()
     h.header(selected)
@@ -120,9 +121,10 @@ describe('Session model selection', () => {
     const selected = { provider: 'beta', model: 'b1' }
     h.record(selected)
     h.header({ ...selected, reasoningEffort: ReasoningEffortId('high') }, { reasoningEffort: true })
-    expect(h.state()).toEqual({ lastUsed: selected, pending: null })
+    expect(h.state()).toEqual({ lastUsed: selected, pending: null, routingMode: null })
     expect(h.current()).toEqual(selected)
-    expect(h.ctx.sessionProjections.snapshot(h.session).values.modelSelection).toEqual({ lastUsed: selected, next: selected })
+    expect(h.ctx.sessionProjections.snapshot(h.session).values.modelSelection)
+      .toEqual({ lastUsed: selected, next: selected, routingMode: null })
     h.header({ ...selected, reasoningEffort: ReasoningEffortId('low') })
     expect(h.current()).toEqual({ ...selected, reasoningEffort: 'low' })
   })
@@ -145,6 +147,60 @@ describe('Session model selection', () => {
     expect(h.session.snapshotEvents()).toHaveLength(2)
     h.record(INITIAL)
     expect(h.session.snapshotEvents()).toHaveLength(2)
+  })
+})
+
+describe('Session routing mode', () => {
+  it('folds a routing mode into the projection and publishes it on the wire', async () => {
+    const h = await harness()
+    expect(h.state()).toEqual({ lastUsed: null, pending: null, routingMode: null })
+    h.agent.model.setRoutingMode('fixed')
+    expect(h.session.snapshotEvents())
+      .toMatchObject([{ type: 'model/routing-mode', data: { mode: 'fixed' } }])
+    expect(h.state()).toEqual({ lastUsed: null, pending: null, routingMode: 'fixed' })
+    expect(h.ctx.sessionProjections.snapshot(h.session).values.modelSelection)
+      .toEqual({ lastUsed: null, next: null, routingMode: 'fixed' })
+  })
+
+  it('reuses fold state for a routing mode the Session already recorded', async () => {
+    const h = await harness()
+    h.session.append('model/routing-mode', { mode: 'fixed' })
+    const state = h.state()
+    h.session.append('model/routing-mode', { mode: 'fixed' })
+    expect(h.state()).toBe(state)
+    expect(h.state()?.routingMode).toBe('fixed')
+  })
+
+  it('reads the recorded mode, then the Agent option, then auto', async () => {
+    const h = await harness()
+    expect(h.agent.model.routingMode()).toBe('auto')
+    const configured = await harness({ routingMode: 'fixed' })
+    expect(configured.agent.model.routingMode()).toBe('fixed')
+    configured.agent.model.setRoutingMode('auto')
+    expect(configured.agent.model.routingMode()).toBe('auto')
+  })
+
+  it('appends a routing mode change and leaves an equal recorded mode alone', async () => {
+    const h = await harness()
+    h.agent.model.setRoutingMode('fixed')
+    expect(h.session.snapshotEvents())
+      .toMatchObject([{ type: 'model/routing-mode', data: { mode: 'fixed' } }])
+    h.agent.model.setRoutingMode('fixed')
+    expect(h.session.snapshotEvents()).toHaveLength(1)
+  })
+
+  it('keeps the routing mode when a request header retires a selection', async () => {
+    const h = await harness()
+    h.agent.model.setRoutingMode('fixed')
+    h.record({ provider: 'beta', model: 'b1' })
+    h.header({ provider: 'beta', model: 'b1' })
+    expect(h.state()).toEqual({
+      lastUsed: { provider: 'beta', model: 'b1' },
+      pending: null,
+      routingMode: 'fixed',
+    })
+    expect(h.ctx.sessionProjections.snapshot(h.session).values.modelSelection)
+      .toEqual({ lastUsed: { provider: 'beta', model: 'b1' }, next: { provider: 'beta', model: 'b1' }, routingMode: 'fixed' })
   })
 })
 

@@ -51,6 +51,8 @@ function controller(value?: Partial<ModelRouterSettings>, writable = true) {
     ok: true,
     value: {
       default: { provider: 'alpha', model: 'alpha-fast' },
+      defaultRoutingMode: 'auto',
+      routingAvailable: true,
       routableProviders: ['alpha', 'beta'],
       groups: GROUPS,
       failures: [],

@@ -25,7 +25,7 @@ interface CompatSwitch {
   /** The `compat` field the switch writes. */
   key: string
   /** Copy key naming the switch. */
-  label: ModelsKey
+  labelKey: ModelsKey
 }
 
 /**
@@ -34,16 +34,16 @@ interface CompatSwitch {
  * ignored at runtime, so only real ones are listed.
  */
 const SWITCHES: readonly CompatSwitch[] = [
-  { key: 'supportsTemperature', label: 'modelCompatSupportsTemperature' },
-  { key: 'forceAdaptiveThinking', label: 'modelCompatForceAdaptiveThinking' },
-  { key: 'supportsReasoningEffort', label: 'modelCompatSupportsReasoningEffort' },
-  { key: 'supportsDeveloperRole', label: 'modelCompatSupportsDeveloperRole' },
-  { key: 'requiresThinkingAsText', label: 'modelCompatRequiresThinkingAsText' },
-  { key: 'requiresToolResultName', label: 'modelCompatRequiresToolResultName' },
-  { key: 'supportsStrictTools', label: 'modelCompatSupportsStrictTools' },
-  { key: 'supportsStore', label: 'modelCompatSupportsStore' },
-  { key: 'supportsUsageInStreaming', label: 'modelCompatSupportsUsageInStreaming' },
-  { key: 'supportsFinishReason', label: 'modelCompatSupportsFinishReason' },
+  { key: 'supportsTemperature', labelKey: 'modelCompatSupportsTemperature' },
+  { key: 'forceAdaptiveThinking', labelKey: 'modelCompatForceAdaptiveThinking' },
+  { key: 'supportsReasoningEffort', labelKey: 'modelCompatSupportsReasoningEffort' },
+  { key: 'supportsDeveloperRole', labelKey: 'modelCompatSupportsDeveloperRole' },
+  { key: 'requiresThinkingAsText', labelKey: 'modelCompatRequiresThinkingAsText' },
+  { key: 'requiresToolResultName', labelKey: 'modelCompatRequiresToolResultName' },
+  { key: 'supportsStrictTools', labelKey: 'modelCompatSupportsStrictTools' },
+  { key: 'supportsStore', labelKey: 'modelCompatSupportsStore' },
+  { key: 'supportsUsageInStreaming', labelKey: 'modelCompatSupportsUsageInStreaming' },
+  { key: 'supportsFinishReason', labelKey: 'modelCompatSupportsFinishReason' },
 ]
 
 /**
@@ -108,7 +108,7 @@ export function ModelCompat({ value, position, disabled, t, onChange }: ModelCom
         {SWITCHES.map(option => (
           <Checkbox
             key={option.key}
-            label={t(option.label)}
+            label={t(option.labelKey)}
             checked={stored[option.key] === true}
             disabled={disabled}
             onChange={(checked) => { toggle(option.key, checked) }}

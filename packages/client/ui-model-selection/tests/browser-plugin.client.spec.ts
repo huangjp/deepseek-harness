@@ -71,12 +71,15 @@ async function bench(locale: 'zh' | 'en' = 'zh') {
   const ctx = new Context()
   let defaultSelection: ModelSelection = { provider: 'deepseek-official', model: 'deepseek-v4-flash' }
   let selected = defaultSelection
-  const calls = { models: 0, select: 0 }
+  const calls = { models: 0, select: 0, selectAuto: 0 }
   const projections = new Map<SessionId, SnapshotStore<ModelSelectionProjection | undefined>>()
   // Whether the Host advertises available models for the current route.
   let routable = true
   let catalogFailure = false
   let groups = GROUPS
+  // Whether the Host offers automatic routing, and which mode it defaults to.
+  let routingAvailable = false
+  let routingMode: 'auto' | 'fixed' = 'auto'
   let selectionFailure: RemoteError<'session/writer-held'> | undefined
   const sessionRemote = {
     modelCatalog: () => {
@@ -89,21 +92,30 @@ async function bench(locale: 'zh' | 'en' = 'zh') {
           routableProviders: routable ? ['deepseek-official'] : [],
           groups: routable ? groups : [],
           failures: [],
+          defaultRoutingMode: routingMode,
+          routingAvailable,
         },
       })
     },
-    selectModel: (payload: { sessionId: SessionId; provider: string; model: string; reasoningEffort?: string }) => {
+    selectModel: (payload: { sessionId: SessionId; provider?: string; model?: string; reasoningEffort?: string; routingMode?: 'auto' | 'fixed' }) => {
+      if (payload.routingMode !== undefined) {
+        calls.selectAuto += 1
+        if (selectionFailure !== undefined) return Promise.resolve({ ok: false as const, error: selectionFailure })
+        routingMode = payload.routingMode
+        projections.get(payload.sessionId)?.set({ lastUsed: null, next: null, routingMode })
+        return Promise.resolve({ ok: true as const, value: { selected: null, routingMode } })
+      }
       calls.select += 1
       if (selectionFailure !== undefined) return Promise.resolve({ ok: false as const, error: selectionFailure })
       selected = {
-        provider: payload.provider,
-        model: payload.model,
+        provider: payload.provider!,
+        model: payload.model!,
         ...payload.reasoningEffort === undefined
           ? {}
           : { reasoningEffort: ReasoningEffortId(payload.reasoningEffort) },
       }
-      projections.get(payload.sessionId)?.set({ lastUsed: null, next: selected })
-      return Promise.resolve({ ok: true as const, value: { selected } })
+      projections.get(payload.sessionId)?.set({ lastUsed: null, next: selected, routingMode: null })
+      return Promise.resolve({ ok: true as const, value: { selected, routingMode } })
     },
   }
   const remote = Object.assign(new TestRemote(ctx), { session: sessionRemote })
@@ -167,6 +179,7 @@ async function bench(locale: 'zh' | 'en' = 'zh') {
     const projection = createSnapshotStore<ModelSelectionProjection | undefined>({
       lastUsed: null,
       next: null,
+      routingMode: null,
     })
     projections.set(id, projection)
     const binding = {
@@ -197,6 +210,13 @@ async function bench(locale: 'zh' | 'en' = 'zh') {
     setProjected: (id: SessionId, value: ModelSelectionProjection) => { projections.get(id)?.set(value) },
     address: (id: SessionId) => { addressed.add(id) },
     setGroups: (next: typeof GROUPS) => { groups = next },
+    setRouting: (next: boolean, mode: 'auto' | 'fixed' = 'auto') => {
+      routingAvailable = next
+      routingMode = mode
+      // The catalog is loaded eagerly when the plugin mounts, so the Host
+      // generation must be refreshed for the new advertisement to reach it.
+      remote.emit('llm/adapters-updated', [])
+    },
     setCatalogFailure: (next: boolean) => { catalogFailure = next },
     setRoutable: (next: boolean) => { routable = next },
     blockOf: (key: string) => blocks.get(sid(key)),
@@ -244,6 +264,25 @@ describe('ui-model-selection dual entry', () => {
       : { placeholder: 'Search models…', empty: 'No models available.', noResults: 'No matching models.' })
   })
 
+  it('offers the smart-routing row in the popup and hands the route back when it is picked', async () => {
+    const b = await bench()
+    try {
+      b.setRouting(true, 'auto')
+      b.mint('s1')
+      const options = await b.popup().options(projection('s1'), new AbortController().signal)
+      expect(options[0]?.id).toBe('routing/auto')
+      expect(options[0]?.label).toBe(zh['routing.label'])
+      expect(options[0]?.active).toBe(true)
+
+      await b.popup().onSelect(options[0]!, projection('s1'))
+      expect(b.calls.selectAuto).toBe(1)
+      expect(b.calls.select).toBe(0)
+      expect(b.ctx.modelDirectories.directoryFor(sid('s1')).store.getSnapshot().routingMode).toBe('auto')
+    } finally {
+      await b.ctx.fiber.dispose()
+    }
+  })
+
   it('orders popup provider groups account-first while retaining third-party catalog order', async () => {
     const b = await bench()
     try {
@@ -268,7 +307,7 @@ describe('ui-model-selection dual entry', () => {
     // Switch through the SEAT entry; the directory holds the submission until it settles.
     const selection = { provider: 'deepseek-official', model: 'deepseek-v4-pro', reasoningEffort: 'max' }
     const settled = seatFace.select(selection)
-    expect(seatFace.directory.getSnapshot()).toMatchObject({ status: 'selecting', pending: selection })
+    expect(seatFace.directory.getSnapshot()).toMatchObject({ status: 'selecting', pending: { mode: 'fixed', selection } })
     expect(await settled).toEqual({ ok: true, value: undefined })
     expect(seatFace.directory.getSnapshot()).toMatchObject({ status: 'ready', pending: null })
     expect(b.hostCurrent()).toEqual({
@@ -358,7 +397,7 @@ describe('ui-model-selection dual entry', () => {
     const face = b.seat().inject!(sid('s1'))
     await b.ctx.modelDirectories.directoryFor(sid('s1')).load()
     const late = face.select({ provider: 'deepseek-official', model: 'deepseek-v4-pro' })
-    expect(face.directory.getSnapshot().pending).toEqual({ provider: 'deepseek-official', model: 'deepseek-v4-pro' })
+    expect(face.directory.getSnapshot().pending).toEqual({ mode: 'fixed', selection: { provider: 'deepseek-official', model: 'deepseek-v4-pro' } })
     b.ctx.emit('connection/reset')
     expect(face.directory.getSnapshot()).toMatchObject({ status: 'loading', pending: null })
     await late
@@ -395,6 +434,7 @@ describe('ui-model-selection dual entry', () => {
     b.setProjected(sid('s1'), {
       lastUsed: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
       next: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+      routingMode: null,
     })
     expect(face.directory.getSnapshot()).toMatchObject({
       current: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
@@ -453,7 +493,8 @@ describe('ui-model-selection dual entry', () => {
       const existing = b.ctx.modelDirectories.directoryFor(sid('existing'))
       await existing.load()
       b.setProjected(sid('existing'), { lastUsed: null,
-        next: { provider: 'deepseek-official', model: 'deepseek-v4-flash', reasoningEffort: ReasoningEffortId('high') } })
+        next: { provider: 'deepseek-official', model: 'deepseek-v4-flash', reasoningEffort: ReasoningEffortId('high') },
+        routingMode: null })
       b.setRoutable(false)
       b.remote.emit('settings/document-updated', ['llm-deepseek', 1])
       expect(existing.store.getSnapshot().retainedEffort).toBe('High')
@@ -501,7 +542,7 @@ describe('ui-model-selection dual entry', () => {
     b.mint('s1')
     const face = b.seat().inject!(sid('s1'))
     const intended = { provider: 'deepseek-official', model: 'unlisted' }
-    b.setProjected(sid('s1'), { lastUsed: intended, next: intended })
+    b.setProjected(sid('s1'), { lastUsed: intended, next: intended, routingMode: null })
     await vi.waitFor(() => { expect(face.directory.getSnapshot().status).toBe('ready') })
     expect(face.directory.getSnapshot().current).toEqual(intended)
     expect(b.blockOf('s1')).toBeUndefined()
@@ -536,7 +577,7 @@ describe('ui-model-selection dual entry', () => {
     })).rejects.toThrow(/unavailable for addressed subagent/)
     b.ctx.emit('connection/reset')
     await Promise.resolve()
-    expect(b.calls).toEqual({ models: 2, select: 0 })
+    expect(b.calls).toEqual({ models: 2, select: 0, selectAuto: 0 })
   })
 })
 

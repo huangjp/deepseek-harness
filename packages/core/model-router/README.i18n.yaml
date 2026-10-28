@@ -9,20 +9,23 @@
   en: 121627188689278d
   zh: ff086db171112441
 /deepseek-ai-dsh-model-router/summary:
-  en: fa1f0910e3f339f0
-  zh: 13361cdc702fbfcf
+  en: 514250de33ba7981
+  zh: d96598f64fc48437
 /deepseek-ai-dsh-model-router/table-of-contents:
   en: b563e4ec4727d0de
   zh: 53bc178a9c9491e8
 /deepseek-ai-dsh-model-router/use-this-package:
-  en: 8336fee3a25b6f93
-  zh: ec2ee37cdda629bf
+  en: 4d529b1e00530ded
+  zh: 11a07353c56d8004
+/deepseek-ai-dsh-model-router/use-this-package/routing-mode:
+  en: 4195884760157174
+  zh: f11b31b0b287e672
 /deepseek-ai-dsh-model-router/understand-the-implementation:
-  en: d6783f717789f91e
-  zh: 442bba4426b28fff
+  en: a67a4cc0be0100a5
+  zh: 552a9c57dca0f00d
 /deepseek-ai-dsh-model-router/further-exploration:
-  en: c1d98a4e203bb44b
-  zh: 747e6f3290955c4a
+  en: 686274dcbb7cbbda
+  zh: d2aeeff74551f7a1
 /deepseek-ai-dsh-model-router/model-experience:
   en: 215e7ba838619b7b
   zh: a311da3843709f90
@@ -36,8 +39,8 @@
   en: bce388eac555726d
   zh: 75baf6d377238e8d
 /deepseek-ai-dsh-model-router/model-experience/route-selection-before-the-first-request/kv-cache-effect:
-  en: 63f3b7200724f56a
-  zh: 18fa4e997fdd7882
+  en: cc3074be6cd7de9f
+  zh: 82e399119262f271
 /deepseek-ai-dsh-model-router/known-limitations-and-deferred-work:
   en: 8027ac05acfed917
   zh: aed1aa257ade8bbe

@@ -190,6 +190,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   })
   ctx.on('agent/inbox/claimed', ({ agent, message }) => {
     if (!config.enabled.get()) return
+    // A Session that pinned a model asked for that model: routing around it
+    // would answer with a route the user did not choose.
+    if (agent.model.routingMode() === 'fixed') return
     const signals = signalsOf(message)
     for (const rule of config.rules.get().map(toRouteRule)) {
       if (!matchesRule(rule, signals)) continue

@@ -3,7 +3,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { Model, AgentOptions, PreStepDecision } from './runtime-types.ts'
-import type { ModelSelection } from './types.ts'
+import type { ModelSelection, RoutingMode } from './types.ts'
 import { boundContextSummary, createUserMessage, type ContextFormed } from '@deepseek-ai/dsh-llm'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm/brand'
 import type { Session, EpochHeader } from '@deepseek-ai/dsh-session'
@@ -20,6 +20,8 @@ export interface ModelSelectionProjectionState {
   readonly lastUsed: ModelSelection | null
   /** Later recorded selection not yet used by a matching model request. */
   readonly pending: ModelSelection | null
+  /** Routing mode the Session recorded; null while it never chose one. */
+  readonly routingMode: RoutingMode | null
 }
 
 /**
@@ -65,27 +67,32 @@ const selectionSchema = z.object({
   reasoningEffort: z.string().min(1).transform(ReasoningEffortId).exactOptional(),
 }).nullable()
 
+const routingModeSchema = z.union([z.literal('auto'), z.literal('fixed')])
+
 /**
  * Session selection fold: recorded selections become
  * the pending choice, and each request header retires a matching one.
  */
 export const modelSelectionProjectionDefinition: Required<ProjectionDefinition<'modelSelection', ModelSelectionProjectionState>> = {
   key: 'modelSelection',
-  stateVersion: 3,
-  stateSchema: z.object({ lastUsed: selectionSchema, pending: selectionSchema }),
-  init: () => ({ lastUsed: null, pending: null }),
+  stateVersion: 4,
+  stateSchema: z.object({ lastUsed: selectionSchema, pending: selectionSchema, routingMode: routingModeSchema.nullable() }),
+  init: () => ({ lastUsed: null, pending: null, routingMode: null }),
   apply: (state, event) => {
+    if (event.type === 'model/routing-mode') {
+      return state.routingMode === event.data.mode ? state : { ...state, routingMode: event.data.mode }
+    }
     if (event.type === 'model/selection') {
       return sameModelSelection(state.pending, event.data) ? state : { ...state, pending: event.data }
     }
     if (event.type !== 'request/header') return state
     const lastUsed = selectionOfHeader(event.data.header)
     const pending = sameModelSelection(state.pending, lastUsed) ? null : state.pending
-    return sameModelSelection(state.lastUsed, lastUsed) && pending === state.pending ? state : { lastUsed, pending }
+    return sameModelSelection(state.lastUsed, lastUsed) && pending === state.pending ? state : { ...state, lastUsed, pending }
   },
   wire: {
-    viewSchema: z.object({ lastUsed: selectionSchema, next: selectionSchema }),
-    view: state => ({ lastUsed: state.lastUsed, next: state.pending ?? state.lastUsed }),
+    viewSchema: z.object({ lastUsed: selectionSchema, next: selectionSchema, routingMode: routingModeSchema.nullable() }),
+    view: state => ({ lastUsed: state.lastUsed, next: state.pending ?? state.lastUsed, routingMode: state.routingMode }),
   },
 }
 
@@ -112,6 +119,26 @@ export class AgentModel implements Model {
   select(selection: Readonly<ModelSelection>): void {
     if (sameModelSelection(this.recordedSelection(), selection)) return
     this.session.append('model/selection', toSelection(selection.provider, selection.model, selection.reasoningEffort))
+  }
+
+  /**
+   * Read the routing mode that applies to the next step. A Session that never
+   * chose one follows the Agent's live options, which carry the deployment's
+   * default mode.
+   * @returns the recorded mode, the Agent's default mode, or `auto`.
+   */
+  routingMode(): RoutingMode {
+    return this.readState().routingMode ?? this.options.routingMode ?? 'auto'
+  }
+
+  /**
+   * Record the routing mode that applies from the next step until a later
+   * mode. An equal recorded mode is a no-op.
+   * @param mode - routing mode the Session selected.
+   */
+  setRoutingMode(mode: RoutingMode): void {
+    if (this.readState().routingMode === mode) return
+    this.session.append('model/routing-mode', { mode })
   }
 
   private recordedSelection(): ModelSelection | null {

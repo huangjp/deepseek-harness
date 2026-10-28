@@ -40,7 +40,7 @@ const handle = await ctx.agents.create({
 await handle.dispose()   // stops the loop, unregisters, removes the session, unwinds the scope
 ```
 
-`AgentOptions` 提供初始提供方／模型路由、可选的由适配器定义的 `reasoningEffort`，以及可选的正数 `maxTokens` 输出上限。循环会校验确切模型的推理（reasoning）支持、解析适配器默认值、把生效值记录在请求头中，并将它们应用到每个对话请求。可选的 `setup(agentCtx, agent)` 回调会在 agent 发布之前组合其作用域世界：`agentCtx` 拥有注册，显式的未发布 Agent 则提供其 Session；Context 不含反向 Agent 属性。作用域工具、提示词段与监听器在 `agent/created` 之前就已存在。Setup 只做组合：创建完成后才能驱动 agent。 setup 开始前 Session 已进入 Store 并完成 `session/created`，因此初始化事件通过实时事件流发出。
+`AgentOptions` 提供初始提供方／模型路由、可选的由适配器定义的 `reasoningEffort`、会话在未记录自己的模式之前跟随的路由模式，以及可选的正数 `maxTokens` 输出上限。循环会校验确切模型的推理（reasoning）支持、解析适配器默认值、把生效值记录在请求头中，并将它们应用到每个对话请求。可选的 `setup(agentCtx, agent)` 回调会在 agent 发布之前组合其作用域世界：`agentCtx` 拥有注册，显式的未发布 Agent 则提供其 Session；Context 不含反向 Agent 属性。作用域工具、提示词段与监听器在 `agent/created` 之前就已存在。Setup 只做组合：创建完成后才能驱动 agent。 setup 开始前 Session 已进入 Store 并完成 `session/created`，因此初始化事件通过实时事件流发出。
 
 <a id="model-selection"></a>
 ### 选择模型
@@ -48,6 +48,8 @@ await handle.dispose()   // stops the loop, unregisters, removes the session, un
 `agent.model` 实现 `Model` 接口，与 `agent.inbox` 并列。`current()` 返回选择的独立副本：依次读取待生效选择、最近请求的选择和实时 `agent.options`；没有来源同时提供 provider 与 model 时返回 `undefined`。读取不会固定选择，也不会改变已经准备的步骤。
 
 `select({ provider, model, reasoningEffort? })` 完整赋值，从下一个尚未开始准备的步骤生效。省略强度表示使用适配器默认值；选择操作既不继承旧强度，也不查询默认值。与已记录选择相同则不重复记录，但仅与初始 options 相同仍会记录 `model/selection`。调用方负责校验可用性与能力；追加失败沿用 Session 现有的失败保证。
+
+`RoutingMode` 说明由谁选择回答这个会话的通道：`auto` 把选择交给部署的路由器，`fixed` 把会话钉在它自己选定的模型上，路由器不得覆盖这一选择。`routingMode()` 读取下一个步骤适用的模式——先读已记录的模式，再读实时的 `agent.options.routingMode`，都没有时取 `auto`。`setRoutingMode(mode)` 记录一个模式并从下一个步骤起生效；与已记录模式相同则不重复记录。该模式以 `model/routing-mode` 事件写入会话日志，因此恢复出来的 Session 能读回它选过的模式。
 
 普通恢复保留持久化选择。明确覆盖模型的入口先形成完整选择：仅在配置未指定强度且路由不变时保留旧的显式强度，然后调用 `select()`。Web 与 ACP 用户选择直接调用 `select()`，因此省略强度表示 Auto。选择 Session 模型不会改变部署默认值。
 
@@ -105,7 +107,7 @@ await handle.agent.whenIdle()
 
 ### 持久模型选择
 
-`Model` 和 `modelSelection` 投影类型在本包定义。默认驱动器与 inbox 一起创建每个 `AgentModel` 并拥有投影注册。每个实例绑定 Session、实时选项和投影读取器，不维护选择的第二份副本。循环在步骤准备前捕获独立选择，并在重试间保留它。
+`Model` 和 `modelSelection` 投影类型在本包定义。默认驱动器与 inbox 一起创建每个 `AgentModel` 并拥有投影注册。每个实例绑定 Session、实时选项和投影读取器，不维护选择的第二份副本。循环在步骤准备前捕获独立选择，并在重试间保留它。同一个投影还会折叠 `model/routing-mode` 事件，因此会话的路由模式是持久状态，而不只来自实时选项。
 
 ### 源码地图
 

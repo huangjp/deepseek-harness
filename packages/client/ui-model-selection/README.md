@@ -11,7 +11,7 @@ Desktop product events use the optional [product analytics service](../product-a
 
 ## Summary
 
-The Web GUI lets users switch the model and reasoning effort for an existing session through either the `/model` popup or the composer's model control. Both surfaces present the same provider-grouped choices, and the selected model determines the available effort names and default. A complete selection applies to the next request; a running step keeps the model and effort it started with.
+The Web GUI lets users switch the model and reasoning effort for an existing session through either the `/model` popup or the composer's model control. Both surfaces present the same provider-grouped choices, and the selected model determines the available effort names and default. A complete selection applies to the next request; a running step keeps the model and effort it started with. On a Host that offers automatic routing, both entries also offer a smart-routing choice that hands the route back to the routing policy, and picking a model instead pins it.
 
 ## Table of Contents
 
@@ -44,6 +44,10 @@ Model and reasoning-effort names use weight 400 (regular) in the composer menu, 
 Both entries group models by provider, with DeepSeek Account first and DeepSeek second; third-party providers retain their catalog order. Both use the shared, asynchronously observed sticky headings from [ui-primitives](../ui-primitives/README.md#understand-the-implementation): transparent at rest, with the theme's 94%-opaque fill only while pinned, and `md` corners outside macOS Desktop. The composer menu shows model and effort names only. Navigation chevrons use `--dsw-alias-menu-icon`. The `/model` popup shows provider names as group headings and model names as rows, without repeating the provider on each row or showing catalog descriptions. Its search placeholder, no-match text, and empty-catalog text use the same localized labels as the composer model menu. The popup applies the selected model's default effort; the composer can then choose any advertised effort. An adapter without reasoning metadata leaves the Effort row absent; there is no arbitrary effort input.
 
 The composer replaces the model and effort text with the Models icon when the expanded controls cannot share one line, and restores the text when space permits. The full selection remains available in the trigger's accessible name, tooltip, and menu.
+
+### Smart routing
+
+A Host that offers automatic routing adds a **Smart routing** row above the provider groups, and the `/model` popup lists it as its first row. Picking it returns the route to the Host's routing policy: the composer trigger then shows the routing name instead of a model name and hides the reasoning-effort row. Picking a model while the session routes automatically pins that model instead — the session switches to the fixed routing mode, the Host's router stops answering for it, and the choice becomes the default for the sessions that follow. A Host without a routing plugin offers no routing row, and its sessions count as pinned.
 
 ### Model label extensions
 

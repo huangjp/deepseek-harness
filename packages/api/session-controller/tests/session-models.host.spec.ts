@@ -11,7 +11,7 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { describe, expect, it, vi, onTestFinished } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent, RoutingMode } from '@deepseek-ai/dsh-agent'
 import AttachmentStore from '@deepseek-ai/dsh-attachment'
 import LlmRuntime, { LlmAdapter, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type {
@@ -132,6 +132,7 @@ async function harness(logged?: {
     get provider() { return ctx.agentDefaultModel.currentSelection().provider },
     get model() { return ctx.agentDefaultModel.currentSelection().model },
     get reasoningEffort() { return ctx.agentDefaultModel.currentSelection().reasoningEffort },
+    get routingMode() { return ctx.agentDefaultModel.currentRoutingMode() },
   }
   const agent = {
     id: session.id,
@@ -523,9 +524,8 @@ describe('Web session model selection', () => {
       reasoningEffort: 'max',
     })
     expect(agent.model.current()).toEqual(selected.selected)
-    expect(agent.session.snapshotEvents().at(-1)).toMatchObject({
-      type: 'model/selection', data: selected.selected,
-    })
+    expect(agent.session.snapshotEvents().filter(event => event.type === 'model/selection'))
+      .toMatchObject([{ data: selected.selected }])
 
     const unsupported = await remote.selectModel(request({
       sessionId,
@@ -568,6 +568,92 @@ describe('Web session model selection', () => {
     })
     expect(currentSelection(ctx, sessionId))
       .toEqual({ provider: 'deepseek-official', model: 'deepseek-reasoner', reasoningEffort: 'max' })
+    await ctx.fiber.dispose()
+  })
+
+  it('records a routing mode without naming a route', async () => {
+    const { ctx, agent, sessionId } = await harness()
+    const remote = await createSessionTestRemote(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+
+    const automatic = expectValue(await remote.selectModel(request({
+      sessionId, routingMode: 'auto' as const,
+    })))
+    expect(automatic).toEqual({ selected: null, routingMode: 'auto' })
+    expect(agent.session.snapshotEvents().at(-1)).toMatchObject({
+      type: 'model/routing-mode', data: { mode: 'auto' },
+    })
+    expect(agent.model.routingMode()).toBe('auto')
+
+    const fixed = expectValue(await remote.selectModel(request({
+      sessionId, routingMode: 'fixed' as const,
+    })))
+    expect(fixed).toEqual({ selected: null, routingMode: 'fixed' })
+    expect(agent.session.snapshotEvents().at(-1)).toMatchObject({
+      type: 'model/routing-mode', data: { mode: 'fixed' },
+    })
+    expect(agent.model.routingMode()).toBe('fixed')
+    await ctx.fiber.dispose()
+  })
+
+  it('pins the routing mode to fixed when a request names a route', async () => {
+    const { ctx, agent, sessionId } = await harness()
+    const remote = await createSessionTestRemote(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+
+    const selected = expectValue(await remote.selectModel(request({
+      sessionId, provider: 'deepseek-official', model: 'deepseek-reasoner',
+    })))
+    expect(selected).toEqual({
+      selected: { provider: 'deepseek-official', model: 'deepseek-reasoner' },
+      routingMode: 'fixed',
+    })
+    const events = agent.session.snapshotEvents()
+    expect(events.filter(event => event.type === 'model/selection'))
+      .toMatchObject([{ data: { provider: 'deepseek-official', model: 'deepseek-reasoner' } }])
+    expect(events.filter(event => event.type === 'model/routing-mode'))
+      .toMatchObject([{ data: { mode: 'fixed' } }])
+    expect(agent.model.routingMode()).toBe('fixed')
+    await ctx.fiber.dispose()
+  })
+
+  it('saves the routing mode as the deployment default in the background', async () => {
+    const { ctx, sessionId } = await harness()
+    const savedModes: RoutingMode[] = []
+    const remote = await createSessionTestRemote(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      saveDefaultRoutingMode: (mode) => { savedModes.push(mode) },
+      cwd: '/tmp',
+    })
+
+    expectValue(await remote.selectModel(request({ sessionId, routingMode: 'fixed' as const })))
+    await expect.poll(() => savedModes).toEqual(['fixed'])
+    expectValue(await remote.selectModel(request({
+      sessionId, provider: 'deepseek-official', model: 'deepseek-reasoner',
+    })))
+    await expect.poll(() => savedModes).toEqual(['fixed', 'fixed'])
+    await ctx.fiber.dispose()
+  })
+
+  it('rejects a request that names neither a route nor a routing mode', async () => {
+    const { ctx, sessionId } = await harness()
+    const remote = await createSessionTestRemote(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }),
+      cwd: '/tmp',
+    })
+
+    expect(await remote.selectModel(request({ sessionId }))).toMatchObject({
+      ok: false,
+      error: {
+        code: 'session/model-unavailable',
+        message: 'The request names no model route.',
+        details: { provider: '', model: '' },
+      },
+    })
     await ctx.fiber.dispose()
   })
 

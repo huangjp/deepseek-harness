@@ -9,7 +9,7 @@ import type { Volatile } from '@deepseek-ai/cordis'
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type { ModelSelection } from '@deepseek-ai/dsh-agent'
+import type { ModelSelection, RoutingMode } from '@deepseek-ai/dsh-agent'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-config-editor'
 
@@ -28,6 +28,8 @@ export interface Config {
   model: Volatile<string>
   /** Adapter-owned reasoning effort; omission follows the provider default. */
   reasoningEffort: Volatile<string | undefined>
+  /** Routing mode new Sessions follow while they record none of their own. */
+  routingMode: Volatile<RoutingMode>
 }
 
 /** Project stored settings onto the Agent-facing selection type. */
@@ -52,6 +54,7 @@ export class AgentDefaultModelConfig extends Service {
     provider: z.string().required().volatile(),
     model: z.string().required().volatile(),
     reasoningEffort: z.string().volatile(),
+    routingMode: z.union([z.const('auto'), z.const('fixed')]).default('auto').volatile(),
   })
 
   constructor(private readonly ownerContext: Context, private config: Config) {
@@ -84,11 +87,39 @@ export class AgentDefaultModelConfig extends Service {
     if (entry === undefined) return
     const editor = this.ctx.get('configEditor')
     if (editor === undefined) return
-    const config = {
-      provider: next.provider, model: next.model,
-      ...next.reasoningEffort === undefined ? {} : { reasoningEffort: String(next.reasoningEffort) },
-    }
-    const saved = this.saves.then(() => editor.edit(entry, () => config))
+    // The write is deferred behind earlier saves, so the submitted values are
+    // captured now: a caller may mutate the object it passed in meanwhile.
+    const selection: ModelSelection = { ...next }
+    const saved = this.saves.then(() => editor.edit(entry, (current) => {
+      const config: Record<string, unknown> = { ...current, provider: selection.provider, model: selection.model }
+      if (selection.reasoningEffort === undefined) Reflect.deleteProperty(config, 'reasoningEffort')
+      else config.reasoningEffort = String(selection.reasoningEffort)
+      return config
+    }))
+    this.saves = saved.catch(() => {})
+    await saved
+  }
+
+  /**
+   * Read the routing mode new Sessions follow while they record none of their own.
+   * @returns the deployment's default routing mode.
+   */
+  currentRoutingMode(): RoutingMode {
+    return this.config.routingMode.get()
+  }
+
+  /**
+   * Save the default routing mode. The mode outlives the Session that chose it,
+   * so a Session that pinned a model keeps that choice in the Sessions that follow.
+   * @param mode - routing mode to store.
+   * @returns fulfillment after the optional profile write settles.
+   */
+  async saveRoutingMode(mode: RoutingMode): Promise<void> {
+    const entry = this.ownerContext.fiber.entry
+    if (entry === undefined) return
+    const editor = this.ctx.get('configEditor')
+    if (editor === undefined) return
+    const saved = this.saves.then(() => editor.edit(entry, current => ({ ...current, routingMode: mode })))
     this.saves = saved.catch(() => {})
     await saved
   }

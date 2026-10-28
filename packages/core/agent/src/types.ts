@@ -85,12 +85,23 @@ export interface ModelSelection {
   reasoningEffort?: ReasoningEffortId
 }
 
+/**
+ * How one Session chooses the route that answers it.
+ *
+ * `auto` leaves the choice to the deployment's router, which picks a route per
+ * task from its rule table. `fixed` pins the Session to the model it selected,
+ * and no router may override that choice.
+ */
+export type RoutingMode = 'auto' | 'fixed'
+
 /** Client view of the durable model-selection fold. */
 export interface ModelSelectionProjection {
   /** Selection used by the latest recorded model request. */
   readonly lastUsed: ModelSelection | null
   /** Selection the next model step uses; null while the Agent's initial options supply the route. */
   readonly next: ModelSelection | null
+  /** Routing mode the Session recorded; null while the Session never chose one. */
+  readonly routingMode: RoutingMode | null
 }
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
@@ -119,5 +130,13 @@ declare module '@deepseek-ai/dsh-session/types' {
      * later selection. Log-only: it never enters derived model history.
      */
     'model/selection': ModelSelection
+    /**
+     * Routing mode the Session selected for its next steps. Log-only: it never
+     * enters derived model history.
+     */
+    'model/routing-mode': {
+      /** Routing mode that applies from the next model step until a later mode. */
+      mode: RoutingMode
+    }
   }
 }

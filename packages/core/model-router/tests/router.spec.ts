@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
+import type { RoutingMode } from '@deepseek-ai/dsh-agent'
 import { apply, toRouteRule, type Config, type RuleConfig } from '../src/index.ts'
 
 /** A context stub that records the listeners the plugin installs. */
@@ -80,13 +81,16 @@ function fakeConfig(rules: readonly RuleConfig[], enabled = true, health: Health
 }
 
 /** An agent whose model selection can be observed. */
-function fakeAgent(current?: { provider: string; model: string; reasoningEffort?: string }): {
+function fakeAgent(
+  current?: { provider: string; model: string; reasoningEffort?: string },
+  routingMode: RoutingMode = 'auto',
+): {
   readonly agent: unknown
   readonly select: ReturnType<typeof vi.fn>
 } {
   const select = vi.fn()
   return {
-    agent: { model: { current: () => current, select } },
+    agent: { model: { current: () => current, select, routingMode: () => routingMode } },
     select,
   }
 }
@@ -147,6 +151,25 @@ describe('model-router routing', () => {
     const { agent, select } = fakeAgent()
     emit('agent/inbox/claimed', { agent, message: claimed('总结这个文件') })
     expect(select).not.toHaveBeenCalled()
+  })
+
+  it('never routes a Session that pinned a model', async () => {
+    const { ctx, emit } = fakeContext()
+    await apply(ctx, fakeConfig([LONG_FORM]))
+    const { agent, select } = fakeAgent(undefined, 'fixed')
+    emit('agent/inbox/claimed', { agent, message: claimed('写一部小说') })
+    expect(select).not.toHaveBeenCalled()
+  })
+
+  it('routes a Session that left the choice to the router', async () => {
+    const { ctx, emit } = fakeContext()
+    await apply(ctx, fakeConfig([LONG_FORM]))
+    const automatic = fakeAgent(undefined, 'auto')
+    emit('agent/inbox/claimed', { agent: automatic.agent, message: claimed('写一部小说') })
+    expect(automatic.select).toHaveBeenCalledWith({ provider: 'p1', model: 'm1', reasoningEffort: 'max' })
+    const defaulted = fakeAgent()
+    emit('agent/inbox/claimed', { agent: defaulted.agent, message: claimed('写一部小说') })
+    expect(defaulted.select).toHaveBeenCalledWith({ provider: 'p1', model: 'm1', reasoningEffort: 'max' })
   })
 
   it('routes a matching task to the declared model', async () => {

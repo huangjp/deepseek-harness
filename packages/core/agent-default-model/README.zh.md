@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-为会话未指定模型的新 agent 提供共享默认 provider 和模型。Provider、模型和推理强度都是即时 Config 字段。保存的选择更新当前 profile patch，并用于后续读取；会话级选择由[Agent 模型 API](../agent/README.zh.md) 负责。
+为会话未指定模型的新 agent 提供共享默认 provider 和模型。Provider、模型、推理强度和路由模式都是即时 Config 字段。保存的选择更新当前 profile patch，并用于后续读取；会话级选择由[Agent 模型 API](../agent/README.zh.md) 负责。
 
 ## 目录
 
@@ -42,6 +42,7 @@ kind: "package-reference"
 |---|---|---|
 | `provider` | 必填 | 新 agent 使用的已注册提供方路由 |
 | `model` | 必填 | 新 agent 使用的、由提供方持有的模型 id |
+| `routingMode` | `auto` | 新 agent 在没有记录自己的模式之前跟随的路由模式：`auto` 把通道交给部署的路由器，`fixed` 把会话钉在自己的模型上 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-agent-default-model) 列出所有接受的字段。`reasoningEffort` 是可选的；保存不含此字段的选择，会从 profile 的完整配置覆盖中移除此字段。
 
@@ -54,7 +55,14 @@ const selection = ctx.agentDefaultModel.currentSelection()
 await ctx.agentDefaultModel.saveSelection({ provider, model, reasoningEffort: 'high' })
 ```
 
-没有配置编辑器时，`saveSelection()` 不执行写入。此服务不验证目录成员资格；发起模型请求的消费者负责可用性诊断。
+`currentRoutingMode()` 返回部署的默认路由模式；`saveRoutingMode()` 为后续 agent 保存这个默认值。该模式比做出选择的会话活得更久，因此钉住模型的会话会在之后的会话里保留这个选择。
+
+```text
+const mode = ctx.agentDefaultModel.currentRoutingMode()
+await ctx.agentDefaultModel.saveRoutingMode('fixed')
+```
+
+没有配置编辑器时，`saveSelection()` 与 `saveRoutingMode()` 不执行写入。此服务不验证目录成员资格；发起模型请求的消费者负责可用性诊断。
 
 -----
 
@@ -68,7 +76,7 @@ await ctx.agentDefaultModel.saveSelection({ provider, model, reasoningEffort: 'h
 
 ### 设计理念
 
-此服务保留已验证的 Config 引用，并在 `currentSelection()` 中读取。`saveSelection()` 捕获提交值，并按提交顺序串行写入 profile，包括调用重叠的情况。每个调用方收到各自的写入失败；一次写入被拒绝不会阻止后续保存。消费者优先使用会话级选择。
+此服务保留已验证的 Config 引用，并在 `currentSelection()` 与 `currentRoutingMode()` 中读取。`saveSelection()` 与 `saveRoutingMode()` 捕获提交值，并按提交顺序串行写入 profile，包括调用重叠的情况。每个调用方收到各自的写入失败；一次写入被拒绝不会阻止后续保存。消费者优先使用会话级选择。
 
 ### 源码地图
 
@@ -78,7 +86,7 @@ await ctx.agentDefaultModel.saveSelection({ provider, model, reasoningEffort: 'h
 
 ### 行为说明
 
-`currentSelection()` 返回分离的选择值。已捕获的选择保持稳定，后续操作则读取更新后的 Config 引用。
+`currentSelection()` 返回分离的选择值。已捕获的选择保持稳定，后续操作则读取更新后的 Config 引用。保存选择时会保留该 profile 条目的其他键，因此保存路由不会丢掉条目的路由模式。
 
 </details>
 

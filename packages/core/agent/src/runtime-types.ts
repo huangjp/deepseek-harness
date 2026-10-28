@@ -12,7 +12,7 @@ import type {
 } from '@deepseek-ai/dsh-llm'
 import type { AgentCancelCause, Session, SessionSeq, UserMessage } from '@deepseek-ai/dsh-session'
 export type { AgentCancelCause } from '@deepseek-ai/dsh-session'
-import type { Agent, InboxTarget, ModelSelection } from './types.ts'
+import type { Agent, InboxTarget, ModelSelection, RoutingMode } from './types.ts'
 export type { Agent } from './types.ts'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 declare module '@deepseek-ai/dsh-system-prompt' {
@@ -36,6 +36,8 @@ export interface AgentOptions {
   model?: string
   /** Adapter-owned reasoning effort for the selected provider/model route. */
   reasoningEffort?: ReasoningEffortId | undefined
+  /** Routing mode the Agent follows while the Session records none; `auto` leaves the route to a router. */
+  routingMode?: RoutingMode | undefined
   /** Maximum output tokens for each conversation-model request. */
   maxTokens?: number
 }
@@ -69,6 +71,20 @@ export interface Model {
    * @param selection - complete provider, model, and optional explicit effort.
    */
   select(selection: Readonly<ModelSelection>): void
+
+  /**
+   * Read the routing mode that applies to the next step. A Session that never
+   * chose one follows the Agent's live options.
+   * @returns `auto` when a router may pick the route, `fixed` when the Session pinned one.
+   */
+  routingMode(): RoutingMode
+
+  /**
+   * Record the routing mode that applies from the next step until a later mode.
+   * An equal recorded mode is a no-op.
+   * @param mode - routing mode the Session selected.
+   */
+  setRoutingMode(mode: RoutingMode): void
 }
 
 /** Agent-owned access to pending work; concrete storage belongs to the driver. */

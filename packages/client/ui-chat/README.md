@@ -21,6 +21,7 @@ File-mention providers receive the viewed Session ID with the closing-turn owner
 - [Command and failure rows](#command-and-failure-rows)
 - [Turn token usage](#turn-token-usage)
 - [Completed-turn footer](#completed-turn-footer)
+- [Route attribution](#route-attribution)
 - [Turn Process Folding](#turn-process-folding)
 - [Grouped rendering](#grouped-rendering)
 - [Scroll ownership](#scroll-ownership)
@@ -84,6 +85,13 @@ Preference menus restore focus to their trigger without scrolling before publish
 Artifact extensions can subscribe to one Turn and Node kind through `ChatNodeStore.turnDataSource`. The source includes hidden Nodes and exposes their business data in anchor order. Membership updates incrementally; only observed collections materialize ordered arrays, and unrelated Turns or kinds do not notify them.
 
 The completed-turn action footer follows the recorded Turn end. Its action row starts 20px below preceding prose or extension content. Actions remain visible only on the latest Turn when its final visible content is a reply; other endings and historical Turns reveal actions on hover or keyboard focus. Devices without hover keep actions visible. An unavailable branch action opens its explanation on click or tap without creating a branch.
+
+-----
+
+<a id="route-attribution"></a>
+## Route attribution
+
+An assistant reply names the provider and model that answered it, in a small caption under the reply. The names come from the durable message source, so a reply recorded before a routing change still shows the route that produced it. A message that names no model route shows no caption, and the reasoning row that shares the message carries none either.
 
 -----
 
@@ -183,7 +191,7 @@ The Chat view detects selection and context-menu gestures on business nodes mark
 <a id="model-experience"></a>
 ## Model Experience
 
-None, as this package renders logged conversation state in the browser and registers nothing model-facing.
+This package registers nothing model-facing. It names the provider and model that answered each reply, but it neither assembles nor modifies provider requests.
 
 #### KV Cache effect
 

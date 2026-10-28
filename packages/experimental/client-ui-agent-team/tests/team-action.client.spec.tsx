@@ -149,11 +149,11 @@ describe('TeamAction', () => {
       projections: {
         [SESSION]: {
           state: 'ready', error: null,
-          values: { agentTeam: team, modelSelection: { lastUsed: null, next: { provider: 'p', model: 'lead-model' } } },
+          values: { agentTeam: team, modelSelection: { lastUsed: null, next: { provider: 'p', model: 'lead-model' }, routingMode: null } },
         },
         [WORKER]: {
           state: 'ready', error: null,
-          values: { modelSelection: { lastUsed: { provider: 'p', model: 'worker-model' }, next: { provider: 'p', model: 'worker-model' } } },
+          values: { modelSelection: { lastUsed: { provider: 'p', model: 'worker-model' }, next: { provider: 'p', model: 'worker-model' }, routingMode: null } },
         },
       },
     })
@@ -241,7 +241,7 @@ describe('TeamAction', () => {
 
     setProjectionSnapshot(b.sessions, WORKER, {
       state: 'ready', error: null,
-      values: { modelSelection: { lastUsed: null, next: { provider: 'p', model: 'updated-worker-model' } } },
+      values: { modelSelection: { lastUsed: null, next: { provider: 'p', model: 'updated-worker-model' }, routingMode: null } },
     })
     expect(screen.getByRole('button', { name: /worker.*updated-worker-model/u })).toBeTruthy()
     setProjection(b.sessions, SESSION, { ...team, tasks: [{ ...task, subject: 'Updated parent task' }] })

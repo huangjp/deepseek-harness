@@ -3007,3 +3007,35 @@ it('keeps user cancellations and forked endings free of a failure row', () => {
     expect(node(snapshot(value), 'turn-error')).toBeUndefined()
   }
 })
+
+it('carries the answering route on an assistant node built from a model source', () => {
+  const value = assembler([
+    at(1, 'turn/start', { turn: 1 }),
+    at(2, 'step/start', { turn: 1, step: 1 }),
+    at(3, 'assistant/message', {
+      turn: 1,
+      step: 1,
+      message: {
+        ...assistantMessage('answer-1', 'answer'),
+        source: { kind: 'model', provider: 'minimax', model: 'MiniMax-M3.1-Flash' },
+      },
+    }, { surfaceOp: 'append' }),
+  ])
+  const assistant = node(snapshot(value), 'assistant-step')
+  expect((assistant?.data as AssistantChatData).finalNode?.providerMetadata)
+    .toEqual({ provider: 'minimax', model: 'MiniMax-M3.1-Flash' })
+})
+
+it('leaves an assistant node without a route when its source names no model route', () => {
+  const value = assembler([
+    at(1, 'turn/start', { turn: 1 }),
+    at(2, 'step/start', { turn: 1, step: 1 }),
+    at(3, 'assistant/message', {
+      turn: 1,
+      step: 1,
+      message: { ...assistantMessage('answer-2', 'answer'), source: { kind: 'notice' } },
+    }, { surfaceOp: 'append' }),
+  ])
+  const assistant = node(snapshot(value), 'assistant-step')
+  expect((assistant?.data as AssistantChatData).finalNode?.providerMetadata).toBeUndefined()
+})

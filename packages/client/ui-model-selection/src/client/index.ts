@@ -48,9 +48,19 @@ function rowId(providerId: string, modelId: string): string {
   return `${providerId}/${modelId}`
 }
 
+/** Popup row id of the automatic-routing choice; it names no model. */
+const ROUTING_ROW_ID = 'routing/auto'
+
 /** Flatten the directory into popup rows; failure rows are listed for visibility but never selectable. */
 function optionsOf(directory: ModelDirectoryState, t: TranslateNS<'model'>): SelectOption[] {
   const rows: SelectOption[] = []
+  if (directory.routingAvailable) {
+    rows.push({
+      id: ROUTING_ROW_ID,
+      label: t('routing.label'),
+      ...(directory.routingMode === 'auto' ? { active: true } : {}),
+    })
+  }
   for (const group of orderModelProviders(directory.groups)) {
     const name = group.id === 'deepseek-account' ? t('provider.account') : group.name
     for (const model of group.models) {
@@ -151,6 +161,14 @@ export function apply(ctx: ClientContext): void {
             throw new Error('model selection is unavailable for addressed subagent sessions')
           }
           const directory = models.directoryFor(session.sessionId)
+          if (option.id === ROUTING_ROW_ID) {
+            const routed = await directory.selectAuto()
+            if (!routed.ok) {
+              if (routed.error.code === 'session/writer-held') throw new Error(t('error.sessionInUse'))
+              throw routed.error
+            }
+            return
+          }
           const selection = selectionOf(directory.store.getSnapshot(), option.id)
           if (selection === undefined) {
             throw new Error('this provider\'s catalog failed to load — pick a model from a loaded group')
@@ -186,6 +204,9 @@ export function apply(ctx: ClientContext): void {
           },
           select: (selection: ModelSelection) => available
             ? directory.select(selection)
+            : Promise.resolve(undefined),
+          selectAuto: () => available
+            ? directory.selectAuto()
             : Promise.resolve(undefined),
         }
       },

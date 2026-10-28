@@ -9,7 +9,7 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session/types'
 import type { AssistantChatData } from '../contract/chat-nodes.ts'
 import { CHAT_SYNTHETIC_SEQ_OFFSETS, chatNode } from './common.ts'
 import {
-  emptyAssistantBlock, isTokenDelta, toAssistantBlock, toAssistantBlocks,
+  assistantProviderMetadata, emptyAssistantBlock, isTokenDelta, toAssistantBlock, toAssistantBlocks,
 } from './event-projection.ts'
 
 declare module '../contract/chat-nodes.ts' {
@@ -194,6 +194,9 @@ function finalNode(
   const final = state.final
   if (final?.event.type === 'assistant/message') {
     const event = final.event
+    // The route that answered is carried by the message source; a message
+    // from any other producer simply names no route.
+    const providerMetadata = assistantProviderMetadata(event.data.message.source)
     return {
       kind: 'assistant',
       seq: event.seq,
@@ -203,6 +206,7 @@ function finalNode(
       step: state.step,
       blocks: toAssistantBlocks(event.data.message.content),
       usage: event.data.usage,
+      ...providerMetadata === undefined ? {} : { providerMetadata },
       timing: {
         stepStartTime: context.start?.event.time ?? null,
         firstTokenTime: state.firstTokenTime ?? null,

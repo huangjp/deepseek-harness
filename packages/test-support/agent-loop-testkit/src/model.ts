@@ -9,5 +9,5 @@ export function unsupportedModel(): Model {
   const reject = (): never => {
     throw new Error('this test Agent does not support model selection')
   }
-  return { current: reject, select: reject }
+  return { current: reject, select: reject, routingMode: reject, setRoutingMode: reject }
 }

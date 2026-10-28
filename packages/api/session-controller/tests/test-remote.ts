@@ -3,7 +3,7 @@ import type { SessionControllerInternals } from '../src/index.ts'
 
 import { SessionLogOffset } from '@deepseek-ai/dsh-session'
 import { Service, type Context } from '@deepseek-ai/cordis'
-import type { ModelSelection as AgentModelSelection } from '@deepseek-ai/dsh-agent'
+import type { ModelSelection as AgentModelSelection, RoutingMode } from '@deepseek-ai/dsh-agent'
 import type {
   AdmittedPromptContentPart,
   AttachmentAdmissionPart,
@@ -96,9 +96,12 @@ export interface TestSessionRemote {
 /** Dependencies and policy supplied by a Session Controller unit harness. */
 export interface TestSessionRemoteDefaults {
   readonly defaultModelSelection: () => AgentModelSelection
+  /** Deployment routing mode a Session follows before it records one of its own. */
+  readonly defaultRoutingMode?: () => RoutingMode
   readonly cwd: string
   readonly nativeOpen?: boolean
   readonly saveDefaultModelSelection?: (selection: AgentModelSelection) => void | Promise<void>
+  readonly saveDefaultRoutingMode?: (mode: RoutingMode) => void | Promise<void>
   readonly openPath?: (path: string, signal: AbortSignal) => Promise<void>
   readonly fileApplications?: SessionControllerInternals['fileApplications']
   readonly openFileApplication?: SessionControllerInternals['openFileApplication']
@@ -252,8 +255,12 @@ async function installControllers(
   if (ctx.get('agentDefaultModel') === undefined) {
     ctx.provide('agentDefaultModel', {
       currentSelection: defaults.defaultModelSelection,
+      currentRoutingMode: defaults.defaultRoutingMode ?? (() => 'auto'),
       saveSelection: async (selection: AgentModelSelection) => {
         await defaults.saveDefaultModelSelection?.(selection)
+      },
+      saveRoutingMode: async (mode: RoutingMode) => {
+        await defaults.saveDefaultRoutingMode?.(mode)
       },
     } as never)
   }

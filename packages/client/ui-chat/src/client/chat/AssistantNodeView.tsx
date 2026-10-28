@@ -49,6 +49,7 @@ export const AssistantNodeView = memo(function AssistantNodeView({
       renderSlot={renderSlot}
       revealProcess={revealProcess}
       mentions={mentions}
+      providerMetadata={data.finalNode?.providerMetadata}
       t={t}
     />
   )

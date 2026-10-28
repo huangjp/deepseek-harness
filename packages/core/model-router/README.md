@@ -9,9 +9,9 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@deepseek-ai/dsh-model-router` picks the provider route a task runs on. A harness deployment registers several routes — one that thinks before it answers, one that accepts images, one tuned for code — but the harness keeps exactly one model selection per Agent, so every task runs on whichever route the user last picked. This plugin reads the task that is about to run and applies the route the deployment's rule table names for it.
+`@deepseek-ai/dsh-model-router` picks the provider route a task runs on. A harness deployment registers several routes — one that thinks before it answers, one that accepts images, one tuned for code — but the harness keeps exactly one model selection per Agent, so every task runs on whichever route the user last picked. This plugin reads the task that is about to run and applies the route the deployment's rule table names for it, for the Sessions that left the choice open.
 
-The plugin never changes what a task does; it only changes which route answers it. A rule it cannot honor is passed over in favour of the next rule, and the Agent keeps the route it had when no rule applies.
+The plugin never changes what a task does; it only changes which route answers it. A Session that pinned a model is left alone entirely. A rule it cannot honor is passed over in favour of the next rule, and the Agent keeps the route it had when no rule applies.
 
 ## Table of Contents
 
@@ -72,10 +72,16 @@ Because a rule that states no condition matches nothing, a deployment expresses 
 
 A route that cannot answer is worse than no route at all: an exhausted quota, a revoked credential and an unreachable relay all make the request fail. The plugin therefore watches each route's own outcomes and routes around a route that keeps failing. `failureThreshold` consecutive failures — two by default — skip that route for `cooldownMs` milliseconds (five minutes by default), and the next rule that fits the task takes the task instead. A route that answers again becomes eligible at once, and a threshold of zero never routes around anything. The cooldown is a **wall-clock window**, not a retry budget: once it expires the route is eligible again and the next matching task tries it once more, and a fresh failure skips it again at once — the failure count is kept, so an expired cooldown does not clear it.
 
+### Routing mode
+
+A Session chooses the route that answers it, and the chat's model switcher is where that choice is made. A Session that names a provider and model pins that route: it is in the `fixed` routing mode, and this plugin never touches it — no rule matches it, and no rule overrides it. A Session that leaves the choice open is in the `auto` mode, and that is the only kind this plugin routes. A Session that has never recorded a mode follows the deployment's default, which is `auto` unless the deployment declares otherwise.
+
+The mode is read when the loop claims the task, so a Session that switches back to `auto` is routed again from its next task on.
+
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
 
-The decision happens on `agent/inbox/claimed`, which the agent loop emits at `packages/core/agent-loop/src/agent.ts` while it claims the messages for a step. The very next line captures the step's model selection, so a route the plugin selects in that event is the route the **first** step uses rather than the one after it. This is why the plugin listens to the inbox rather than to `agent/pre-step`: the pre-step waterfall runs after the selection has already been captured, and a selection made there would apply to the next step only.
+The decision happens on `agent/inbox/claimed`, which the agent loop emits at `packages/core/agent-loop/src/agent.ts` while it claims the messages for a step. The plugin first reads the Session's routing mode: a Session in the `fixed` mode is left alone, so the decision below applies only to a Session in the `auto` mode. The very next line captures the step's model selection, so a route the plugin selects in that event is the route the **first** step uses rather than the one after it. This is why the plugin listens to the inbox rather than to `agent/pre-step`: the pre-step waterfall runs after the selection has already been captured, and a selection made there would apply to the next step only.
 
 The plugin calls `agent.model.select()`, the same public seam the Models page uses. The selection is recorded in the session log as a `model/selection` event, so a routed session reads back the route each step actually used.
 
@@ -93,6 +99,7 @@ Failures are read from the `agent/request-error` waterfall, which every failed r
 - The seam the plugin writes to is `agent.model.select()` in `packages/core/agent/src/runtime-types.ts`; the loop's capture point is `packages/core/agent-loop/src/agent.ts`.
 - `packages/llm/llm-local-bridge` registers the bundled local relay routes this plugin usually routes between.
 
+<a id="model-experience"></a>
 ## Model Experience
 
 ### Route selection before the first request
@@ -109,6 +116,7 @@ Routing adds no tokens to the request. The rule table is read from the plugin's 
 
 The routed route replaces the request's provider and model, so the cached prefix the previous provider held for this conversation is not reused: a request that follows a route change is an independent model request rather than an append onto the previous one. A decision that keeps the route the Agent already holds changes nothing in the request, and therefore leaves an already-reusable prefix intact.
 
+<a id="known-limitations-and-deferred-work"></a>
 ## Known Limitations and Deferred Work
 
 - **Rules read the message only.** A rule sees the claimed message's text and whether it carries an image. It does not see the Agent's preset, its tool set, the task's history length, or the deployment's own notion of what kind of work is running, so two tasks that ask for the same thing in different words can land on different routes.

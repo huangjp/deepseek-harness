@@ -21,6 +21,7 @@ kind: "package-reference"
 - [指令与失败行](#command-and-failure-rows)
 - [轮次 token 用量](#turn-token-usage)
 - [已完成轮次的页脚](#completed-turn-footer)
+- [路由归属](#route-attribution)
 - [轮次过程折叠](#turn-process-folding)
 - [分组渲染](#grouped-rendering)
 - [滚动归属](#scroll-ownership)
@@ -84,6 +85,13 @@ Assistant 尝试结束且没有可见消息时，Chat 隐藏已发布的 Node，
 产物扩展可通过 `ChatNodeStore.turnDataSource` 订阅一个 Turn 中指定类型的节点数据。来源包含隐藏节点，并按锚点顺序提供其业务数据。成员关系增量更新；只有被订阅的集合才生成有序数组，其他 Turn 或类型的更新不通知该集合。
 
 已完成轮次的操作页脚位于记录的轮次结束之后。操作行与前方正文或扩展内容相隔 20px。只有最新轮次且最后可见内容为回复时，操作常显；其他结尾及历史轮次在悬停或键盘聚焦时显示操作。不支持悬停的设备始终显示操作。分支操作不可用时，鼠标或触摸点击可查看原因，不会创建分支。
+
+-----
+
+<a id="route-attribution"></a>
+## 路由归属
+
+助手回复下方以小字标注作答的提供方与模型。名称取自持久消息的来源，因此路由切换前记录的回复仍显示当时的线路。来源未指明模型线路的消息不显示标注；与该回复同处的推理行同样不显示。
 
 -----
 
@@ -183,7 +191,7 @@ Chat view 在标记了 `data-text-interaction-source` 的业务节点上检测�
 <a id="model-experience"></a>
 ## 模型体验
 
-无，因为本包在浏览器中渲染已记录的对话状态，不注册任何面向模型的内容。
+本包不注册任何面向模型的内容。它标注每条回复由哪个提供方与模型作答，但不会组装或修改提供方请求。
 
 #### KV Cache 影响
 

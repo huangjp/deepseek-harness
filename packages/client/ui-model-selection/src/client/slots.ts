@@ -56,4 +56,9 @@ export interface ModelSelectInjected {
    * @returns the Host outcome, or undefined when this Session cannot select a model.
    */
   select: (selection: ModelSelection) => Promise<RemoteResult<void> | undefined>
+  /**
+   * Switch the session to automatic routing, where the Host picks the route per task.
+   * @returns the Host outcome, or undefined when this Session cannot select a model.
+   */
+  selectAuto: () => Promise<RemoteResult<void> | undefined>
 }

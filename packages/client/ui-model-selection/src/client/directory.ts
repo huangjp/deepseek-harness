@@ -4,7 +4,7 @@
  * Session's durable selection projection, then submit through the same
  * selectModel call. A switch made in either entry updates this shared state.
  */
-import type { ModelSelectionProjection } from '@deepseek-ai/dsh-agent/types'
+import type { ModelSelectionProjection, RoutingMode } from '@deepseek-ai/dsh-agent/types'
 import type { TrackProductEvent } from '@deepseek-ai/dsh-client-product-analytics/client'
 import type {
   ModelCatalogFailure, ModelProviderGroup, ModelSelection,
@@ -14,6 +14,19 @@ import type { RemoteResult, TypertClientRemote } from '@deepseek-ai/dsh-typert-p
 import type { ObservableSnapshot, SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { ModelCatalogDirectory } from './catalog.ts'
+
+/**
+ * The change one selection request submitted, until the Host confirms it.
+ *
+ * A request either pins a route (the mode becomes `fixed`) or only changes the
+ * routing mode (the mode becomes `auto` and the route stays as it was).
+ */
+export interface PendingModelChange {
+  /** Routing mode the request applies. */
+  readonly mode: RoutingMode
+  /** Model the request pins; null when it only changes the routing mode. */
+  readonly selection: ModelSelection | null
+}
 
 /** Directory snapshot both entries render from. */
 export interface ModelDirectoryState {
@@ -29,10 +42,19 @@ export interface ModelDirectoryState {
   failures: readonly ModelCatalogFailure[]
   /** Lifecycle of the in-flight operation. */
   status: 'idle' | 'loading' | 'ready' | 'selecting' | 'error'
-  /** Selection submitted by the latest `select` until it settles; null otherwise. */
-  pending: ModelSelection | null
+  /** Change submitted by the latest `select` until it settles; null otherwise. */
+  pending: PendingModelChange | null
   /** Whole-request or selection failure text; null when none. */
   error: string | null
+  /**
+   * Routing mode the session follows.
+   *
+   * `auto` lets the Host pick the route per task; `fixed` pins the session to
+   * the model it selected, and no router may override it.
+   */
+  routingMode: RoutingMode
+  /** Whether the deployment offers automatic routing, so the seat may offer it. */
+  routingAvailable: boolean
 }
 
 /** One session's shared directory controller; disposed with the session scope. */
@@ -40,6 +62,7 @@ export class ModelDirectory {
   /** The shared snapshot both entries render from (uSES-safe store). */
   readonly store: SnapshotStore<ModelDirectoryState> = createSnapshotStore<ModelDirectoryState>({
     current: null, routable: null, groups: [], failures: [], status: 'idle', pending: null, error: null,
+    routingMode: 'auto', routingAvailable: false,
   })
 
   /** Latest selection operation wins; an older response never overwrites a newer one. */
@@ -86,6 +109,9 @@ export class ModelDirectory {
    * Select the complete provider/model/reasoning selection. The durable
    * projection frame updates the shared current; failures surface on the store
    * and return with the operation so each entry can present its own failure.
+   *
+   * Naming a route pins it: the session switches to the `fixed` routing mode,
+   * so no router may answer with another route.
    * @param selection - provider, provider-owned model id, and optional adapter-owned effort.
    * @returns the selection outcome, including the original Remote failure.
    */
@@ -95,7 +121,7 @@ export class ModelDirectory {
     const previousEffort = previous?.reasoningEffort ?? (previous === null ? undefined : this.catalog.reasoningFor(previous)?.defaultEffort)
     const nextEffort = selection.reasoningEffort ?? this.catalog.reasoningFor(selection)?.defaultEffort
     const generation = ++this.generation
-    this.store.update((s) => { s.status = 'selecting'; s.pending = selection; s.error = null })
+    this.store.update((s) => { s.status = 'selecting'; s.pending = { mode: 'fixed', selection }; s.error = null })
     const result = await this.sessions.selectModel({
       sessionId: this.sessionId,
       provider: selection.provider,
@@ -122,6 +148,33 @@ export class ModelDirectory {
       if (from === to && previousEffort !== nextEffort) this.track?.('thinking_level_switch', {
         ...this.isBlank() ? {} : { session_id: this.sessionId }, model_name: to, switch_from: previousEffort ?? 'default', switch_to: nextEffort ?? 'default',
       })
+    }
+    this.store.update((s) => { s.status = 'ready'; s.pending = null; s.error = null })
+    this.syncInputs()
+    return { ok: true, value: undefined }
+  }
+
+  /**
+   * Switch the session to automatic routing, where the Host picks the route
+   * per task. The route the session already uses stays as the fallback for a
+   * task no rule covers.
+   * @returns the selection outcome, including the original Remote failure.
+   */
+  async selectAuto(): Promise<RemoteResult<void>> {
+    this.assertAvailable()
+    const generation = ++this.generation
+    this.store.update((s) => { s.status = 'selecting'; s.pending = { mode: 'auto', selection: null }; s.error = null })
+    const result = await this.sessions.selectModel({ sessionId: this.sessionId, routingMode: 'auto' })
+    if (this.disposed || generation !== this.generation) {
+      return result.ok ? { ok: true, value: undefined } : result
+    }
+    if (!result.ok) {
+      this.store.update((s) => {
+        s.status = 'error'
+        s.pending = null
+        s.error = `${result.error.code}: ${result.error.message}`
+      })
+      return result
     }
     this.store.update((s) => { s.status = 'ready'; s.pending = null; s.error = null })
     this.syncInputs()
@@ -164,6 +217,10 @@ export class ModelDirectory {
     const effort = intended?.reasoningEffort ?? reasoning?.defaultEffort
     const retainedEffort = effort === undefined ? undefined
       : reasoning?.efforts.find(level => level.id === effort)?.name ?? effort
+    // The session's own mode wins; a session that recorded none follows the
+    // deployment's default mode.
+    const routingMode: RoutingMode = projected?.routingMode ?? catalog.value?.defaultRoutingMode ?? 'auto'
+    const routingAvailable = catalog.value?.routingAvailable ?? false
     if (catalog.status !== 'ready' || catalog.value === null || projected === undefined) {
       this.store.set({
         current: catalog.value === null ? null : this.store.getSnapshot().current,
@@ -174,6 +231,8 @@ export class ModelDirectory {
         status: catalog.status === 'error' ? 'error' : 'loading',
         pending: this.store.getSnapshot().pending,
         error: catalog.error,
+        routingMode,
+        routingAvailable,
       })
       return
     }
@@ -191,6 +250,8 @@ export class ModelDirectory {
         : 'ready',
       pending: this.store.getSnapshot().pending,
       error: null,
+      routingMode,
+      routingAvailable,
     })
   }
 }

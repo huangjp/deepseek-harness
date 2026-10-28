@@ -11,6 +11,28 @@ import type {
   ModelSelection,
 } from './types.ts'
 
+/** Settings namespace the model router publishes its rule table under. */
+const ROUTER_NAMESPACE = 'model-router'
+
+/**
+ * Whether the deployment offers automatic routing.
+ *
+ * The router publishes its rule table as a settings namespace, so a deployment
+ * that mounts it — and leaves it enabled — offers the Session the choice of
+ * letting a router pick the route. A deployment without that namespace offers
+ * no such choice.
+ * @param ctx - Host context carrying the settings service.
+ * @returns whether a Session may route automatically.
+ */
+function hasRouting(ctx: Context): boolean {
+  const settings = ctx.get('settings')
+  if (settings === undefined) return false
+  const namespace = settings.describe({ redactSecrets: true }).find(view => view.ns === ROUTER_NAMESPACE)
+  const value = namespace?.value
+  if (typeof value !== 'object' || value === null) return false
+  return Reflect.get(value, 'enabled') === true
+}
+
 /**
  * Build the browser model catalog without requiring a Session.
  * @param ctx - Host context carrying the live LLM registry.
@@ -65,6 +87,8 @@ export async function buildModelCatalog(
     .filter(group => group.models.length > 0)
   return {
     default: { ...defaultSelection },
+    defaultRoutingMode: ctx.agentDefaultModel.currentRoutingMode(),
+    routingAvailable: hasRouting(ctx),
     routableProviders: groups.map(group => group.id),
     groups,
     failures: catalog.flatMap(item => item.kind === 'failure' ? [item.failure] : []),

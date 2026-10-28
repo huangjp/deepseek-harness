@@ -2,7 +2,7 @@
 
 import type { ContentBlock, StreamChunk } from '@deepseek-ai/dsh-llm/types'
 import type {
-  AssistantBlock, ContextProducerView, KnownContextForm,
+  AssistantBlock, AssistantProviderMetadataView, ContextProducerView, KnownContextForm,
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
 
 /* jscpd:ignore-start -- Chat and Trajectory own independent event-to-view projections. */
@@ -95,6 +95,20 @@ export function skillInvocationName(source: unknown): string | null {
   const record = asRecord(source)
   if (record === null || readString(record, 'kind') !== 'skill-invocation') return null
   return readString(record, 'name')
+}
+
+/**
+ * Read the provider/model route that produced one assistant message.
+ * @param source - Logged `assistant/message` source.
+ * @returns Route identity, or undefined when the source names no model route.
+ */
+export function assistantProviderMetadata(source: unknown): AssistantProviderMetadataView | undefined {
+  const record = asRecord(source)
+  if (record === null || readString(record, 'kind') !== 'model') return undefined
+  const provider = readString(record, 'provider')
+  const model = readString(record, 'model')
+  if (provider === null || model === null) return undefined
+  return { provider, model }
 }
 
 /**

@@ -144,6 +144,11 @@ export class SessionCommandController {
 
   /**
    * Validate and record one Session model selection; save the default in the background.
+   *
+   * A request that names a route pins it and switches the Session to the `fixed`
+   * routing mode, so that no router may override the choice. A request that
+   * carries only a routing mode changes who picks the route and leaves the
+   * named route alone.
    * @param request - Session identity and requested model selection.
    * @returns the normalized selection recorded for the Session, without waiting for default persistence.
    */
@@ -151,7 +156,21 @@ export class SessionCommandController {
     const agent = await this.resolveAgent(request.sessionId)
     return this.agents.serializeImageAdmission(agent, async () => {
       try {
-        await this.requireModel(request)
+        if (request.provider === undefined || request.model === undefined) {
+          const mode = request.routingMode
+          if (mode === undefined) {
+            throw new RemoteError('session/model-unavailable', 'The request names no model route.',
+              { provider: request.provider ?? '', model: request.model ?? '' })
+          }
+          agent.model.setRoutingMode(mode)
+          void this.ctx.agentDefaultModel.saveRoutingMode(mode).catch((error: unknown) => {
+            this.ctx.logger.warn(
+              `session-controller: routing mode changed for the Session but the default was not saved: ${String(error)}`,
+            )
+          })
+          return { selected: null, routingMode: mode }
+        }
+        await this.requireModel({ provider: request.provider, model: request.model })
         const selected: AgentModelSelection = {
           provider: request.provider,
           model: request.model,
@@ -161,18 +180,24 @@ export class SessionCommandController {
         }
         await this.ctx.llm.resolveCallConfig(selected)
         agent.model.select(selected)
+        agent.model.setRoutingMode('fixed')
         void this.ctx.agentDefaultModel.saveSelection(selected).catch((error: unknown) => {
           this.ctx.logger.warn(
             `session-controller: model selection changed for the Session but the default was not saved: ${String(error)}`,
           )
         })
-        return { selected: { ...selected } }
+        void this.ctx.agentDefaultModel.saveRoutingMode('fixed').catch((error: unknown) => {
+          this.ctx.logger.warn(
+            `session-controller: routing mode changed for the Session but the default was not saved: ${String(error)}`,
+          )
+        })
+        return { selected: { ...selected }, routingMode: 'fixed' }
       } catch (error) {
         if (remoteErrorOf(error) !== undefined) throw error
         throw new RemoteError(
           'session/model-unavailable',
           error instanceof Error ? error.message : String(error),
-          { provider: request.provider, model: request.model },
+          { provider: request.provider ?? '', model: request.model ?? '' },
         )
       }
     })

@@ -40,7 +40,7 @@ const handle = await ctx.agents.create({
 await handle.dispose()   // stops the loop, unregisters, removes the session, unwinds the scope
 ```
 
-`AgentOptions` supplies the initial provider/model route, optional adapter-owned `reasoningEffort`, and optional positive `maxTokens` output cap. The loop validates exact-model reasoning support, resolves adapter defaults, records the effective values in the request header, and applies them to each conversation request. An optional `setup(agentCtx, agent)` callback composes the agent's scoped world before it is published: `agentCtx` owns registrations, while the explicit unpublished Agent provides its Session; the Context has no reverse Agent property. Scoped tools, prompt sections, and listeners exist before `agent/created`. Setup is composition-only: drive the agent only after creation resolves. The Session has entered its store and completed `session/created` before setup, so initialization events follow the live event feed.
+`AgentOptions` supplies the initial provider/model route, optional adapter-owned `reasoningEffort`, the routing mode the Session follows while it records none of its own, and optional positive `maxTokens` output cap. The loop validates exact-model reasoning support, resolves adapter defaults, records the effective values in the request header, and applies them to each conversation request. An optional `setup(agentCtx, agent)` callback composes the agent's scoped world before it is published: `agentCtx` owns registrations, while the explicit unpublished Agent provides its Session; the Context has no reverse Agent property. Scoped tools, prompt sections, and listeners exist before `agent/created`. Setup is composition-only: drive the agent only after creation resolves. The Session has entered its store and completed `session/created` before setup, so initialization events follow the live event feed.
 
 <a id="model-selection"></a>
 ### Select a model
@@ -48,6 +48,8 @@ await handle.dispose()   // stops the loop, unregisters, removes the session, un
 `agent.model` implements `Model`, alongside `agent.inbox`. `current()` returns a detached selection: the pending choice, then the latest request's choice, then live `agent.options`; it returns `undefined` when no source supplies both provider and model. Reading does not pin a choice or change a prepared step.
 
 `select({ provider, model, reasoningEffort? })` assigns the complete choice for the next step whose preparation has not begun. Omitted effort uses adapter defaults; selection neither inherits old effort nor queries defaults. An equal recorded choice is a no-op, but a choice equal only to initial options is recorded as `model/selection`. Callers validate availability and capabilities; append failures retain the Session's existing guarantees.
+
+`RoutingMode` names who chooses the route that answers a Session: `auto` leaves the choice to the deployment's router, and `fixed` pins the Session to the model it selected, so no router may override that choice. `routingMode()` reads the mode that applies to the next step — the recorded one, else the live `agent.options.routingMode`, else `auto`. `setRoutingMode(mode)` records a mode for the next steps; an equal recorded mode is a no-op. The mode is written to the session log as a `model/routing-mode` event, so a resumed Session reads back the mode it chose.
 
 Ordinary resume keeps the recorded choice. An entry point explicitly overriding the model first builds a complete selection, retaining the previous explicit effort only when the configured route is unchanged and omits effort, then calls `select()`. Web and ACP user selections call `select()` directly, so omitted effort means Auto. Selecting a Session model does not change deployment defaults.
 
@@ -105,7 +107,7 @@ The package is built on one separation: the public `Agent` surface and registry 
 
 ### Durable model selection
 
-`Model` and the `modelSelection` projection types live here. The default driver creates each `AgentModel` and owns projection registration alongside its inbox. Each instance binds the Session, live options, and a projection reader; it holds no second copy of the choice. The loop captures a detached selection before step preparation and retains it across retries.
+`Model` and the `modelSelection` projection types live here. The default driver creates each `AgentModel` and owns projection registration alongside its inbox. Each instance binds the Session, live options, and a projection reader; it holds no second copy of the choice. The loop captures a detached selection before step preparation and retains it across retries. The same projection folds the `model/routing-mode` event, so a Session's routing mode is durable state rather than a live option alone.
 
 ### Source map
 
