@@ -55,7 +55,7 @@ export type Config = z.infer<typeof Config>
 
 ## `@deepseek-ai/dsh-agent-default-model`
 
-- `refs`: `Volatile` (`@deepseek-ai/cordis`)
+- `refs`: [`RoutingMode`](../packages/core/agent/src/index.ts) · `Volatile` (`@deepseek-ai/cordis`)
 - `source`: [`packages/core/agent-default-model/src/index.ts:24`](../packages/core/agent-default-model/src/index.ts)
 
 ```ts config-catalog
@@ -67,6 +67,8 @@ export interface Config {
   model: Volatile<string>
   /** Adapter-owned reasoning effort; omission follows the provider default. */
   reasoningEffort: Volatile<string | undefined>
+  /** Routing mode new Sessions follow while they record none of their own. */
+  routingMode: Volatile<RoutingMode>
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-agent-default-model -->
@@ -1667,10 +1669,31 @@ export interface Config {
   host: string
   /** WorkBuddy 模型反代端口。 */
   port: number
-  /** WorkBuddy 反代的模型通道：`serve`（客户端网关）/ `cli`（CodeBuddy CLI）/ `openai`（任意 OpenAI 兼容端点）。 */
+  /**
+   * WorkBuddy 反代的模型通道：
+   * - `wbcloud`（默认）：直连 WorkBuddy 云端，自带官方客户端的渠道头。
+   * - `serve`：客户端本地网关的一次性 agent 接口 —— 云端现在做渠道校验，这条路已被拒。
+   * - `cli`：无头调用本机 CodeBuddy CLI。
+   * - `openai`：任意 OpenAI 兼容端点。
+   */
   backend: string
   /** 网关凭据缓存目录；留空则落在系统临时目录（安装目录通常不可写）。 */
   cacheDir: string
+  /** `wbcloud` 通道的专属设置；其余通道不读这里。 */
+  wbcloud: {
+    /** 运行 `workbuddy-token.py` 的解释器；留空则自动在 LOCALAPPDATA\Programs\Python 与 PATH 里找。 */
+    python: string
+    /** 收割脚本路径；留空则用同目录的 `workbuddy-token.py`。 */
+    harvestScript: string
+    /**
+     * WorkBuddy 客户端缓存产品配置的目录；留空则用默认的
+     * `%USERPROFILE%\.workbuddy-ai\cache`。
+     *
+     * 反代从那里读账号真实的模型清单（哪些模型可用、倍率、上下文长度），
+     * 所以 `/v1/models` 跟着账号走，而不是跟着一份写死的清单走。
+     */
+    catalogDir: string
+  }
   /** Microsoft Copilot 反代。 */
   copilot: {
     /** 是否启动 Copilot 反代（需先收割到令牌，否则只监听、调用会报 no_token）。 */
@@ -1679,6 +1702,19 @@ export interface Config {
     port: number
     /** 令牌/模板收割目录；留空则用 `%USERPROFILE%\copilot-probe`。 */
     harvestDir: string
+    /**
+     * 交给这条通道的工具清单。
+     *
+     * chatHub 没有原生 function calling，工具只以提示词里的清单存在 —— 清单里
+     * 有什么，模型就有什么。默认只给「读文档」「写文档」：这条通道专用于架构与
+     * 文档的设计，而 DSH 的 27 个工具渲染进去是一万六千多字符的提示词，模型
+     * 反而更容易把清单当成参考文档、回一句「这些工具不属于我实际可用的工具集」。
+     * 给空数组则这条通道只做纯文本生成。
+     */
+    tools: {
+      /** 放行的工具名。 */
+      allow: string[]
+    }
   }
   /** 华为「AI空间」小艺反代。 */
   xiaoyi: {
@@ -1923,6 +1959,31 @@ export interface Config extends ProtocolConfig, ModelListingConfig {
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-llm-deepseek-api-key -->
+
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-llm-minimax -->
+<a id="deepseek-aidsh-llm-minimax"></a>
+
+## `@deepseek-ai/dsh-llm-minimax`
+
+- `inject`: `llm`
+- `refs`: `Volatile` (`@deepseek-ai/cordis`)
+- `source`: [`packages/llm/llm-minimax/src/index.ts:45`](../packages/llm/llm-minimax/src/index.ts)
+
+```ts config-catalog
+/** Plugin configuration: where the route points and how it authenticates. */
+export interface Config {
+  /** Credential reference holding the MiniMax API key. */
+  apiKeyEnv: Volatile<string>
+  /** Anthropic-compatible endpoint root; the Messages path is appended. */
+  baseURL: Volatile<string>
+  /** Thinking depth a request that names none materializes; MiniMax defaults to `max`. */
+  reasoningEffort: Volatile<MiniMaxEffort>
+}
+
+/** One MiniMax thinking depth. */
+export type MiniMaxEffort = typeof MINIMAX_EFFORTS[number]
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-llm-minimax -->
 
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-llm-pi-ai -->
 <a id="deepseek-aidsh-llm-pi-ai"></a>
@@ -2431,6 +2492,51 @@ export interface Config {
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-message-feedback -->
+
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-model-router -->
+<a id="deepseek-aidsh-model-router"></a>
+
+## `@deepseek-ai/dsh-model-router`
+
+- `inject`: `llm`
+- `refs`: `Volatile` (`@deepseek-ai/cordis`)
+- `source`: [`packages/core/model-router/src/index.ts:67`](../packages/core/model-router/src/index.ts)
+
+```ts config-catalog
+/** Deployment configuration for the routing table. */
+export interface Config {
+  /** Whether routing may change the route a step uses. */
+  enabled: Volatile<boolean>
+  /** The rule table, evaluated in declaration order. */
+  rules: Volatile<readonly RuleConfig[]>
+  /**
+   * Consecutive failures after which a provider route is skipped.
+   *
+   * Zero keeps every route eligible: the router then never routes around a
+   * failing route, and the harness's own retry policy stays in charge.
+   */
+  failureThreshold: Volatile<number>
+  /** How long a skipped provider route stays skipped, in milliseconds. */
+  cooldownMs: Volatile<number>
+}
+
+/** One rule as the deployment declares it. */
+export interface RuleConfig {
+  /** Stable identifier used in diagnostics. */
+  name: string
+  /** Keywords that must appear in the message text; empty ignores the text. */
+  keywords: readonly string[]
+  /** Required image condition; absent ignores attachments. */
+  hasImage?: boolean
+  /** Target provider route. */
+  provider: string
+  /** Target model id on that provider. */
+  model: string
+  /** Reasoning effort to request; absent leaves the provider default. */
+  reasoningEffort?: string
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-model-router -->
 
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-office-to-pdf -->
 <a id="deepseek-aidsh-office-to-pdf"></a>
@@ -4112,6 +4218,94 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-tool-lsp -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-tool-minimax-media -->
+<a id="deepseek-aidsh-tool-minimax-media"></a>
+
+## `@deepseek-ai/dsh-tool-minimax-media`
+
+- `inject`: `tools`
+- `refs`: `Volatile` (`@deepseek-ai/cordis`)
+- `source`: [`packages/media/tool-minimax-media/src/index.ts:126`](../packages/media/tool-minimax-media/src/index.ts)
+
+```ts config-catalog
+/** Plugin configuration. */
+export interface Config {
+  /** Literal key; prefer {@link apiKeyEnv}. */
+  apiKey: Volatile<string | undefined>
+  /** Credential reference holding the MiniMax key. */
+  apiKeyEnv: Volatile<string>
+  /** Native API root. */
+  apiBaseURL: Volatile<string>
+  /** Image model. */
+  imageModel: Volatile<string>
+  /** Default aspect ratio for image generation. */
+  aspectRatio: Volatile<string>
+  /** Speech-synthesis model. */
+  speechModel: Volatile<string>
+  /** Default voice. */
+  voiceId: Volatile<string>
+  /** Music model. */
+  musicModel: Volatile<string>
+  /** Speech-recognition model. */
+  asrModel: Volatile<string>
+  /** Audio container for produced audio. */
+  audioFormat: Volatile<string>
+  /** Sample rate for produced audio. */
+  sampleRate: Volatile<number>
+  /** Largest accepted download, in bytes. */
+  maxDownloadBytes: Volatile<number>
+  /** Largest accepted input file for transcription or upload, in bytes. */
+  maxUploadBytes: Volatile<number>
+  /** Delay between two status reads of a background task, in milliseconds. */
+  pollIntervalMs: Volatile<number>
+  /** Upper bound on one background task, in milliseconds. */
+  pollTimeoutMs: Volatile<number>
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-tool-minimax-media -->
+
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-tool-minimax-video -->
+<a id="deepseek-aidsh-tool-minimax-video"></a>
+
+## `@deepseek-ai/dsh-tool-minimax-video`
+
+- `inject`: `tools`
+- `refs`: `Volatile` (`@deepseek-ai/cordis`)
+- `source`: [`packages/media/tool-minimax-video/src/index.ts:94`](../packages/media/tool-minimax-video/src/index.ts)
+
+```ts config-catalog
+/** Plugin configuration: endpoints, defaults, and one credential. */
+export interface Config {
+  /** Literal key; prefer {@link apiKeyEnv}. */
+  apiKey: Volatile<string | undefined>
+  /** Credential reference holding the MiniMax key. */
+  apiKeyEnv: Volatile<string>
+  /** Native API root for task endpoints. */
+  apiBaseURL: Volatile<string>
+  /** Anthropic-compatible root for understanding. */
+  chatBaseURL: Volatile<string>
+  /** Model used when the caller names none. */
+  videoModel: Volatile<string>
+  /** Resolution used when the caller names none. */
+  resolution: Volatile<string>
+  /** Duration used when the caller names none. */
+  durationSeconds: Volatile<number>
+  /** Aspect ratio used when the caller names none. */
+  ratio: Volatile<string>
+  /** Delay between two status reads, in milliseconds. */
+  pollIntervalMs: Volatile<number>
+  /** Upper bound on one create-and-poll operation, in milliseconds. */
+  pollTimeoutMs: Volatile<number>
+  /** Largest accepted video download, in bytes. */
+  maxDownloadBytes: Volatile<number>
+  /** Output cap for one understanding turn. */
+  maxTokens: Volatile<number>
+  /** Model that answers the understanding turn. */
+  understandingModel: Volatile<string>
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-tool-minimax-video -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-tool-present -->
 <a id="deepseek-aidsh-tool-present"></a>
 
@@ -4656,6 +4850,42 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-web-search-exa -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-web-search-minimax -->
+<a id="deepseek-aidsh-web-search-minimax"></a>
+
+## `@deepseek-ai/dsh-web-search-minimax`
+
+- `inject`: `web`
+- `refs`: `Volatile` (`@deepseek-ai/cordis`)
+- `source`: [`packages/web/web-search-minimax/src/index.ts:48`](../packages/web/web-search-minimax/src/index.ts)
+
+```ts config-catalog
+/** Plugin configuration. */
+export interface Config {
+  /** Literal key; prefer {@link apiKeyEnv} so no secret enters configuration files. */
+  apiKey: Volatile<string | undefined>
+  /** Credential reference resolved for each search. */
+  apiKeyEnv: Volatile<string>
+  /** Anthropic-compatible root; `/v1/messages` is appended. */
+  baseURL: Volatile<string>
+  /** Model that runs the server-side search. */
+  model: Volatile<string>
+  /** Output cap for the search turn. */
+  maxTokens: Volatile<number>
+  /** Searches one request may perform. */
+  maxUses: Volatile<number>
+  /**
+   * Admission tier the search asks for.
+   *
+   * `priority` costs 1.5 times the standard tier and answers sooner.
+   * `MiniMax-M3.1-Flash` rejects the field outright, so a deployment that
+   * wants it must point the search at `MiniMax-M3` as well.
+   */
+  serviceTier: Volatile<'standard' | 'priority'>
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-web-search-minimax -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-web-search-perplexity -->
 <a id="deepseek-aidsh-web-search-perplexity"></a>
 
@@ -4828,6 +5058,7 @@ export interface Config {
 | `@deepseek-ai/dsh-client-ui-settings-agent-loop` | — | [`packages/client/ui-settings-agent-loop/src/index.ts`](../packages/client/ui-settings-agent-loop/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-settings-general` | — | [`packages/client/ui-settings-general/src/index.ts`](../packages/client/ui-settings-general/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-settings-local-bridge` | — | [`packages/client/ui-settings-local-bridge/src/index.ts`](../packages/client/ui-settings-local-bridge/src/index.ts) |
+| `@deepseek-ai/dsh-client-ui-settings-model-router` | — | [`packages/client/ui-settings-model-router/src/index.ts`](../packages/client/ui-settings-model-router/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-settings-plugin-inventory` | — | [`packages/client/ui-settings-plugin-inventory/src/index.ts`](../packages/client/ui-settings-plugin-inventory/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-settings-plugins` | — | [`packages/client/ui-settings-plugins/src/index.ts`](../packages/client/ui-settings-plugins/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-settings-session-log` | — | [`packages/client/ui-settings-session-log/src/index.ts`](../packages/client/ui-settings-session-log/src/index.ts) |
