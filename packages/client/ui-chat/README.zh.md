@@ -191,7 +191,7 @@ Chat view 在标记了 `data-text-interaction-source` 的业务节点上检测�
 <a id="model-experience"></a>
 ## 模型体验
 
-本包不注册任何面向模型的内容。它标注每条回复由哪个提供方与模型作答，但不会组装或修改提供方请求。
+无，因为它是浏览器侧的 Chat 呈现，不注册任何面向模型的内容。
 
 #### KV Cache 影响
 

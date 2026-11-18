@@ -62,6 +62,109 @@
     provider: dpv41f
     model: deepseek-v4.1-flash
 
+# ── 内置路由表（随安装包分发）─────────────────────────────────────────────
+#
+# 路由表属于用户设置层：不在这里声明的话，新机器（profile patch 为 `[]`）用的是
+# 插件默认值 —— `enabled: false` 且规则表为空，模型选择器里连「智能路由」入口都
+# 不会出现（模型目录只在 `model-router` 命名空间 `enabled` 为真时公告这个选项）。
+# 所以这张表写进组合层，随包一起走。
+#
+# 规则自上而下读，第一条命中的生效：命中条件是「消息正文含任一关键词」或「消息
+# 带图」；两个条件都不声明的规则什么都不匹配，所以兜底要写成 hasImage: true 与
+# hasImage: false 两条，合起来才覆盖所有任务。
+#
+# 规则点名一个本机没注册的线路时，路由器会跳过它并继续读下一条，任务落到后面的
+# 兜底，不会失败。所以这张表只写随包注册的线路：`minimax-official` 是本包的一等 MiniMax
+# 路由（`@deepseek-ai/dsh-llm-minimax`，用 `MINIMAX_API_KEY`），`dpv41f` /
+# `slefgpt56` / `hwcelia` 是三个内置反代。
+#
+# 想改这张表：在**本机** profile 的 cordis.patch.yml 里写一条同名 `- id:
+# model-router` 即可整行覆盖（patch 替换整行 config），或在「插件 → 模型路由」
+# 页面上改。
+- id: model-router
+  config:
+    enabled: true
+    rules:
+      - name: deep-reasoning
+        keywords:
+          - 推理
+          - 分析
+          - 架构
+          - 方案
+          - 设计
+          - 排查
+          - 根因
+          - 评估
+          - 对比
+          - 规划
+          - 优化
+          - 重构
+          - debug
+          - analyze
+          - architect
+          - plan
+          - design
+          - research
+          - review
+        provider: minimax-official
+        model: MiniMax-M3.1-Flash
+        reasoningEffort: high
+      - name: microsoft-office
+        keywords:
+          - excel
+          - word
+          - ppt
+          - outlook
+          - office
+          - 表格
+          - 邮件
+          - 幻灯片
+          - 周报
+        provider: slefgpt56
+        model: copilot
+      - name: creative-writing
+        keywords:
+          - 小说
+          - 写作
+          - 文案
+          - 润色
+          - 大纲
+          - 章节
+          - 正文
+          - 剧本
+          - 故事
+          - novel
+          - write
+          - draft
+          - story
+        provider: hwcelia
+        model: xiaoyi-chat
+      - name: quick-text
+        keywords:
+          - 翻译
+          - 摘要
+          - 总结
+          - 概括
+          - 改写
+          - translate
+          - summarize
+          - rewrite
+        provider: minimax-official
+        model: MiniMax-M3.1-Flash
+        reasoningEffort: low
+      - name: fallback-image
+        keywords: []
+        hasImage: true
+        provider: dpv41f
+        model: deepseek-v4.1-flash
+      - name: fallback-text
+        keywords: []
+        hasImage: false
+        provider: dpv41f
+        model: deepseek-v4.1-flash
+    failureThreshold: 2
+    cooldownMs: 300000
+
 # ── web-only host rows, the transport layer, and the browser roster ─────────
 
 # `dsh.client` rows are the browser roster the modules node half scans into
@@ -664,6 +767,15 @@
 
 - id: tool-web
   disabled: true
+
+# The desktop surface searches with MiniMax, the same key its models use: the
+# shipped default model route is a MiniMax-compatible relay, so a user who fills
+# in one MiniMax key gets chat and search from it. A deployment that keeps
+# DeepSeek search overrides this row back to `deepseek-official`.
+- id: web
+  config:
+    searchProvider: minimax
+    fetchProvider: http
 
 # The preset selection registry. The shipped preset declarations follow as
 # separate patch files under `presets/`, listed after this file in

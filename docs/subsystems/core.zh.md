@@ -211,6 +211,8 @@ interface AgentOptions {
   model?: string
   /** Adapter-owned reasoning effort for the selected provider/model route. */
   reasoningEffort?: ReasoningEffortId | undefined
+  /** Routing mode the Agent follows while the Session records none; `auto` leaves the route to a router. */
+  routingMode?: RoutingMode | undefined
   /** Maximum output tokens for each conversation-model request. */
   maxTokens?: number
 }
@@ -241,6 +243,19 @@ interface Model {
    */
   select(selection: Readonly<ModelSelection>): void
 
+  /**
+   * Read the routing mode that applies to the next step. A Session that never
+   * chose one follows the Agent's live options.
+   * @returns `auto` when a router may pick the route, `fixed` when the Session pinned one.
+   */
+  routingMode(): RoutingMode
+
+  /**
+   * Record the routing mode that applies from the next step until a later mode.
+   * An equal recorded mode is a no-op.
+   * @param mode - routing mode the Session selected.
+   */
+  setRoutingMode(mode: RoutingMode): void
 }
 ```
 
@@ -267,6 +282,8 @@ interface ModelSelectionProjectionState {
   readonly lastUsed: ModelSelection | null
   /** Later recorded selection not yet used by a matching model request. */
   readonly pending: ModelSelection | null
+  /** Routing mode the Session recorded; null while it never chose one. */
+  readonly routingMode: RoutingMode | null
 }
 ```
 
@@ -277,6 +294,8 @@ interface ModelSelectionProjection {
   readonly lastUsed: ModelSelection | null
   /** Selection the next model step uses; null while the Agent's initial options supply the route. */
   readonly next: ModelSelection | null
+  /** Routing mode the Session recorded; null while the Session never chose one. */
+  readonly routingMode: RoutingMode | null
 }
 ```
 

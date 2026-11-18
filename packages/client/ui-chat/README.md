@@ -191,7 +191,7 @@ The Chat view detects selection and context-menu gestures on business nodes mark
 <a id="model-experience"></a>
 ## Model Experience
 
-This package registers nothing model-facing. It names the provider and model that answered each reply, but it neither assembles nor modifies provider requests.
+None, as it is browser-side Chat presentation and registers nothing model-facing.
 
 #### KV Cache effect
 

@@ -9,8 +9,8 @@
   en: 121627188689278d
   zh: ff086db171112441
 /deepseek-ai-dsh-model-router/summary:
-  en: 514250de33ba7981
-  zh: d96598f64fc48437
+  en: 13d602773e96a36a
+  zh: c53166f4d52f9e1c
 /deepseek-ai-dsh-model-router/table-of-contents:
   en: b563e4ec4727d0de
   zh: 53bc178a9c9491e8
@@ -35,12 +35,18 @@
 /deepseek-ai-dsh-model-router/model-experience/route-selection-before-the-first-request/what-the-model-sees:
   en: 4f54b8a3b2f0e2d9
   zh: 94e5c26f413b1878
+/deepseek-ai-dsh-model-router/model-experience/route-selection-before-the-first-request/what-the-model-sees/the-notice-the-model-reads:
+  en: e5124c303f6148fb
+  zh: 14e3845676a0f52b
 /deepseek-ai-dsh-model-router/model-experience/route-selection-before-the-first-request/token-effect:
   en: bce388eac555726d
   zh: 75baf6d377238e8d
 /deepseek-ai-dsh-model-router/model-experience/route-selection-before-the-first-request/kv-cache-effect:
-  en: cc3074be6cd7de9f
-  zh: 82e399119262f271
+  en: 63f3b7200724f56a
+  zh: 18fa4e997fdd7882
 /deepseek-ai-dsh-model-router/known-limitations-and-deferred-work:
-  en: 8027ac05acfed917
-  zh: aed1aa257ade8bbe
+  en: 5bac9eb5bd5cd611
+  zh: 9d60af77e08fa348
+/deepseek-ai-dsh-model-router/known-limitations-and-deferred-work/dev-note:
+  en: 2d18456d6b2814e8
+  zh: 618fa3fa95c58b4c
