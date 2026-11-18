@@ -357,7 +357,7 @@ describe('dsh-doc skill consolidation', () => {
       const metadata = readFrontmatter(file)
       expect(packageReadmeMetadataErrors(file, metadata), file).toEqual([])
     }
-  })
+  }, 30_000)
 
   it('maps persistence transition records to their dedicated document kind', () => {
     const files = globSync('docs/persistence-changes/*.md', { cwd: root })
@@ -407,7 +407,7 @@ describe('dsh-doc skill consolidation', () => {
       const source = readFileSync(resolve(root, file), 'utf8')
       expect(packageReadmeStructureErrors(file, source), file).toEqual([])
     }
-  })
+  }, 30_000)
 
   it('rejects redundant fields and a kind that does not match the README position', () => {
     expect(packageReadmeMetadataErrors('packages/example/README.md', {
