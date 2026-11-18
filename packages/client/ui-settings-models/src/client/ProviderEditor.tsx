@@ -45,7 +45,7 @@ import { ApiKeyInput } from './ApiKeyInput.tsx'
 import styles from './ModelsSection.module.css'
 
 /** Per-adapter-family curated field sets (unknown namespaces get the hint alone). */
-type EditorLayout = 'deepseek' | 'pi-ai' | 'unknown'
+type EditorLayout = 'deepseek' | 'pi-ai' | 'minimax' | 'unknown'
 
 
 
@@ -155,6 +155,10 @@ export function pathOps(
 function layoutOf(ns: string): EditorLayout {
   if (ns === 'llm-deepseek') return 'deepseek'
   if (ns === 'llm-pi-ai') return 'pi-ai'
+  // A first-party family whose route is fully described by code: the endpoint,
+  // the model catalog, and every compatibility switch are composition values,
+  // so the one thing a user supplies here is the key.
+  if (ns === 'llm-minimax') return 'minimax'
   return 'unknown'
 }
 
@@ -198,6 +202,9 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
   const fallback = schema.getPath(namespace.value, settingsPath)
   const disabled = props.readOnly || busy
   const layout = layoutOf(namespace.ns)
+  // A code-registered family owns every profile field, so its card is the key
+  // input alone: no editable identity, endpoint, or model list to write back.
+  const credentialOnly = props.credentialOnly === true || layout === 'minimax'
   const keyRef = refFor(schema, namespace, settingsPath, props.provider)
   // The same schema read the create card makes, so the choices offered here
   // and there cannot drift apart: both come from the adapter's own `Config`.
@@ -274,7 +281,7 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
       && stringAt(fallback, 'apiKeyEnv') === undefined && keyValue.length > 0
       ? schema.setPath(draft, ['apiKeyEnv'], keyRef)
       : draft
-    if (props.credentialOnly !== true) {
+    if (!credentialOnly) {
       // The same checker gates the submit button, so a card cannot reach this
       // with a bad row; it stays because the schema check below would refuse
       // the write with a message naming a path instead of the row, and because
@@ -286,7 +293,7 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
       }
     }
     /* v8 ignore next -- apply is only reachable from the rendered card, which required a resolved node */
-    if (props.credentialOnly !== true && node !== undefined && settingsPath.length === 0) {
+    if (!credentialOnly && node !== undefined && settingsPath.length === 0) {
       const sectionError = schema.validate(node, next)
       if (sectionError !== undefined) return sectionError
     }
@@ -294,7 +301,7 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
       && fallback === undefined
       && committedOriginal === undefined
       && Object.keys(next).length === 0
-    const ops: SettingsPathOpView[] = props.credentialOnly === true
+    const ops: SettingsPathOpView[] = credentialOnly
       ? []
       : materializesNativeProfile
         ? [{ op: 'set', path: [...settingsPath], value: {} }]
@@ -438,7 +445,7 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
             {credentialHint === undefined ? null : <p id={`${props.provider}-credential-hint`} className={styles[missingRefs ? 'notice' : detectedRef === undefined ? 'advancedHint' : 'savedNotice']}>{credentialHint}</p>}
             {shownKeyFailure === undefined ? null : <p className={styles['error']}>{t(shownKeyFailure)}</p>}
           </div>}
-        {props.credentialOnly === true ? null : <details className={styles['customized']}>
+        {credentialOnly ? null : <details className={styles['customized']}>
           <summary className={styles['customizedSummary']}>{t('customized')}</summary>
           <div className={styles['customizedBody']}>
             {/* The name and the protocol are the create card's two remaining
@@ -560,7 +567,7 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
   }
 
   return (
-    <div className={props.credentialOnly === true ? styles['addBlock'] : styles['editor']}>
+    <div className={credentialOnly ? styles['addBlock'] : styles['editor']}>
       {props.hideTitle === true
         ? null
         : (
@@ -573,9 +580,9 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
         )}
       {layout === 'unknown'
         ? <p className={styles['advancedHint']}>{`${t('advancedHint')} (${namespace.ns})`}</p>
-        : curatedFields(layout)}
+        : curatedFields(layout === 'pi-ai' ? 'pi-ai' : 'deepseek')}
       {failure !== undefined ? <p className={styles['error']}>{failure}</p> : null}
-      {props.credentialOnly === true || modelFailure === undefined
+      {credentialOnly || modelFailure === undefined
         ? null
         : (
           <p className={styles['advancedHint']}>
@@ -586,7 +593,7 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
         t={t}
         busy={busy}
         submitDisabled={disabled || layout === 'unknown'
-          || (props.credentialOnly !== true && modelFailure !== undefined)
+          || (!credentialOnly && modelFailure !== undefined)
           || shownKeyFailure !== undefined
           || (props.credentialRequired === true && keyValue.length === 0)}
         submitLabelKey={props.submitLabelKey ?? 'apply'}
