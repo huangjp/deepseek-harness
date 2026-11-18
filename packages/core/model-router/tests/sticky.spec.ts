@@ -38,7 +38,7 @@ describe('model-router stickiness', () => {
     expect(stickyBreakText('route-held', 'p1/m1')).toContain('quota')
     expect(stickyBreakText('route-unavailable', 'p1/m1')).toContain('configuration')
     expect(stickyBreakText('needs-vision', 'p1/m1')).toContain('image')
-    const target: RouteTarget = { provider: 'p2', model: 'm2', reasoningEffort: undefined }
+    const target: RouteTarget = { provider: 'p2', model: 'm2' }
     expect(stickyFromTarget(target, 'hard', true, 'hard').tier).toBe('hard')
   })
 })

@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { Config } from '../src/index.ts'
+import { Config, type Config as RouterConfig } from '../src/index.ts'
+
+/** The schema's public type is the resolved config, so the test passes the raw document through a widened call. */
+function load(input: object): RouterConfig {
+  const schema: (value: object) => RouterConfig = Config as (value: object) => RouterConfig
+  return schema(input)
+}
 
 describe('model-router config', () => {
   it('keeps an old rule table and fills the new sections from their defaults', () => {
-    const config = Config({
+    const config = load({
       enabled: true,
       rules: [{ name: 'writing', keywords: ['小说'], provider: 'p1', model: 'm1' }],
       failureThreshold: 2,
@@ -24,7 +30,7 @@ describe('model-router config', () => {
   })
 
   it('accepts a tier, a route list, and scored health', () => {
-    const config = Config({
+    const config = load({
       rules: [{
         name: 'hard',
         tier: 'hard',

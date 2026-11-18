@@ -334,7 +334,9 @@ export function classifyTask(
  * @param overrides - deployment fields; an omitted list keeps the built-in one.
  * @returns a complete options object.
  */
-export function resolveClassifierOptions(overrides: Partial<ClassifierOptions> | undefined): ClassifierOptions {
+export function resolveClassifierOptions(
+  overrides?: { [K in keyof ClassifierOptions]?: ClassifierOptions[K] | undefined },
+): ClassifierOptions {
   const defined = stripUndefined(overrides)
   return {
     ...DEFAULT_CLASSIFIER_OPTIONS,
@@ -364,7 +366,9 @@ function listOrDefault(value: readonly string[] | undefined, fallback: readonly 
  * @param overrides - partial options from configuration.
  * @returns only the fields the configuration actually set.
  */
-function stripUndefined(overrides: Partial<ClassifierOptions> | undefined): Partial<ClassifierOptions> {
+function stripUndefined(
+  overrides: { [K in keyof ClassifierOptions]?: ClassifierOptions[K] | undefined } | undefined,
+): Partial<ClassifierOptions> {
   if (overrides === undefined) return {}
   const defined: Partial<ClassifierOptions> = {}
   for (const key of Object.keys(overrides) as (keyof ClassifierOptions)[]) {
