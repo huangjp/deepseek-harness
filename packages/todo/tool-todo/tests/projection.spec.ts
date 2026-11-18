@@ -84,7 +84,7 @@ describe('todos projection provider', () => {
     expect(projections?.asOfSeq).toBe(session.seq - 1)
   })
 
-  it('clears the standing plan on the next turn/start (turn/end keeps it)', async () => {
+  it('keeps the standing plan across the next turn/start (turn/end keeps it)', async () => {
     const bench = await harness(true)
     const session = bench.session
     seedMessage(session)
@@ -93,10 +93,12 @@ describe('todos projection provider', () => {
     session.append('todo/write', { todos: list })
     session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
     expect((await bench.tailProjections())?.values.todos).toEqual(list)
+    // The plan spans turns: a multi-step task continues across the human's answers,
+    // and the model reads the plan back from the prompt (see the prompt-context spec).
     session.append('turn/start', { turn: 2 })
-    const cleared = await bench.tailProjections()
-    expect(cleared?.values.todos).toBeNull()
-    expect(cleared?.asOfSeq).toBe(session.seq - 1)
+    const kept = await bench.tailProjections()
+    expect(kept?.values.todos).toEqual(list)
+    expect(kept?.asOfSeq).toBe(session.seq - 1)
   })
 
   it('has no todos key when tool-todo is not composed', async () => {

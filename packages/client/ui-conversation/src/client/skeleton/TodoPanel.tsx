@@ -16,6 +16,8 @@ import css from './TodoPanel.module.css'
 export interface TodoPanelProps {
   /** The session's current plan (empty renders nothing) — selected by the dock adapter. */
   todos: readonly TodoItem[]
+  /** Whether the agent is running right now; an idle session leaves an in-progress task paused. */
+  running?: boolean
   /** The dock entry's locale seat, passed down as a plain prop. */
   t: TodoDockProps['t']
 }
@@ -26,11 +28,20 @@ function assertNever(value: never): never {
   throw new Error(`unreachable todo status: ${String(value)}`)
 }
 
-/** Map Todo lifecycle state onto the shared compact status language. */
-function statusDotState(status: TodoItem['status']): StateDotState {
+/**
+ * Map Todo lifecycle state onto the shared compact status language.
+ *
+ * An `in_progress` task shows the spinner only while the agent is actually
+ * running: a paused task that spins forever reads as "still working" when
+ * nothing is happening, which is the opposite of what the plan says.
+ * @param status - The task's status.
+ * @param running - Whether the agent is running right now.
+ * @returns The marker to render.
+ */
+function statusDotState(status: TodoItem['status'], running: boolean): StateDotState {
   switch (status) {
     case 'completed': return 'done'
-    case 'in_progress': return 'ongoing'
+    case 'in_progress': return running ? 'ongoing' : 'idle'
     case 'pending': return 'idle'
     /* v8 ignore next -- closed TodoItem status union */
     default: return assertNever(status)
@@ -62,7 +73,7 @@ function progressLabel(todos: readonly TodoItem[], t: TodoPanelProps['t']): stri
   ].join('\u2002·\u2002')
 }
 
-export function TodoPanel({ todos, t }: TodoPanelProps) {
+export function TodoPanel({ todos, running = false, t }: TodoPanelProps) {
   const [collapsed, setCollapsed] = useState(true)
   if (todos.length === 0) return null
 
@@ -87,7 +98,7 @@ export function TodoPanel({ todos, t }: TodoPanelProps) {
             {todos.map(item => (
               <li key={item.content} className={css.item} data-status={item.status}>
                 <span className={css.glyph} role="img" aria-label={statusLabel(item.status, t)}>
-                  <StateDot state={statusDotState(item.status)} />
+                  <StateDot state={statusDotState(item.status, running)} />
                 </span>
                 <span className={css.content}>{item.content}</span>
               </li>
@@ -103,9 +114,10 @@ export function TodoPanel({ todos, t }: TodoPanelProps) {
 export type TodoDockProps = PropsRuntime<'conversation.input.dock'> & PropsLocale<'conversation'>
 
 /** Renders the current todo projection, or nothing when it is absent. */
-export function TodoDock({ useProjection, t }: TodoDockProps) {
+export function TodoDock({ useProjection, useSession, t }: TodoDockProps) {
   const todos = useProjection('todos')
-  return <TodoPanel todos={todos ?? []} t={t} />
+  const running = useSession(session => session.running)
+  return <TodoPanel todos={todos ?? []} running={running} t={t} />
 }
 
 /** Registers the projected todo dock. */

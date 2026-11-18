@@ -230,13 +230,13 @@ describe('dsh-tool-todo', () => {
     // A default export would make Loader unwrap only apply and drop `inject`.
     expect('default' in tool).toBe(false)
     expect(tool.name).toBe('tool-todo')
-    expect(tool.inject).toEqual(['tools', 'sessionProjections'])
+    expect(tool.inject).toEqual(['tools', 'sessionProjections', 'systemPrompt'])
 
     const loader = Object.create(Loader.prototype) as Loader
     const unwrapped = loader.unwrapExports(tool) as Record<string, unknown>
     expect(unwrapped).toBe(tool)
     expect(unwrapped.name).toBe('tool-todo')
-    expect(unwrapped.inject).toEqual(['tools', 'sessionProjections'])
+    expect(unwrapped.inject).toEqual(['tools', 'sessionProjections', 'systemPrompt'])
     expect(typeof unwrapped.apply).toBe('function')
   })
 })

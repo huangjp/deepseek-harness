@@ -20,7 +20,7 @@ import type {} from '@deepseek-ai/dsh-session-projection'
 export type * from './types.ts'
 
 export const name = 'tool-todo'
-export const inject = ['tools', 'sessionProjections']
+export const inject = ['tools', 'sessionProjections', 'systemPrompt']
 
 /** The valid {@link TodoItem} statuses, as a runtime set for input narrowing. */
 const STATUSES = ['pending', 'in_progress', 'completed'] as const
@@ -109,6 +109,26 @@ const todosProjectionSchema: ZodType<TodoItem[] | null> = zod.union([
 ])
 
 /**
+ * Render the agent's current plan for the model.
+ *
+ * The plan is a standing list: it spans turns, because a multi-step task often
+ * needs the human to answer something mid-way. A model that cannot read its own
+ * plan back starts that task from scratch after every exchange — or asks the
+ * human what to do, which is the same failure with an extra turn.
+ *
+ * @param todos - The session's current list, or null before the first write.
+ * @returns The plan text, or an empty string when there is no plan.
+ */
+function planText(todos: TodoItem[] | null | undefined): string {
+  if (todos === null || todos === undefined || todos.length === 0) return ''
+  const lines = todos.map(todo => `- [${todo.status}] ${todo.content}`)
+  const header = 'Current task list (todo_write replaces the whole list — replace it when the task'
+    + ' changes; keep one task `in_progress` while work remains, and mark each `completed` when'
+    + ' it is done):'
+  return `${header}\n${lines.join('\n')}`
+}
+
+/**
  * Register the `todo_write` tool on `ctx.tools` and the `todos` unit on
  * `ctx.sessionProjections`.
  * @param ctx - registrant context carrying the tool and session-projection registries.
@@ -117,21 +137,29 @@ const todosProjectionSchema: ZodType<TodoItem[] | null> = zod.union([
  */
 export async function apply(ctx: Context, config: Config): Promise<void> {
   const allowParallel = config.allowParallelInProgress
-  // Standing-plan fold: latest whole todo/write list, cleared by the next
-  // turn/start (turn/end keeps the finished checklist visible); null before the
-  // first write or after a later turn begins; every other event returns the
-  // same state reference.
-  await ctx.sessionProjections.register<'todos', TodoItem[] | null>({
+  // Standing-plan fold: latest whole todo/write list. The list spans turns —
+  // `turn/end` keeps the finished checklist visible, and the next `turn/start`
+  // keeps it too, because a multi-step task continues across the human's
+  // answers. `todo_write` replaces the whole list, so a new plan replaces the
+  // old one at the moment the model writes it.
+  const todosProjection = await ctx.sessionProjections.register<'todos', TodoItem[] | null>({
     key: 'todos',
     stateSchema: todosProjectionSchema,
     init: () => null,
     apply: (state, event) => {
       if (event.type === 'todo/write') return event.data.todos
-      if (event.type === 'turn/start') return null
       return state
     },
     wire: { viewSchema: todosProjectionSchema, view: state => state, summary: false },
     stateVersion: 2,
+  })
+  // The model reads its own plan from here; without it the plan exists only in
+  // the UI, and a model that cannot see it ends a turn asking the human what
+  // to do instead of continuing the work it already started.
+  ctx.systemPrompt.context({
+    name: 'todo:plan',
+    order: ctx.systemPrompt.getContextOrder('TODO_PLAN'),
+    text: context => context.agent === undefined ? '' : planText(todosProjection.stateOf(context.agent.session)),
   })
   ctx.tools.register(defineTool({
     name: 'todo_write',

@@ -62,6 +62,11 @@ async function harness(): Promise<{ ctx: Context; sessionContext: Context }> {
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(SessionProjectionRegistry)
   ctx.provide('tools', { register: () => () => {} } as never)
+  // The todo plugin contributes the model's view of its own plan as prompt context.
+  ctx.provide('systemPrompt', {
+    context: () => () => {},
+    getContextOrder: () => 0,
+  } as never)
   await ctx.sessionProjections.register(agentPresetProjectionDefinition)
   await ctx.plugin({ name: turnOutlineName, inject: turnOutlineInject, apply: turnOutlineApply })
   await ctx.plugin({ name: sessionStatsName, inject: sessionStatsInject, apply: sessionStatsApply })

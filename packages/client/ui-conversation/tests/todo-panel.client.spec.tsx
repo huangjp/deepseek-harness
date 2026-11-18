@@ -58,7 +58,7 @@ describe('TodoPanel', () => {
   })
 
   it('expands to show one row per item with its status glyph', () => {
-    render(<TodoPanel todos={LIST} t={t} />)
+    render(<TodoPanel todos={LIST} running t={t} />)
     fireEvent.click(screen.getByRole('button', { expanded: false }))
     const items = screen.getAllByRole('listitem')
     expect(items.map(li => li.getAttribute('data-status'))).toEqual(['completed', 'in_progress', 'pending'])
@@ -68,6 +68,18 @@ describe('TodoPanel', () => {
       .toEqual(['done', 'ongoing', 'idle'])
     expect(screen.getAllByRole('img').map(node => node.getAttribute('aria-label')))
       .toEqual(['已完成', '进行中', '待处理'])
+  })
+
+  it('leaves an in-progress task paused while the agent is not running', () => {
+    render(<TodoPanel todos={LIST} running={false} t={t} />)
+    fireEvent.click(screen.getByRole('button', { expanded: false }))
+    const items = screen.getAllByRole('listitem')
+    // A spinner that never stops reads as "still working" while nothing happens.
+    expect(items.map(li => li.querySelector('[data-state]')?.getAttribute('data-state')))
+      .toEqual(['done', 'idle', 'idle'])
+    // The status itself is unchanged: the task is still the active one.
+    expect(items[1]?.getAttribute('data-status')).toBe('in_progress')
+    expect(screen.getAllByRole('img')[1]?.getAttribute('aria-label')).toBe('进行中')
   })
 
   it('collapse hides an expanded list; expand restores; header keeps the count summary', () => {
@@ -104,11 +116,15 @@ describe('TodoPanel', () => {
   })
 })
 
-/** Dock props stub: the adapter reads the 'todos' projection only; the rest of the owner share is unused. */
-function dockProps(store: ReturnType<typeof createSnapshotStore<{ value: readonly TodoItem[] | null | undefined }>>): TodoDockProps {
+/** Dock props stub: the adapter reads the 'todos' projection and the session's running state. */
+function dockProps(
+  store: ReturnType<typeof createSnapshotStore<{ value: readonly TodoItem[] | null | undefined }>>,
+  running = false,
+): TodoDockProps {
   const useProjection = (_key: string, selector?: (v: unknown) => unknown) =>
     bindSnapshotSelector(store)(s => (selector ?? (v => v))(s.value))
-  return { useProjection, t } as unknown as TodoDockProps
+  const useSession = (selector: (session: { running: boolean }) => unknown) => selector({ running })
+  return { useProjection, useSession, t } as unknown as TodoDockProps
 }
 
 describe('TodoDock', () => {

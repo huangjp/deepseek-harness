@@ -90,7 +90,13 @@ agent 每次更新都发送完整列表；新列表替换旧列表，因此没�
 
 ### 会话投影
 
-当组合挂载 `ctx.sessionProjections`（[`@deepseek-ai/dsh-session-projection`](../../session/session-projection/README.zh.md)）时，本包在注入的子插件中注册 `todos` 单元：投影即有效计划——最新的整份 `todo/write` 列表，首次写入前为 `null`，下一轮次开始时清空，而 `turn/end` 保留刚完成的清单。该键在此处合并进 `SessionProjectionMap`；载体通过历史尾页与 `session/projection` 推送帧提供该值。未挂载注册表的组合不受影响；单元注册见 [src/index.ts](src/index.ts)。
+当组合挂载 `ctx.sessionProjections`（[`@deepseek-ai/dsh-session-projection`](../../session/session-projection/README.zh.md)）时，本包在注入的子插件中注册 `todos` 单元：投影即有效计划——最新的整份 `todo/write` 列表，首次写入前为 `null`，而且**跨轮次保留**：`turn/end` 保留刚完成的清单，下一轮的 `turn/start` 也保留它——多步任务要在人回答问题之后接着做。新计划由模型写入时替换旧计划。该键在此处合并进 `SessionProjectionMap`；载体通过历史尾页与 `session/projection` 推送帧提供该值。未挂载注册表的组合不受影响；单元注册见 [src/index.ts](src/index.ts)。
+
+### 模型看到什么
+
+计划是面向模型的状态，模型要能把它读回来。组合挂载 `ctx.systemPrompt` 时，本包贡献一个名为 `todo:plan` 的运行时上下文，把调用方 agent 当前的清单渲染出来——每项一行 `- [状态] 任务`——于是模型能在人中途回答问题之后接着把多步任务做下去。没有它，计划只存在于界面里，而看不见计划的模型会重新开始这项任务，或者反过来问人「你想让我做什么」。
+
+该上下文按 agent 会话渲染，所以每个 agent 只看到自己那份；还没有计划时它不贡献任何内容。
 
 ### 调用机制
 

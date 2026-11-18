@@ -16,6 +16,7 @@ import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import { renderContextSnapshot } from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import * as ToolTodo from '@deepseek-ai/dsh-tool-todo'
@@ -136,6 +137,30 @@ describe('tool-todo real Loader composition through cordis.yml', () => {
     })
     expect(result.isError).toBe(false)
     expect(owner.session.snapshotEvents().findLast(e => e.type === 'todo/write')?.data.todos).toEqual(PARALLEL_TODOS)
+  }, 30_000)
+
+  it('shows the model its own plan, and keeps it across the next turn', async () => {
+    const ctx = await boot(['    allowParallelInProgress: false'])
+    const owner = await agent(ctx)
+    const result = await executeToolFixture(ctx, {
+      signal: new AbortController().signal,
+      callId: ToolCallId('plan'),
+      name: 'todo_write',
+      arguments: { todos: [{ content: 'read the architecture doc', status: 'in_progress' }] },
+      agent: owner,
+    })
+    expect(result.isError).toBe(false)
+
+    // The plan reaches the model as runtime context, not as a system-prompt section.
+    const assembly = await ctx.systemPrompt.assemble({ agent: owner, scope: owner })
+    expect(renderContextSnapshot(assembly)).toContain('read the architecture doc')
+    expect(renderContextSnapshot(assembly)).toContain('in_progress')
+
+    // It survives the next turn: a multi-step task continues across the human's answers.
+    owner.session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    owner.session.append('turn/start', { turn: 2 })
+    const next = await ctx.systemPrompt.assemble({ agent: owner, scope: owner })
+    expect(renderContextSnapshot(next)).toContain('read the architecture doc')
   }, 30_000)
 
   it.each([

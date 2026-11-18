@@ -90,7 +90,13 @@ The plugin is a function/namespace plugin: it exports `name` / `inject` / `apply
 
 ### Session projection
 
-When the composition mounts `ctx.sessionProjections` ([`@deepseek-ai/dsh-session-projection`](../../session/session-projection/README.md)), this package registers the `todos` unit on an injected child: the projection is the standing plan — the latest whole `todo/write` list, `null` before the first write, cleared when the next turn starts while `turn/end` keeps the finished checklist visible. The key merges into `SessionProjectionMap` here; carriers serve the value on the history tail page and the `session/projection` push frame. Compositions without the registry are unaffected; see [src/index.ts](src/index.ts) for the unit registration.
+When the composition mounts `ctx.sessionProjections` ([`@deepseek-ai/dsh-session-projection`](../../session/session-projection/README.md)), this package registers the `todos` unit on an injected child: the projection is the standing plan — the latest whole `todo/write` list, `null` before the first write, and it **spans turns**: `turn/end` keeps the finished checklist visible, and the next `turn/start` keeps it too, because a multi-step task continues across the human's answers. A new plan replaces the old one when the model writes it. The key merges into `SessionProjectionMap` here; carriers serve the value on the history tail page and the `session/projection` push frame. Compositions without the registry are unaffected; see [src/index.ts](src/index.ts) for the unit registration.
+
+### What the model sees
+
+The plan is model-facing state, so the model gets to read it back. When the composition mounts `ctx.systemPrompt`, this package contributes a runtime context named `todo:plan` that renders the calling agent's current list — one `- [status] task` line per item — so the model can pick a multi-step task back up after the human answers a question mid-way. Without it the plan exists only in the UI, and a model that cannot see it restarts the task or asks the human what to do instead of continuing.
+
+The context is rendered per agent session, so each agent sees only its own list, and it contributes nothing while there is no plan yet.
 
 ### Call mechanics
 
