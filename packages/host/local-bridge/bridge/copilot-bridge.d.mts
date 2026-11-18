@@ -20,3 +20,22 @@ export function startCopilotBridge(overrides?: Record<string, unknown>): Promise
 
 /** 停止由 `startCopilotBridge()` 启动的服务（幂等）。 */
 export function stopCopilotBridge(): Promise<void>
+
+/**
+ * 收敛工具清单时默认放行的工具名。
+ */
+export const DEFAULT_TOOL_ALLOW: string[]
+
+/**
+ * 按允许清单收敛工具数组。
+ * @param tools - 请求带来的 OpenAI 风格或扁平工具数组。
+ * @param allow - 放行的工具名。
+ * @returns 放行的工具数组。
+ */
+export function filterTools(tools: unknown, allow: readonly string[]): unknown[]
+
+/**
+ * 这条通道本次放行的工具名。
+ * @returns 放行的工具名。
+ */
+export function allowedTools(): string[]

@@ -15,6 +15,14 @@
 import { parseToolCalls, looksLikeToolCallAttempt } from './toolcalls.mjs';
 
 /**
+ * 带工具时最多问几轮模型。
+ *
+ * 没有原生 function calling 的通道上单轮成功率只有两成上下，多问两轮比只问一轮
+ * 稳得多，而一轮只是一次模型调用。
+ */
+export const TOOL_CALL_ATTEMPTS = 3;
+
+/**
  * 工具由外部持有并执行这一点的声明。
  *
  * 必须在提示词最前面：通道上游（Copilot 的聊天模型、小艺）都倾向按自己的理解行事，
@@ -97,16 +105,25 @@ export function normalizeToolSpecs(tools) {
 export function buildToolInstruction(tools, toolChoice) {
   const specs = normalizeToolSpecs(tools);
   if (!specs.length) return '';
+  const names = specs.map((s) => s.name);
 
   const lines = [
     '【可用工具清单】（这些工具由外部调用方持有并执行；你表达意图，它们就会替你执行）',
     JSON.stringify(specs, null, 2),
+    '',
+    // 工具名单列一行：模型是拿原生 function calling 训练出来的，它读"清单"时会
+    // 把清单里的 schema 当参考文档，而把 bridge_tool_calls 这个**键名**当成工具名
+    // —— 于是它回「这些工具不属于我实际可用的工具集」。把真实工具名单列出来，
+    // 它就没有理由再去找一个叫 bridge_tool_calls 的工具。
+    `可用工具名（JSON 里 "name" 字段只能填这些）：${names.join('、')}`,
     '',
     '【工具调用意图的表达格式】',
     '当你判断需要某个工具时，输出如下 JSON（可以多行缩进，便于你保持括号配对）：',
     '   {"bridge_tool_calls":[{"name":"工具名","arguments":{参数对象}}]}',
     '注意：',
     '  1. 键名必须是 bridge_tool_calls，**不要用 tool_calls**（原生格式在这里没有接收方）。',
+    '     bridge_tool_calls 是这段 JSON 的**键名**，不是工具名；真正要调用的工具名写在',
+    '     每个对象的 "name" 字段里，且只能取上面那份工具名清单里的名字。',
     '  2. 除这段 JSON 外不要输出任何文字、解释、前后缀或 Markdown 代码围栏。',
     '  3. 需要多个工具时，在 bridge_tool_calls 数组里放多个对象。',
     '  4. arguments 必须是满足该工具 parameters 约束的 JSON **对象**（不是字符串）。',
@@ -270,6 +287,8 @@ export function buildCompactToolInstruction(tools, toolChoice) {
     '',
     '需要工具时**只输出**这一行 JSON：',
     '   {"bridge_tool_calls":[{"name":"工具名","arguments":{参数对象}}]}',
+    'bridge_tool_calls 是这段 JSON 的**键名**，不是工具名；工具名写在 "name" 字段里，',
+    '且只能取上面那份清单里的名字。',
     '除这段 JSON 外不要输出任何文字、解释或 Markdown 代码围栏。',
     '你确实拥有上面这些工具，执行由外部完成 —— 不要回答「我无法访问文件」。',
     '读写文件、执行命令**必须**通过上面这些工具完成，**不要**输出 python / shell 脚本文本来代替调用。',
@@ -426,10 +445,16 @@ export function toolCallFailureText(text) {
 }
 
 /**
- * 带工具时的一次（必要时两次）模型调用（非流式）。
+ * 带工具时的一次（必要时多次）模型调用（非流式）。
  *
- * JSON 写坏时先重试一次；仍失败就把最后一次的原文与判定一起交回去，由调用方显式
- * 报错 —— 绝不把半截 JSON 当"最终回答"下发。
+ * JSON 写坏、拒答、假完成、脚本代替调用，各有对应的追加提示；每一轮失败就按
+ * 判据挑一条提示累加进下一次请求，直到模型给出工具调用、正常回答，或者轮数用尽。
+ * 用尽仍失败就把最后一次的原文与判定一起交回去，由调用方显式报错 —— 绝不把半截
+ * JSON 当"最终回答"下发。
+ *
+ * 轮数是 3 而不是 1：Copilot chatHub 这类**没有原生 function calling**的通道上，
+ * 单轮成功率实测只有两成上下（同一份提示词、同一个模型，有时照做有时回「我无法
+ * 访问你本机上的文件」）。每多一轮就多一次机会，而一轮只是一次模型调用。
  * @param {object} options 调用参数。
  * @param {(systemPrompt: string) => Promise<{text: string, usage?: object}>} options.invoke
  *   用给定 system prompt 走上游一次；由各通道实现。
@@ -439,51 +464,48 @@ export function toolCallFailureText(text) {
  * @returns {Promise<{outcome: {calls: Array<object>|null, content: string, broken: boolean}, text: string, usage: object|undefined}>}
  */
 export async function completeWithToolCalls({ invoke, systemPrompt, hasTools, log = () => {} }) {
-  const first = await invoke(systemPrompt);
-  const decided = resolveToolOutcome({ text: first.text, hasTools });
-  if (!decided.broken) {
-    // 拒答：模型不认为该调工具（"我无法访问你本机上的文件"）。这种要**再试一次**，
-    // 换成强制给出工具意图的说法 —— 它不是不会写 JSON，是没打算写。
-    if (hasTools && looksLikeToolRefusal(first.text)) {
-      log('[warn] 模型拒绝了工具任务，重试一次并强制给出工具意图');
-      const retry = await invoke(`${systemPrompt}\n\n${TOOL_CALL_REFUSAL_REMINDER}`);
-      return {
-        outcome: resolveToolOutcome({ text: retry.text, hasTools }),
-        text: retry.text,
-        usage: retry.usage || first.usage,
-      };
+  const reminders = [];
+  let last = null;
+  let firstUsage = undefined;
+  for (let attempt = 0; attempt < TOOL_CALL_ATTEMPTS; attempt += 1) {
+    const prompt = reminders.length === 0
+      ? systemPrompt
+      : `${systemPrompt}\n\n${reminders.join('\n\n')}`;
+    const result = await invoke(prompt);
+    last = result;
+    if (firstUsage === undefined && result.usage !== undefined) firstUsage = result.usage;
+    const decided = resolveToolOutcome({ text: result.text, hasTools });
+    if (decided.calls) {
+      return { outcome: decided, text: result.text, usage: result.usage ?? firstUsage };
     }
-    // 假完成：模型声称做完了，却一次工具都没调。这种比拒答更隐蔽 —— 对话里已经有一句
-    // 「已完成」，下游却什么都没发生。必须重试并明确要求它真的调工具。
-    if (hasTools && !decided.calls && looksLikeFalseCompletion(first.text)) {
-      log('[warn] 模型声称完成了任务但没有调用任何工具，重试一次并强制使用工具');
-      const retry = await invoke(`${systemPrompt}\n\n${TOOL_REQUIRED_REMINDER}`);
-      return {
-        outcome: resolveToolOutcome({ text: retry.text, hasTools }),
-        text: retry.text,
-        usage: retry.usage || first.usage,
-      };
+    if (!hasTools) {
+      return { outcome: decided, text: result.text, usage: result.usage ?? firstUsage };
     }
-    // 脚本代替调用：模型写了一段 python/shell 脚本（而且路径是服务端的 /mnt/data/），
-    // 看上去有产出，实际什么都不会落地。这一类跟「假完成」不同 —— 它的措辞很诚实，
-    // 诚实到反而没人发现文件根本没建。
-    if (hasTools && !decided.calls && looksLikeScriptInsteadOfToolCall(first.text)) {
-      log('[warn] 模型用脚本代替了工具调用，重试一次并强制使用工具');
-      const retry = await invoke(`${systemPrompt}\n\n${TOOL_CALL_NOT_SCRIPT_REMINDER}`);
-      return {
-        outcome: resolveToolOutcome({ text: retry.text, hasTools }),
-        text: retry.text,
-        usage: retry.usage || first.usage,
-      };
+    // 判据各管一种失败：JSON 写坏、拒答、假完成、脚本代替调用。累加而不是替换，
+    // 因为一次失败之后模型可能换一种毛病（第一次拒答、第二次把 JSON 写坏）。
+    let reminder = null;
+    if (decided.broken) {
+      log(`[warn] 工具调用解析失败，疑似 JSON 非法（输出 ${String(result.text || '').length} 字），重试`);
+      reminder = TOOL_CALL_REPAIR_REMINDER;
+    } else if (looksLikeToolRefusal(result.text)) {
+      log('[warn] 模型拒绝了工具任务，重试并强制给出工具意图');
+      reminder = TOOL_CALL_REFUSAL_REMINDER;
+    } else if (looksLikeFalseCompletion(result.text)) {
+      log('[warn] 模型声称完成了任务但没有调用任何工具，重试并强制使用工具');
+      reminder = TOOL_REQUIRED_REMINDER;
+    } else if (looksLikeScriptInsteadOfToolCall(result.text)) {
+      log('[warn] 模型用脚本代替了工具调用，重试并强制使用工具');
+      reminder = TOOL_CALL_NOT_SCRIPT_REMINDER;
+    } else {
+      // 不是失败：模型正常回答，这次任务确实不需要工具。
+      return { outcome: decided, text: result.text, usage: result.usage ?? firstUsage };
     }
-    return { outcome: decided, text: first.text, usage: first.usage };
+    if (!reminders.includes(reminder)) reminders.push(reminder);
   }
-  log(`[warn] 工具调用解析失败，疑似 JSON 非法（输出 ${String(first.text || '').length} 字），重试一次`);
-  const retry = await invoke(`${systemPrompt}\n\n${TOOL_CALL_REPAIR_REMINDER}`);
   return {
-    outcome: resolveToolOutcome({ text: retry.text, hasTools }),
-    text: retry.text,
-    usage: retry.usage || first.usage,
+    outcome: resolveToolOutcome({ text: last?.text ?? '', hasTools }),
+    text: last?.text ?? '',
+    usage: last?.usage ?? firstUsage,
   };
 }
 

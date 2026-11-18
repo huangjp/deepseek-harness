@@ -61,6 +61,9 @@ export const TOOL_CALL_REPAIR_REMINDER: string
 /** 模型拒绝执行工具任务时的重试提示。 */
 export const TOOL_CALL_REFUSAL_REMINDER: string
 
+/** 带工具时最多问几轮模型。 */
+export const TOOL_CALL_ATTEMPTS: number
+
 /**
  * 归一化 tools —— 同时认 OpenAI 标准形状与 DSH 的扁平形状。
  * @param tools - OpenAI 风格或扁平形状的 tools 数组。
@@ -160,7 +163,7 @@ export function resolveToolOutcome(input: { text: string | undefined; hasTools: 
 export function toolCallFailureText(text: string | undefined): string
 
 /**
- * 带工具的一次（必要时两次）非流式调用。
+ * 带工具的一次（必要时多次）非流式调用。
  * @param options - 上游调用、system prompt、是否带工具与日志。
  * @returns 判定结果、最后一次原文与用量。
  */

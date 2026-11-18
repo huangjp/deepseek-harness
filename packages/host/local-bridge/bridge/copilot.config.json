@@ -14,5 +14,10 @@
   "session": {
     "timeoutMs": 180000,
     "_comment": "单轮对话超时；Copilot 首 token 通常 1-3 秒，但深度检索会久一些"
+  },
+
+  "tools": {
+    "allow": ["read", "write"],
+    "_comment": "交给这条通道的工具清单。chatHub 没有原生 function calling，工具只以提示词清单存在，清单里有什么模型就有什么；这条通道专用于设计文档，默认只给读文档与写文档。给空数组则只做纯文本生成。"
   }
 }

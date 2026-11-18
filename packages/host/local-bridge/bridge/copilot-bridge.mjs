@@ -94,6 +94,48 @@ let gate = null;
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 
 /**
+ * 收敛工具清单时默认放行的工具。
+ *
+ * 本通道专用于设计文档：模型读文档、写文档，别的用不上。宿主与本模块各自有一份
+ * 默认值（宿主那份在 `src/index.ts` 的 Config 里），两边一致。
+ */
+export const DEFAULT_TOOL_ALLOW = ['read', 'write'];
+
+/**
+ * 按允许清单收敛工具数组。
+ *
+ * 通道没有原生 function calling，工具只以提示词里的清单存在，因此**清单里有什么，
+ * 模型就有什么**。清单里没有的工具既不会被模型提到，也不会出现在下游收到的
+ * tool_calls 里。
+ *
+ * 允许清单为空：这条通道只做纯文本生成，请求照常走普通聊天路径。
+ * @param {Array<object>} tools 请求带来的 OpenAI 风格或扁平工具数组。
+ * @param {readonly string[]} allow 放行的工具名。
+ * @returns 放行的工具数组。
+ */
+export function filterTools(tools, allow) {
+  if (!Array.isArray(tools)) return [];
+  if (!Array.isArray(allow) || allow.length === 0) return [];
+  const allowed = new Set(allow);
+  return tools.filter((tool) => {
+    const fn = tool?.function && typeof tool.function === 'object' ? tool.function : tool;
+    return typeof fn?.name === 'string' && allowed.has(fn.name);
+  });
+}
+
+/**
+ * 这条通道本次放行的工具名。
+ *
+ * 配置里写了就用配置的，没写就用默认的那两个。空数组是有效取值：它表示这条通道
+ * 只做纯文本生成。
+ * @returns 放行的工具名。
+ */
+export function allowedTools() {
+  const configured = config.tools?.allow;
+  return Array.isArray(configured) ? configured : DEFAULT_TOOL_ALLOW;
+}
+
+/**
  * 装配运行时状态。
  * @param {object} [overrides] 宿主直接注入的配置，优先级高于配置文件与环境变量。
  */
@@ -101,7 +143,7 @@ function initRuntime(overrides = {}) {
   const base = loadConfig();
   config = { ...base, ...overrides };
   // 已知子对象做浅合并：宿主只传一个字段时不能把整块配置顶掉。
-  for (const key of ['server', 'harvest', 'session']) {
+  for (const key of ['server', 'harvest', 'session', 'tools']) {
     if (overrides[key] && base[key]) config[key] = { ...base[key], ...overrides[key] };
   }
   serverCfg = config.server || {};
@@ -678,7 +720,13 @@ async function handleChatCompletions(req, res) {
   }
   // 工具协议：本通道没有原生 function calling，`tools` 只能渲染成提示词里的清单与格式
   // 约定，模型的意图再解析回 OpenAI tool_calls。
-  const toolInstruction = buildToolInstruction(body.tools, body.tool_choice);
+  //
+  // 清单先按配置收敛：本通道专用于设计文档，模型只需要「读文档」「写文档」两个工具。
+  // DSH 那边有 27 个工具，完整 schema 渲染进去是一万六千多字符的提示词，而这条通道
+  // 的模型是拿原生 function calling 训练出来的 —— 清单越长，它越容易把清单当成
+  // 参考文档而不是可用工具，于是回「这些工具不属于我实际可用的工具集」。
+  const tools = filterTools(body.tools, allowedTools());
+  const toolInstruction = buildToolInstruction(tools, body.tool_choice);
   const hasTools = Boolean(toolInstruction);
   // 声明置顶（它是"最高优先级"的那条），但**工具清单要排在用户请求之后**：
   // chatHub 的服务端 system prompt 权重很高，清单若排在用户请求前面，模型最后看到的

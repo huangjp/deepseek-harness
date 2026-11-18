@@ -15,8 +15,8 @@
   en: b563e4ec4727d0de
   zh: 44ebe7ceeda3dff6
 /deepseek-ai-dsh-host-local-bridge/use-this-package:
-  en: 50002ed47587978c
-  zh: 1675d77d37f77ced
+  en: 7d3f56dd925397c5
+  zh: a781b97c2e0157c4
 /deepseek-ai-dsh-host-local-bridge/use-this-package/refreshing-while-the-app-runs:
   en: 40ace05a78b39df0
   zh: 1da6562c62de770f
@@ -26,6 +26,12 @@
 /deepseek-ai-dsh-host-local-bridge/understand-the-implementation:
   en: cfb47439d5b0ff9b
   zh: 5c7f5bc0de5c30f1
+/deepseek-ai-dsh-host-local-bridge/understand-the-implementation/the-workbuddy-model-catalogue:
+  en: a6250655e99710cc
+  zh: befd50562265ecf0
+/deepseek-ai-dsh-host-local-bridge/understand-the-implementation/reasoning-effort:
+  en: 9917c8e33a16f663
+  zh: 88774410be73e32d
 /deepseek-ai-dsh-host-local-bridge/understand-the-implementation/tool-calls-over-a-text-only-upstream:
   en: 392de49543c2c1b5
   zh: 956edc0f56f769ad
@@ -39,8 +45,8 @@
   en: ca75c51c89c2c9b0
   zh: ca75c51c89c2c9b0
 /deepseek-ai-dsh-host-local-bridge/known-limitations-and-deferred-work:
-  en: 02468509c64491da
-  zh: 2fb616775161edf7
+  en: c38ab525055f2712
+  zh: d4973fbeeb541899
 /deepseek-ai-dsh-host-local-bridge/known-limitations-and-deferred-work/dev-note:
   en: 3f179b447b9d5c27
   zh: ac43bf20e2ae7db5

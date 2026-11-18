@@ -40,6 +40,10 @@ No credential is required. Each profile carries the hop's `authorization: Bearer
 
 Only the WorkBuddy route declares `input: [text, image]`. A model that omits it is treated as text-only and the harness rejects an attached image before sending (`MODEL_DOES_NOT_SUPPORT_IMAGES`, surfaced as "current model does not support images"). The Copilot route declares `text` because its SignalR `chatHub` frame carries one plain-text prompt field and no attachment field. The Huawei Celia route declares `text` for the same reason: its upstream is a text-in/text-out WebSocket frame. Claiming image support on either would only move the failure upstream, after the attachment was already recorded in the session.
 
+The WorkBuddy models declare `reasoningEfforts`, the levels the account's product config lists for each of them, so the model picker offers the reasoning level and the selected one reaches the relay as OpenAI's `reasoning_effort`. A model whose effort the account fixes — the `Auto`/`Fast`/`Balanced`/`Primary` aliases and `kimi-k3` — declares `reasoningEfforts: false` and takes no level from the caller. `off` is not offered on any of them: pi-ai's OpenAI-compatible transport encodes "do not think" as the parameter's **absence**, which the WorkBuddy cloud reads as "use this model's own default effort" rather than as "think less", so offering it would be a control that does not do what it says.
+
+They also declare `contextWindow`, the account's own input budget per model. That number decides when the harness compacts a conversation, so it has to be the real one: the aliases are far smaller than the concrete models (`Auto` takes 176k, the GPT family 1M), and a route that claims 1M for all of them lets a conversation grow past what the model accepts before anything compacts it.
+
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
 

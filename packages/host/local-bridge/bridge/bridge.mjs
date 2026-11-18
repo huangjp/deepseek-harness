@@ -14,6 +14,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { createBackend, Semaphore, classifyCliFailure, sanitizeOwnEnv } from './backends.mjs';
+import { readCatalogModels } from './workbuddy-cloud.mjs';
 import {
   WeFlowClient, normalizeMessages, trimMessages,
   buildSummaryPrompt, buildSchemaInstruction, parseJsonLoose,
@@ -103,6 +104,8 @@ function initRuntime(overrides = {}) {
   if (config.serve) {
     config.serve = { ...config.serve, selfPort: serverCfg.port || 8787 };
   }
+  // 渠道身份（客户端版本、部署形态）由 wbcloud 后端自己从账号的产品配置里读：
+  // 那是官方客户端自己的取值来源，跟着它走就不会漂。
   backend = createBackend(config);
   weflow = new WeFlowClient(config.weflow || {});
   gate = new Semaphore(config.cli?.maxConcurrent ?? 2);
@@ -370,12 +373,12 @@ const IMAGE_INSTRUCTION = [
  * @param {object} options 本次调用。
  * @returns {Promise<{outcome: object, text: string, usage: object|undefined}>}
  */
-function chatWithTools({ prompt, systemPrompt, model, signal, images }) {
+function chatWithTools({ prompt, systemPrompt, model, reasoningEffort, signal, images }) {
   return completeWithToolCalls({
     systemPrompt,
     hasTools: true,
     log,
-    invoke: sys => invokeModel({ prompt, systemPrompt: sys, model, signal, images }),
+    invoke: sys => invokeModel({ prompt, systemPrompt: sys, model, reasoningEffort, signal, images }),
   });
 }
 
@@ -413,7 +416,7 @@ function materializeImages(images) {
 }
 
 /** 走一次模型调用（含并发闸门、图片投递与信号透传）。 */
-async function invokeModel({ prompt, systemPrompt, messages, tools, toolChoice, model, signal, onDelta, images }) {
+async function invokeModel({ prompt, systemPrompt, messages, tools, toolChoice, model, reasoningEffort, signal, onDelta, images }) {
   await gate.acquire();
   const hasImages = Array.isArray(images) && images.length > 0;
   // openai 与 wbcloud 都是「真正的 OpenAI 兼容端点」：按多模态 content 数组透传，保真度最高。
@@ -451,7 +454,7 @@ async function invokeModel({ prompt, systemPrompt, messages, tools, toolChoice, 
             : m
         ));
       }
-      return await backend.complete({ messages: msgs, tools, toolChoice, model, signal, onDelta });
+      return await backend.complete({ messages: msgs, tools, toolChoice, model, reasoningEffort, signal, onDelta });
     }
 
     if (hasImages && passthrough) {
@@ -462,7 +465,7 @@ async function invokeModel({ prompt, systemPrompt, messages, tools, toolChoice, 
       const msgs = [];
       if (systemPrompt) msgs.push({ role: 'system', content: systemPrompt });
       msgs.push({ role: 'user', content });
-      return await backend.complete({ messages: msgs, model, signal, onDelta });
+      return await backend.complete({ messages: msgs, model, reasoningEffort, signal, onDelta });
     }
 
     let finalPrompt = prompt;
@@ -477,12 +480,13 @@ async function invokeModel({ prompt, systemPrompt, messages, tools, toolChoice, 
       const msgs = [];
       if (systemPrompt) msgs.push({ role: 'system', content: systemPrompt });
       msgs.push({ role: 'user', content: finalPrompt });
-      return await backend.complete({ messages: msgs, model, signal, onDelta });
+      return await backend.complete({ messages: msgs, model, reasoningEffort, signal, onDelta });
     }
     return await backend.complete({
       prompt: finalPrompt,
       systemPrompt,
       model,
+      reasoningEffort,
       signal,
       onDelta,
       // 看图需要"先调工具读文件、再回答"，1 轮不够；仅在带图时放宽。
@@ -519,10 +523,30 @@ function handleModels(req, res) {
   const id = activeModel();
   const created = Math.floor(Date.now() / 1000);
   // 多给几个别名：不少客户端会先拉列表、再用自己预设的模型名来请求。
-  const ids = [...new Set([id, 'gpt-4o', 'gpt-3.5-turbo', 'default'])];
+  const aliases = ['gpt-4o', 'gpt-3.5-turbo', 'default'];
+  // wbcloud 后端的模型目录来自账号自己的产品配置（WorkBuddy 客户端缓存的那份），
+  // 所以列表永远跟着账号走，而不是跟着一份写死的清单走。
+  const catalog = config.backend === 'wbcloud'
+    ? readCatalogModels(config.wbcloud?.catalogDir)
+    : [];
+  const ids = [...new Set([id, ...catalog.map(model => model.id), ...aliases])];
   sendJson(res, 200, {
     object: 'list',
-    data: ids.map((m) => ({ id: m, object: 'model', created, owned_by: 'workbuddy-bridge' })),
+    data: ids.map((m) => {
+      const entry = catalog.find(model => model.id === m);
+      return {
+        id: m,
+        object: 'model',
+        created,
+        owned_by: 'workbuddy-bridge',
+        // 账号目录里的推理档位与输出上限：客户端据此知道自己能选什么档位。
+        ...entry === undefined ? {} : {
+          supported_reasoning_efforts: entry.supportedEfforts,
+          can_disable_thinking: entry.canDisableThinking,
+          max_output_tokens: entry.maxOutputTokens,
+        },
+      };
+    }),
   });
 }
 
@@ -573,6 +597,9 @@ async function handleChatCompletions(req, res) {
   const nativeTools = config.backend === 'wbcloud' && hasTools;
 
   const model = body.model || activeModel();
+  // 推理强度：OpenAI 形态的 `reasoning_effort`。DSH 侧按 pi-ai 的档位名发过来
+  // （low/medium/high/xhigh/max），云端认的就是这个字段（实测写 xhigh 返回 200）。
+  const reasoningEffort = typeof body.reasoning_effort === 'string' ? body.reasoning_effort : undefined;
   // 组装结果的尺寸要落日志：上游是否把提示词截断、模型到底看到多少字，事后只能靠
   // 这两个数字判断 —— 否则"输出重复/缺失"只能猜。
   log(`[req] msgs=${String(body.messages?.length ?? 0)} tools=${String(body.tools?.length ?? 0)}`
@@ -587,7 +614,7 @@ async function handleChatCompletions(req, res) {
     if (nativeTools) {
       const x = await invokeModel({
         messages: body.messages, tools: body.tools, toolChoice: body.tool_choice,
-        model, signal: ctl.signal, images,
+        model, reasoningEffort, signal: ctl.signal, images,
       });
       // 原生 function calling 没给出调用时，回退**文本协议**解析。工具一多，模型
       // 常常改用自己的 DSML 标记或 bridge_tool_calls JSON 表达同一件事（实测：27 个
@@ -602,10 +629,10 @@ async function handleChatCompletions(req, res) {
         usage: x.usage,
       };
     } else if (hasTools) {
-      const out = await chatWithTools({ prompt, systemPrompt, model, signal: ctl.signal, images });
+      const out = await chatWithTools({ prompt, systemPrompt, model, reasoningEffort, signal: ctl.signal, images });
       r = { ...out.outcome, text: out.text, usage: out.usage };
     } else {
-      const x = await invokeModel({ prompt, systemPrompt, model, signal: ctl.signal, images });
+      const x = await invokeModel({ prompt, systemPrompt, model, reasoningEffort, signal: ctl.signal, images });
       r = { calls: null, content: x.text, broken: false, text: x.text, usage: x.usage };
     }
     // 写坏了但确实在表达工具调用 → 明确报错，不冒充正常回答
@@ -659,7 +686,7 @@ async function handleChatCompletions(req, res) {
       // 原生工具：整段收完再下发 —— tool_calls 必须完整成组才能被下游 agent 执行。
       const x = await invokeModel({
         messages: body.messages, tools: body.tools, toolChoice: body.tool_choice,
-        model, signal: ctl.signal, images,
+        model, reasoningEffort, signal: ctl.signal, images,
       });
       const fallback = x.toolCalls?.length ? null : resolveToolOutcome({ text: x.text, hasTools: true });
       const calls = x.toolCalls?.length ? x.toolCalls : (fallback?.calls ?? null);
@@ -678,12 +705,12 @@ async function handleChatCompletions(req, res) {
     } else if (!hasTools) {
       // 不带工具：保持真流式，逐段下发
       frame({ role: 'assistant', content: '' });
-      await invokeModel({ prompt, systemPrompt, model, signal: ctl.signal, images, onDelta: (t) => frame({ content: t }) });
+      await invokeModel({ prompt, systemPrompt, model, reasoningEffort, signal: ctl.signal, images, onDelta: (t) => frame({ content: t }) });
       frame({}, 'stop');
     } else {
       // 带工具：必须先收全文再判定，否则可能把工具调用 JSON 当正文吐给客户端。
       // 本地模型服务本身也不支持真流式，这里没有额外损失。
-      const out = await chatWithTools({ prompt, systemPrompt, model, signal: ctl.signal, images });
+      const out = await chatWithTools({ prompt, systemPrompt, model, reasoningEffort, signal: ctl.signal, images });
       const { calls, content, broken } = out.outcome;
       if (calls) {
         frame({ role: 'assistant', content: '' });

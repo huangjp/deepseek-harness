@@ -19,6 +19,20 @@
 # in plain memory, so we read it out of the process the same way
 # `xiaoyi-harvest.py` reads the Celia cookies out of AI Space.
 #
+# WorkBuddy 5.9.4 launches itself elevated (it ships `resources/elevate.exe`),
+# and every process in its tree inherits that high integrity level. A process
+# at medium integrity cannot open a high-integrity target with
+# PROCESS_VM_READ, so the scan below fails with "access denied" instead of
+# finding nothing -- `OpenProcess` is refused for the daemon, the CLI sidecar
+# and every child of both. The token therefore only exists in memory for a
+# process that is itself elevated.
+#
+# So the scan runs twice: once as-is, and -- when that is refused -- once from
+# a relaunched, elevated copy of this script. The elevated copy writes the
+# token to the cache file and exits; this process reads it back. The relaunch
+# asks for consent through the usual UAC prompt, and the cached token is good
+# for months, so the prompt is rare rather than per-call.
+#
 # Only this user's own processes are inspected, read-only.
 #
 # Output (stdout, last line): a single JSON object.
@@ -30,8 +44,11 @@ import base64
 import ctypes
 import ctypes.wintypes as wt
 import json
+import os
 import re
+import shutil
 import sys
+import time
 
 k32 = ctypes.WinDLL("kernel32", use_last_error=True)
 ntdll = ctypes.WinDLL("ntdll")
@@ -80,6 +97,95 @@ ntdll.NtQueryInformationProcess.argtypes = [wt.HANDLE, wt.DWORD, ctypes.c_void_p
 JWT_RE = re.compile(rb'eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}')
 # Only the desktop daemon / CLI hold the cloud credential.
 TARGET_EXE = "workbuddyai.exe"
+
+# The harvested token outlives the harvest by months, so it is cached on disk:
+# the memory scan needs elevation, and the elevation asks the user for consent.
+CACHE_DIR = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
+                         "workbuddy-bridge")
+CACHE_FILE = os.path.join(CACHE_DIR, "token.json")
+# A token that is about to expire is refreshed instead of handed out.
+CACHE_MARGIN_MS = 5 * 60 * 1000
+# How long the elevated copy may take, including the time the user spends on
+# the consent prompt.
+ELEVATED_WAIT_MS = 180000
+
+
+def read_cache():
+    """Read the cached token, or None when there is none that is still usable."""
+    try:
+        with open(CACHE_FILE, "r", encoding="utf-8") as handle:
+            cached = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    token = cached.get("token")
+    expires_at = cached.get("expiresAt")
+    if not isinstance(token, str) or not token:
+        return None
+    if not isinstance(expires_at, (int, float)):
+        return None
+    if expires_at - CACHE_MARGIN_MS <= time.time() * 1000:
+        return None
+    return {"ok": True, "token": token, "uid": cached.get("uid", ""),
+            "expiresAt": int(expires_at)}
+
+
+def write_cache(cred):
+    """Store the harvested token so the next run needs neither a scan nor a prompt."""
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        path = os.path.join(CACHE_DIR, "token.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump({"token": cred["token"], "uid": cred.get("uid", ""),
+                       "expiresAt": int(cred.get("expiresAt") or 0)}, handle)
+        return True
+    except OSError:
+        return False
+
+
+class SHELLEXECUTEINFOW(ctypes.Structure):
+    _fields_ = [("cbSize", wt.DWORD), ("fMask", wt.ULONG), ("hwnd", wt.HWND),
+                ("lpVerb", wt.LPCWSTR), ("lpFile", wt.LPCWSTR), ("lpParameters", wt.LPCWSTR),
+                ("lpDirectory", wt.LPCWSTR), ("nShow", ctypes.c_int), ("hInstApp", wt.HINSTANCE),
+                ("lpIDList", ctypes.c_void_p), ("lpClass", wt.LPCWSTR),
+                ("hkeyClass", wt.HKEY), ("dwHotKey", wt.DWORD), ("hIconOrMonitor", wt.HANDLE),
+                ("hProcess", wt.HANDLE)]
+
+
+SEE_MASK_NOCLOSEPROCESS = 0x00000040
+SEE_MASK_NOASYNC = 0x00000100
+SW_HIDE = 0
+INFINITE = 0xFFFFFFFF
+ERROR_CANCELLED = 1223
+
+shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+shell32.ShellExecuteExW.restype = wt.BOOL
+shell32.ShellExecuteExW.argtypes = [ctypes.POINTER(SHELLEXECUTEINFOW)]
+kernel32.WaitForSingleObject.restype = wt.DWORD
+kernel32.WaitForSingleObject.argtypes = [wt.HANDLE, wt.DWORD]
+kernel32.CloseHandle.argtypes = [wt.HANDLE]
+
+
+def run_elevated_copy():
+    """Relaunch this script elevated and wait for it to cache the token.
+
+    Returns the cached token, or None when the copy did not run -- the user
+    declined the consent prompt, or the relaunch failed.
+    """
+    info = SHELLEXECUTEINFOW()
+    info.cbSize = ctypes.sizeof(info)
+    info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC
+    info.lpVerb = "runas"
+    info.lpFile = sys.executable
+    info.lpParameters = '"%s" --elevated-child' % os.path.abspath(__file__)
+    info.nShow = SW_HIDE
+    if not shell32.ShellExecuteExW(ctypes.byref(info)):
+        return None
+    try:
+        kernel32.WaitForSingleObject(info.hProcess, ELEVATED_WAIT_MS)
+    finally:
+        kernel32.CloseHandle(info.hProcess)
+    return read_cache()
 
 
 def emit(obj, exit_code=0):
@@ -204,17 +310,15 @@ def is_access_token(token):
     return pl
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--timeout-ms", type=int, default=60000)
-    args = ap.parse_args()
+def scan_memory():
+    """Read the account token out of the WorkBuddy processes.
 
-    if sys.platform != "win32":
-        emit({"ok": False, "error": "token harvesting is Windows-only", "code": "unsupported_platform"})
-
+    Returns the token, or None when no process could be read or none of them
+    held an account-scoped token.
+    """
     pids = pids_named(TARGET_EXE)
     if not pids:
-        emit({"ok": False, "error": "WorkBuddy AI is not running", "code": "client_not_running"})
+        return None
 
     # The daemon (daemon-app-server-entry) owns the session; the CLI sidecar
     # holds a copy. Prefer the daemon, fall back to any other WorkBuddy process.
@@ -249,11 +353,43 @@ def main():
                 best = candidate
         if best:
             break
+    return best
 
-    if not best:
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--timeout-ms", type=int, default=60000)
+    ap.add_argument("--elevated-child", action="store_true",
+                    help="This copy already runs elevated: scan, cache, and stop.")
+    args = ap.parse_args()
+
+    if sys.platform != "win32":
+        emit({"ok": False, "error": "token harvesting is Windows-only", "code": "unsupported_platform"})
+
+    if args.elevated_child:
+        cred = scan_memory()
+        if cred:
+            write_cache(cred)
+        emit(cred or {"ok": False, "error": "no WorkBuddy access token found in client memory",
+                      "code": "no_token"}, 0 if cred else 1)
+
+    cached = read_cache()
+    if cached:
+        emit(cached)
+
+    if not pids_named(TARGET_EXE):
+        emit({"ok": False, "error": "WorkBuddy AI is not running", "code": "client_not_running"})
+
+    cred = scan_memory()
+    if not cred:
+        # The client runs elevated, so this process cannot read it. Ask for the
+        # consent that lets an elevated copy read it instead.
+        cred = run_elevated_copy()
+    if not cred:
         emit({"ok": False, "error": "no WorkBuddy access token found in client memory",
               "code": "no_token"})
-    emit(best)
+    write_cache(cred)
+    emit(cred)
 
 
 if __name__ == "__main__":

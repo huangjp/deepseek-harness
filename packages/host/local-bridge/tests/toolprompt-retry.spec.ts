@@ -3,7 +3,7 @@
  *
  * 1. **拒答**：模型带着「我没有工具 / 我不能访问你的文件」的先验，直接回「我无法读取
  *    你本机上的 xxx」。它不是不会写 JSON，是不认为该写 —— 换一种说法让它重来。
- * 2. **假完成**：模型声称「已创建文件 docs/v2/100-test.md」，但**一次工具都没调**。
+ * 2. **假完成**：模型声称「已创建文件 notes/100-test.md」，但**一次工具都没调**。
  *    这比拒答更隐蔽：对话里已经有一句「已完成」，下游却什么都没发生，用户看到的就是
  *    「模型说做完了，磁盘上什么都没有」。
  *
@@ -27,7 +27,7 @@ describe('拒答与假完成的判据', () => {
   })
 
   it('认得出「已创建文件」这类假完成', () => {
-    expect(looksLikeFalseCompletion('已创建文件 `docs/v2/100-test.md`，内容为：…')).toBe(true)
+    expect(looksLikeFalseCompletion('已创建文件 `notes/100-test.md`，内容为：…')).toBe(true)
     expect(looksLikeFalseCompletion('已经保存好了。')).toBe(true)
     expect(looksLikeFalseCompletion('这个架构分三层。')).toBe(false)
   })
@@ -46,7 +46,7 @@ describe('用脚本代替工具调用的判据', () => {
   })
 
   it('认得出没有沙箱路径、但明显在写文件或执行命令的脚本', () => {
-    expect(looksLikeScriptInsteadOfToolCall('```bash\nmkdir -p docs/v2\ncat > docs/v2/a.md\n```')).toBe(true)
+    expect(looksLikeScriptInsteadOfToolCall('```bash\nmkdir -p notes\ncat > notes/a.md\n```')).toBe(true)
     expect(looksLikeScriptInsteadOfToolCall('```powershell\nSet-Content -Path a.md -Value x\n```')).toBe(true)
   })
 
@@ -79,8 +79,8 @@ describe('completeWithToolCalls 的重试', () => {
 
   it('模型声称完成却没调工具时，重试一次并强制调用工具', async () => {
     const invoke = vi.fn()
-      .mockResolvedValueOnce({ text: '已创建文件 `docs/v2/100-test.md`，内容为：这是工作的内容。' })
-      .mockResolvedValueOnce({ text: '{"bridge_tool_calls":[{"name":"write","arguments":{"file_path":"docs/v2/100-test.md","content":"x"}}]}' })
+      .mockResolvedValueOnce({ text: '已创建文件 `notes/100-test.md`，内容为：这是工作的内容。' })
+      .mockResolvedValueOnce({ text: '{"bridge_tool_calls":[{"name":"write","arguments":{"file_path":"notes/100-test.md","content":"x"}}]}' })
     const out = await completeWithToolCalls({
       invoke,
       systemPrompt: 'SYS',
@@ -103,7 +103,7 @@ describe('completeWithToolCalls 的重试', () => {
       .mockResolvedValueOnce({
         text: '```python\nfrom pathlib import Path\np = Path(\'/mnt/data/100-test.md\')\np.write_text(\'x\')\n```',
       })
-      .mockResolvedValueOnce({ text: '{"bridge_tool_calls":[{"name":"write","arguments":{"file_path":"docs/v2/100-test.md","content":"x"}}]}' })
+      .mockResolvedValueOnce({ text: '{"bridge_tool_calls":[{"name":"write","arguments":{"file_path":"notes/100-test.md","content":"x"}}]}' })
     const out = await completeWithToolCalls({
       invoke,
       systemPrompt: 'SYS',

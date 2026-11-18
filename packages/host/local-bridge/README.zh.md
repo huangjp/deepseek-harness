@@ -35,9 +35,11 @@ kind: "package-reference"
 | `cacheDir` | 系统临时目录 | 网关凭据缓存；安装目录通常不可写 |
 | `wbcloud.python` | 自动探测 | 运行 `bridge/workbuddy-token.py` 的解释器；留空则在 `%LOCALAPPDATA%\Programs\Python` 与 `PATH` 里找 |
 | `wbcloud.harvestScript` | 随包分发 | 从客户端进程内存收割 WorkBuddy access token 的脚本；留空则用 `bridge/workbuddy-token.py` |
+| `wbcloud.catalogDir` | `%USERPROFILE%\.workbuddy-ai\cache` | WorkBuddy 客户端缓存产品配置的目录；反代从那里读账号的模型清单 |
 | `copilot.enabled` | `true` | 是否启动 Copilot 反代 |
 | `copilot.port` | `8899` | Copilot 反代端口 |
 | `copilot.harvestDir` | `%USERPROFILE%\copilot-probe` | 收割到的令牌、请求模板与刷新转录 |
+| `copilot.tools.allow` | `["read", "write"]` | 交给 Copilot 通道的工具清单。chatHub 的请求里没有 `tools` 字段，工具只以提示词清单存在，模型手上就只有清单里写着的那些；给空数组则这条通道只做纯文本生成 |
 | `xiaoyi.enabled` | `false` | 是否启动华为小艺反代。默认关：它需要华为「AI空间」应用开着对话页 |
 | `xiaoyi.port` | `8123` | 小艺反代端口 |
 | `xiaoyi.python` | 自动探测 | 运行 `bridge/xiaoyi-harvest.py` 的解释器；留空则在 `%LOCALAPPDATA%\Programs\Python` 与 `PATH` 里找 |
@@ -90,6 +92,26 @@ kind: "package-reference"
 
 真正执行刷新的是 `bridge/refresh-token.ps1`：它拉起本地拦截代理，把系统代理指向它，驱动 Copilot 窗口建立一次连接，从该连接的握手里收割访问令牌，并在 `finally` 中还原代理。一份备份文件让被强杀的那一轮在下次运行时可以补还原。上一次留下仍在监听的代理，只有在仍加载着当前这份收割脚本时才会被复用；比脚本更旧的进程会被停掉重起 —— mitmproxy 在监视的脚本变化时先把它卸掉，却不保证把新的装回去，于是端口仍在监听、却没有插件在收割。
 
+### WorkBuddy 的模型目录
+
+`wbcloud` 反代把 `model` 原样透传给 `https://www.workbuddy.ai/v2/chat/completions`，所以账号带的每个模型 id 都能用 —— 具体的那些（GPT-6 与 GPT-5.6 两族、Grok、Gemini、Kimi、GLM、MiniMax、DeepSeek、混元预览）以及客户端为用户解析的 `Auto`/`Fast`/`Balanced`/`Primary` 别名。id 是小写的；显示名不是 id，拿显示名去请求会被拒（`model [...] service info not found`）。
+
+模型目录不由公开 HTTP 接口提供：daemon 把产品配置 spill 到本地文件，客户端从 `ACC_PRODUCT_CONFIG_PATH` 读它。反代读的是同一份文件（`wbcloud.catalogDir`，默认 `%USERPROFILE%\.workbuddy-ai\cache`），取其中最新的 `acc-product-config-v3*.json`，在 `/v1/models` 上给出文本模型 —— 于是清单跟着账号走，而不是跟着一份写死的清单走。带 `tags` 的是媒体模型与 agent 人设，不是对话模型，不计入。DSH 路由则静态声明同一份模型清单，因为 pi-ai 没有动态发现模型：`openai-completions` 传输从不调 `/v1/models`，模型选择器里能看到它们，靠的是路由的声明。
+
+### 推理强度
+
+云端认的是 OpenAI 的 `reasoning_effort` —— `low`、`medium`、`high`、`xhigh`、`max` —— 所以反代把请求里的这个字段转发出去；调用方没给强度时就不写这个字段，由云端按模型自己的默认档位走。请求里写了 `off` 的会被翻成云端的 `none`；字面量 `off` 会被拒（`400`，参数名 `reasoning.effort`）。云端点名了参数的拒绝，报错里就带上那个参数名 —— 账号不再提供的档位因此读起来是「云端拒了 `reasoning.effort`」，而不是一句没头没脑的「参数不合法」。
+
+请求的输出上限跟着账号目录走（每个模型自己的 `maxOutputTokens`），而不是写死一个数。思维链和答案共用这个额度，写死的数会让高推理档位没地方写答案 —— 模型想完了、额度花光了，回来一句空。
+
+这个上限还会按提示词实际占的位置再收一收：云端把**提示词 + 预留输出**一起算进模型的上下文窗口，所以一个自己放得下的请求，也可能因为反代预留了满额的输出而被顶出窗口。反代因此按提示词的 token 估算值，只预留剩下的位置（留一点余量），长对话才发得出去。
+
+上游拒收输入时回 `11133` + `extError.code: 400002` + `param: input`，同一个码盖着两种原因。一种是工具配对：某条 `tool_calls` 没有对应的结果、或者某条结果找不到发起它的调用时，上游会拒掉整条请求 —— 一轮工具调用被中断、或者上一轮重试裁短过，对话里就会留下这种切片。反代每次请求都先把配对修好（只有调用没有结果的补一条说明，只有结果没有调用的去掉），于是一轮被中断不会再让之后每一步都失败。另一种是装不下：先原样重试一次，再裁短对话 —— 先留最近 8 条、再留 2 条 —— 并且只在工具调用的边界上切，切片不会以一条工具结果开头，否则又会因为上面那条配对规则被拒。
+
+渠道头里的客户端版本与部署形态，取自**账号自己的产品配置**（缓存的 `acc-product-config-v3*.json` 里的 `genieVersion` 与 `deploymentType`）—— 官方客户端自己也是从这份配置里取这两个值的。整组头与客户端发的同形：`X-Product` 是部署形态（`SaaS`），`X-IDE-Name` 是 `WorkBuddy`，`X-Private-Data` 是 `true`，请求里还带上客户端发的 `x-requested-with`、`x-codebuddy-request`、`acp-connection-id` 与 B3 链路追踪头。写死的版本号或手写的产品名，在客户端自动更新后就和真正在跑的那个对不上，而云端的渠道校验读的正是这组头。`GET /health` 会报出当前用的版本与部署形态。
+
+`400` + `code: 11128` 的意思是「云端此刻不接受这次调用」。实测它与请求大小、推理强度、渠道头都无关：90 字的提示词也会撞上；它总在短时间内连续调用之后出现，停几分钟又自己好了。账号本来就有频率与额度上限——云端另一条提示写得很直白："usage exceeds frequency limit … you can switch to the other models"——只是它对不同模型报的码不一样：忙的模型给 `14003`/`no_capacity`（"模型忙，请换模型或稍后重试"），其余的给 `11128`。所以这是**账号侧的限流**，不是反代少了参数。反代把能自动做的都做了：重新收割令牌、等 1.5 秒、把**同一条请求**原样重试一次 —— 它不裁对话，因为这个码与请求内容无关，裁了只会让模型丢掉正在做的事。每次被拒还会写进 `%LOCALAPPDATA%\workbuddy-bridge\channel.log`，记下这次请求的形状（模型、消息条数、提示词字符数、工具数、输出上限、推理强度、配对修复去掉和补上的条数）以及每一次尝试的消息条数与状态码，下次再遇到时就能拿它与一次成功的请求对比。`401`/`403` 走同一条重试路径 —— 令牌被轮换时正是需要它。
+
 ### 纯文本上游上的工具调用
 
 两个上游都不提供 function calling。WorkBuddy 网关背后是一个自带工具白名单的 agent，它无视调用方给的 tools —— 让它去调一个，它会伸手去够自己的那套然后报错；Copilot 的 `chatHub` 帧只承载一条纯文本 prompt，根本没有工具字段。所以两个反代都用同一份模块（`bridge/toolprompt.mjs`）把工具调用搭在文本上：
@@ -120,11 +142,15 @@ None; this package neither assembles nor sends a provider request.
 ## 已知限制与延期工作 <a id="known-limitations-and-deferred-work"></a>
 
 - **整条刷新链路只在 Windows 上可用。** 探测、脚本、UI 自动化与证书导入全都以 Windows 为前提；路由会报出 `process.platform`，好让页面直接说明，而不是以难以排查的方式失败。
+- **WorkBuddy 的令牌需要提权读取器。** WorkBuddy 5.9.4 会把自己重新以提权方式启动，于是它进程树里的每个进程都是高完整性级别，中完整性的读取器对它调用 `OpenProcess(PROCESS_VM_READ)` 会被拒绝。`bridge/workbuddy-token.py` 因此把收割到的令牌缓存到 `%LOCALAPPDATA%\workbuddy-bridge\token.json`，并在自己的扫描被拒时通过常规的同意提示重启一份提权副本；提权副本负责缓存令牌，原进程再把它读回来。所以提示只在缓存令牌过期时出现，不是每次调用都出现；用户拒绝提示的部署仍然得到原来的「找不到访问令牌」错误。
 - **拦截端口是固定的。** `bridge/refresh-token.ps1` 监听 `8082`，并经 `127.0.0.1:7890`（它配套的代理客户端混合端口）转发；两者都不可配置，因为控制面探测的正是脚本使用的端口，只改一处的配置会让链路本跑不通时却报「就绪」。
 - **触发方不等待刷新。** 宿主启动的是一个分离进程，只回报「已启动」。需要结果的那一方 —— 反代在放行请求之前 —— 靠轮询收割令牌的时间戳把它读回来，并有一个期限；设置页显示的进度则来自锁文件与同一个时间戳。
 - **刷新令牌期间会接管整台机器的系统代理，所以它是显式开关。** `refresh-token.ps1` 直接写 `ProxyEnable`/`ProxyServer` 注册表项，等于把这项设置从用户平时用的代理客户端手里夺过来；客户端随后若重新接管或停掉自己的内核，系统代理就会指向一个没人监听的端口，于是所有节点全部超时。因此 `deps.autoRefreshToken` 与 `deps.autoRefreshWhileRunning` **都默认关闭**，平时用设置页的「刷新令牌」按钮发起。打开任一项都会驱动 Copilot 窗口发送一条消息。
 - **反代不做就绪探测。** 端口被监听并不代表背后的应用可用；上游未登录要到第一个请求才会暴露。
 - **工具调用取决于能否认出模型输出的形态。** 桥接渲染出工具清单，并接受三种回法：它要求的 `bridge_tool_calls` JSON、可修复的变体、以及模型自带的 DSML 标记族。模型若发明第四种形态，出来的就是一段文字而不是调用。工具调用也是整份到达而不是流式片段，因为必须先看到完整载荷才能解析。
+- **Copilot 的 chatHub 通道根本承载不了工具调用。** 它的请求里没有 `tools` 字段，工具只以提示词清单存在；而另一端的模型是按 chatHub 给它的那套**服务端 agent 人设**回答的：它自己去找文件、报 `FILE_NOT_FOUND`、或者宣称自己在 `/mnt/data/...` 建了文件 —— 从不吐我们的 JSON。对着真实存在的文件实测：27 个工具与 2 个工具各跑 8 次，工具调用都是 0；换三种提示措辞（包括一种把格式写死、明确禁止它假装找文件的）也毫无变化。人设之所以压得住，是因为我们的说明是以**用户消息**身份到达的：请求里没有 system prompt 字段（`plugins` 是内置的 Bing 搜索，`options` 与 `extraExtensionParameters` 都是空的）。所以这条通道是纯文本通道 —— 用它出正文，任何要落盘的活交给有原生 function calling 的通道。
+
+- **Copilot 通道的文本协议不稳，而清单大小不是原因。** chatHub 的请求里没有 `tools` 字段，工具只以提示词清单存在，模型得自己把 JSON 写出来。现在提示词里列出真实工具名、并说明 `bridge_tool_calls` 是 JSON 的键名而不是工具名；请求最多问三轮，每轮把对应的提醒追加进去，而不是只重试一次。这两处都**不能**让这条通道变得可用 —— 原因见上一条。这条通道还与已安装的实例共用同一条采集到的会话，两个反代指向同一账号会互相抢。
 
 ### 开发备注
 

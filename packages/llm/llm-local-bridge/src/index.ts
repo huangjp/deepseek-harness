@@ -43,12 +43,98 @@ import {
   credentialStoreFrom,
   PiAiAdapter,
   resolveProfiles,
+  type PiAiModelProfile,
   type PiAiProviderProfile,
+  type PiAiReasoningEfforts,
 } from '@deepseek-ai/dsh-llm-pi-ai'
 import { resolveImageAttachmentAccess } from '@deepseek-ai/dsh-llm'
 
 export const name = 'llm-local-bridge'
 export const inject = ['llm']
+
+/**
+ * The reasoning levels one WorkBuddy model offers, keyed by the level pi-ai
+ * dispatches.
+ *
+ * The account's product config lists each model's `reasoning.supportedEfforts`;
+ * the levels below are exactly those, with the same spelling on the wire — the
+ * cloud reads OpenAI's `reasoning_effort` and accepts these names as they are.
+ *
+ * `off` is deliberately absent from every model: pi-ai's OpenAI-compatible
+ * transport encodes "do not think" as the **absence** of `reasoning_effort`,
+ * which the cloud reads as "use this model's own default effort", not as
+ * "think less". Declaring it would offer a control that does not do what it
+ * says, so the picker offers the levels the cloud actually honours.
+ */
+type WorkBuddyEfforts = Exclude<PiAiReasoningEfforts, false>
+
+/** The five levels the account's models draw from. */
+const EFFORTS_LOW_HIGH: WorkBuddyEfforts = { low: 'low', high: 'high' }
+const EFFORTS_LOW_MAX: WorkBuddyEfforts = { low: 'low', high: 'high', max: 'max' }
+const EFFORTS_LOW_MEDIUM_HIGH: WorkBuddyEfforts = { low: 'low', medium: 'medium', high: 'high' }
+const EFFORTS_LOW_MEDIUM_HIGH_XHIGH: WorkBuddyEfforts = {
+  low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh',
+}
+const EFFORTS_FULL: WorkBuddyEfforts = {
+  low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max',
+}
+
+/**
+ * The WorkBuddy account's text models, as its own product config declares them.
+ *
+ * The relay passes `model` straight through to `https://www.workbuddy.ai/v2/chat/completions`,
+ * so every id below is a working model id, not a label. The list is the account's
+ * catalogue as of 2026-11-03: the `Auto`/`Fast`/`Balanced`/`Primary` aliases the
+ * client resolves for the user, then the concrete models — DeepSeek,
+ * GLM, the GPT-6 and GPT-5.6 families, Grok, Gemini, Kimi, and the Hunyuan
+ * preview. All of them take images and tool calls.
+ *
+ * The account also carries `minimax-m3.1-flash`, which is deliberately absent:
+ * the deployment reaches MiniMax over its own `minimax-official` channel, so a
+ * second route to the same model would only split history and let a routing
+ * rule pick the more expensive path by accident.
+ *
+ * `reasoningEfforts` is the account's own list of levels per model. A model
+ * whose config names one fixed `effort` (the `Auto`/`Fast`/`Balanced`/`Primary`
+ * aliases, `kimi-k3`) takes no level from the caller, so it declares
+ * `reasoningEfforts: false` and the picker offers no control for it.
+ *
+ * `contextWindow` is the account's own input budget per model. It decides when
+ * the harness compacts a conversation, so it has to be the real number: the
+ * aliases are far smaller than the concrete models (`Auto` takes 176k, the GPT
+ * family 1M), and a route that claims 1M for all of them lets a conversation
+ * grow past what the model accepts before anything compacts it.
+ *
+ * The catalogue moves with the account: a tier change or a new model appears in
+ * the WorkBuddy client before it appears here. The relay's `/v1/models` reads
+ * the same product config the client caches, so it always shows the live set —
+ * and it reports each model's levels and output cap, so a level this list no
+ * longer offers is visible there before the cloud rejects it.
+ */
+const WORKBUDDY_MODELS: PiAiModelProfile[] = [
+  { id: 'default-model', name: 'Auto', input: ['text', 'image'], reasoningEfforts: false, contextWindow: 176_000 },
+  { id: 'fast-model', name: 'Fast', input: ['text', 'image'], reasoningEfforts: false, contextWindow: 200_000 },
+  { id: 'balanced-model', name: 'Balanced', input: ['text', 'image'], reasoningEfforts: false, contextWindow: 256_000 },
+  { id: 'primary-model', name: 'Primary', input: ['text', 'image'], reasoningEfforts: false, contextWindow: 272_000 },
+  { id: 'deepseek-v4.1-flash', name: 'Deepseek-V4.1-Flash', input: ['text', 'image'], reasoningEfforts: EFFORTS_LOW_MAX, contextWindow: 1_000_000 },
+  { id: 'deepseek-v4.1-flash-sg', name: 'Deepseek-V4.1-Flash (SG)', input: ['text', 'image'], reasoningEfforts: EFFORTS_LOW_MAX, contextWindow: 1_000_000 },
+  { id: 'gpt-6-astra', name: 'GPT-6-Astra', input: ['text', 'image'], reasoningEfforts: EFFORTS_FULL, contextWindow: 1_000_000 },
+  { id: 'gpt-6.1-sol', name: 'GPT-6.1-Sol', input: ['text', 'image'], reasoningEfforts: EFFORTS_LOW_MEDIUM_HIGH_XHIGH, contextWindow: 1_000_000 },
+  { id: 'gpt-6-sol', name: 'GPT-6-Sol', input: ['text', 'image'], reasoningEfforts: EFFORTS_LOW_MEDIUM_HIGH_XHIGH, contextWindow: 1_000_000 },
+  { id: 'gpt-6-luna', name: 'GPT-6-Luna', input: ['text', 'image'], reasoningEfforts: EFFORTS_LOW_MEDIUM_HIGH_XHIGH, contextWindow: 1_000_000 },
+  { id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol', input: ['text', 'image'], reasoningEfforts: EFFORTS_FULL, contextWindow: 1_000_000 },
+  { id: 'gpt-5.6-terra', name: 'GPT-5.6-Terra', input: ['text', 'image'], reasoningEfforts: EFFORTS_FULL, contextWindow: 1_000_000 },
+  { id: 'gpt-5.6-luna', name: 'GPT-5.6-Luna', input: ['text', 'image'], reasoningEfforts: EFFORTS_FULL, contextWindow: 1_000_000 },
+  { id: 'grok-4.7', name: 'Grok-4.7', input: ['text', 'image'], reasoningEfforts: EFFORTS_LOW_MEDIUM_HIGH_XHIGH, contextWindow: 500_000 },
+  { id: 'gemini-3.8-flash', name: 'Gemini-3.8-Flash', input: ['text', 'image'], reasoningEfforts: EFFORTS_LOW_MEDIUM_HIGH, contextWindow: 1_000_000 },
+  { id: 'glm-5.3', name: 'GLM-5.3', input: ['text', 'image'], reasoningEfforts: EFFORTS_LOW_MAX, contextWindow: 1_000_000 },
+  { id: 'glm-5.3-flash', name: 'GLM-5.3-Flash', input: ['text', 'image'], reasoningEfforts: EFFORTS_LOW_MAX, contextWindow: 1_000_000 },
+  { id: 'kimi-k3.1-pro', name: 'Kimi-K3.1-Pro', input: ['text', 'image'], reasoningEfforts: EFFORTS_LOW_MAX, contextWindow: 1_000_000 },
+  { id: 'kimi-k3.1-pro-highspeed', name: 'Kimi-K3.1-Pro-Highspeed', input: ['text', 'image'], reasoningEfforts: EFFORTS_LOW_MAX, contextWindow: 1_000_000 },
+  { id: 'kimi-k3', name: 'Kimi-K3', input: ['text', 'image'], reasoningEfforts: false, contextWindow: 1_000_000 },
+  { id: 'hy4-preview', name: 'Hy4 Preview', input: ['text', 'image'], reasoningEfforts: { high: 'high' }, contextWindow: 1_000_000 },
+  { id: 'hy3', name: 'Hy3', input: ['text', 'image'], reasoningEfforts: EFFORTS_LOW_HIGH, contextWindow: 192_000 },
+]
 
 /** Fixed provider routes this plugin owns, keyed by provider route. */
 const BRIDGE_PROVIDERS: Record<string, PiAiProviderProfile> = {
@@ -58,12 +144,7 @@ const BRIDGE_PROVIDERS: Record<string, PiAiProviderProfile> = {
     api: 'openai-completions',
     baseURL: 'http://127.0.0.1:8787/v1',
     headers: { authorization: 'Bearer local-bridge' },
-    models: [
-      { id: 'deepseek-v4.1-flash', name: 'deepseek-v4.1-flash', input: ['text', 'image'] },
-      { id: 'gpt-4o', name: 'gpt-4o', input: ['text', 'image'] },
-      { id: 'gpt-3.5-turbo', name: 'gpt-3.5-turbo', input: ['text', 'image'] },
-      { id: 'default', name: 'default', input: ['text', 'image'] },
-    ],
+    models: WORKBUDDY_MODELS,
   },
   // Microsoft Copilot relay (dsh-host-local-bridge, default 127.0.0.1:8899).
   //

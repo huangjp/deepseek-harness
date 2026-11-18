@@ -42,6 +42,10 @@ kind: "package-reference"
 
 只有 WorkBuddy 路由声明了 `input: [text, image]`。不声明的模型会被视为纯文本，宿主在发送前就以 `MODEL_DOES_NOT_SUPPORT_IMAGES` 拦下附图（提示「当前模型不支持图片」）。Copilot 路由声明 `text`，因为它的 SignalR `chatHub` 帧只有一个纯文本提示字段，没有附件字段。小艺路由同理：上游是一来一往的文本 WebSocket 帧。给它们声明图片支持只会把失败推到上游，而附图那时已经记进会话了。
 
+WorkBuddy 的各模型声明了 `reasoningEfforts`，即账号产品配置为每个模型列出的档位，于是模型选择器会给出推理强度这一项，选中的档位以 OpenAI 的 `reasoning_effort` 送到反代。账号把强度写死的模型（`Auto`/`Fast`/`Balanced`/`Primary` 别名与 `kimi-k3`）声明 `reasoningEfforts: false`，不接调用方给的强度。所有模型都不提供 `off`：pi-ai 的 OpenAI 兼容传输把「不思考」编码成这个参数的**缺席**，而 WorkBuddy 云端把缺席读成「用这个模型自己的默认档位」，不是「少想一点」—— 提供它就是一个做不到自己名字所说之事的控件。
+
+它们还声明了 `contextWindow`，即账号为每个模型给出的输入额度。这个数决定宿主在什么时候压缩对话，所以必须是真数：几个别名比具体模型小得多（`Auto` 只有 176k，GPT 家族是 1M），一律按 1M 算的话，对话会先长到模型装不下，才轮到压缩接手。
+
 <a id="understand-the-implementation"></a>
 ## 理解实现
 

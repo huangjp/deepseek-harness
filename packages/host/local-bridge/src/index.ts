@@ -96,6 +96,14 @@ export interface Config {
     python: string
     /** 收割脚本路径；留空则用同目录的 `workbuddy-token.py`。 */
     harvestScript: string
+    /**
+     * WorkBuddy 客户端缓存产品配置的目录；留空则用默认的
+     * `%USERPROFILE%\.workbuddy-ai\cache`。
+     *
+     * 反代从那里读账号真实的模型清单（哪些模型可用、倍率、上下文长度），
+     * 所以 `/v1/models` 跟着账号走，而不是跟着一份写死的清单走。
+     */
+    catalogDir: string
   }
   /** Microsoft Copilot 反代。 */
   copilot: {
@@ -105,6 +113,19 @@ export interface Config {
     port: number
     /** 令牌/模板收割目录；留空则用 `%USERPROFILE%\copilot-probe`。 */
     harvestDir: string
+    /**
+     * 交给这条通道的工具清单。
+     *
+     * chatHub 没有原生 function calling，工具只以提示词里的清单存在 —— 清单里
+     * 有什么，模型就有什么。默认只给「读文档」「写文档」：这条通道专用于架构与
+     * 文档的设计，而 DSH 的 27 个工具渲染进去是一万六千多字符的提示词，模型
+     * 反而更容易把清单当成参考文档、回一句「这些工具不属于我实际可用的工具集」。
+     * 给空数组则这条通道只做纯文本生成。
+     */
+    tools: {
+      /** 放行的工具名。 */
+      allow: string[]
+    }
   }
   /** 华为「AI空间」小艺反代。 */
   xiaoyi: {
@@ -178,11 +199,18 @@ export const Config: z<Config> = z.object({
   wbcloud: z.object({
     python: z.string().default(''),
     harvestScript: z.string().default(''),
+    // WorkBuddy 客户端缓存产品配置的目录；留空则用客户端的默认目录
+    // （%USERPROFILE%\.workbuddy-ai\cache）。模型清单从那里读。
+    catalogDir: z.string().default(''),
   }),
   copilot: z.object({
     enabled: z.boolean().default(true),
     port: z.number().default(DEFAULT_COPILOT_PORT),
     harvestDir: z.string().default(''),
+    tools: z.object({
+      // 默认只给读文档与写文档两个工具，理由见 Config 里的说明。
+      allow: z.array(z.string()).default(['read', 'write']),
+    }).default({ allow: ['read', 'write'] }),
   }),
   xiaoyi: z.object({
     // 默认关：它依赖华为「AI空间」开着对话页，对没装这个应用的人是纯噪音。
@@ -478,6 +506,8 @@ export function apply(ctx: Context, config: Config): void {
               || fileURLToPath(new URL('../bridge/workbuddy-token.py', import.meta.url)),
           ),
           ...config.wbcloud.python ? { python: config.wbcloud.python } : {},
+          // 账号的模型清单来自 WorkBuddy 客户端缓存的产品配置；留空则用客户端的默认目录。
+          ...config.wbcloud.catalogDir ? { catalogDir: config.wbcloud.catalogDir } : {},
         },
       },
     },
@@ -491,6 +521,9 @@ export function apply(ctx: Context, config: Config): void {
       overrides: {
         server: { host: config.host, port: config.copilot.port },
         ...config.copilot.harvestDir ? { harvest: { dir: config.copilot.harvestDir } } : {},
+        // 这条通道只放行配置里的那几个工具：工具在这里只以提示词清单存在，
+        // 清单里有什么模型就有什么。
+        tools: { allow: config.copilot.tools.allow },
         // 运行时自动换令牌：只有反代知道有没有请求正在用令牌，所以「什么时候换」由它
         // 决定，宿主只交出触发能力。**默认不注入** —— 一次刷新会把整机系统代理指向
         // 拦截代理约一分钟（实测 57 秒），期间其它出境流量会失败，见 Config 的说明。

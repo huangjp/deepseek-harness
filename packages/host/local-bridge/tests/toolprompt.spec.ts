@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   buildToolInstruction, completeWithToolCalls, createToolCallGate, EXTERNAL_TOOLING_NOTICE,
   resolveToolOutcome, toolCallFailureText, toolCallTurnText, toolResultTurnText, toolTurnText,
-  TOOL_CALL_REPAIR_REMINDER,
+  TOOL_CALL_ATTEMPTS, TOOL_CALL_REPAIR_REMINDER,
 } from '../bridge/toolprompt.mjs'
 
 /** 一条 OpenAI 风格的工具定义。 */
@@ -201,12 +201,12 @@ describe('completeWithToolCalls', () => {
   })
 
   it('重试后仍写坏时交给调用方报错', async () => {
-    const invoke = vi.fn()
-      .mockResolvedValueOnce({ text: '{"bridge_tool_calls":[' })
-      .mockResolvedValueOnce({ text: '{"bridge_tool_calls":[' })
+    const invoke = vi.fn().mockResolvedValue({ text: '{"bridge_tool_calls":[' })
     const result = await completeWithToolCalls({ invoke, systemPrompt: 'sys', hasTools: true })
 
-    expect(invoke).toHaveBeenCalledTimes(2)
+    // 轮数是上限而不是恰好两次：同一份提示词在只有文本协议的通道上时好时坏，
+    // 多问一轮就多一次机会，问满就交给调用方报错。
+    expect(invoke).toHaveBeenCalledTimes(TOOL_CALL_ATTEMPTS)
     expect(result.outcome.broken).toBe(true)
   })
 
@@ -227,7 +227,27 @@ describe('completeWithToolCalls', () => {
       .mockResolvedValueOnce({ text: '{"bridge_tool_calls":[{"name":"a","arguments":{}}]}' })
     await completeWithToolCalls({ invoke, systemPrompt: 'sys', hasTools: true, log: (m) => { logs.push(m) } })
 
-    expect(logs.join('\n')).toContain('重试一次')
+    expect(logs.join('\n')).toContain('重试')
+  })
+
+  it('连续失败时每一轮都追加一条提示', async () => {
+    const invoke = vi.fn().mockResolvedValue({ text: '我无法直接读取你设备上的 `D:/a.json` 文件。' })
+    await completeWithToolCalls({ invoke, systemPrompt: 'sys', hasTools: true })
+
+    expect(invoke).toHaveBeenCalledTimes(TOOL_CALL_ATTEMPTS)
+    expect(String(invoke.mock.calls[1]?.[0])).toContain('确实拥有')
+    // 第三轮带着前两轮攒下来的提示：一次失败之后模型可能换一种毛病。
+    expect(String(invoke.mock.calls[2]?.[0])).toContain('确实拥有')
+  })
+
+  it('工具清单里列得出真实工具名，并说明键名不是工具名', () => {
+    const text = buildToolInstruction([
+      { name: 'read', description: '读文件', parameters: { type: 'object', properties: { path: { type: 'string' } } } },
+      { name: 'write', description: '写文件', parameters: { type: 'object', properties: { path: { type: 'string' } } } },
+    ], 'auto')
+
+    expect(text).toContain('read、write')
+    expect(text).toContain('不是工具名')
   })
 })
 
