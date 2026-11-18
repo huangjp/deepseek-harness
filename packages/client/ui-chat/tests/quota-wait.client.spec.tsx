@@ -4,12 +4,14 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render } from '@testing-library/react'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
-import type { ConversationLocation, ConversationMatch } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type {
+  ConversationLocation, ConversationMatch, ConversationNodeContext, ConversationNodeDefinition, ConversationStartMatch,
+} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { SessionEvent } from '@deepseek-ai/dsh-session/types'
 import type { ChatNodeViewProps } from '../src/client/contract/slots.ts'
 import { zh } from '../src/client/locale.ts'
 import { QuotaWaitNodeView } from '../src/client/chat/MessageItem.tsx'
-import { quotaWaitDefinition } from '../src/client/conversation-nodes/quota-wait.ts'
+import { quotaWaitDefinition, type QuotaWaitState } from '../src/client/conversation-nodes/quota-wait.ts'
 
 afterEach(cleanup)
 
@@ -33,8 +35,25 @@ function quotaEvent(waitId = 'wait-1'): SessionEvent {
   } as SessionEvent
 }
 
-function matchOf(event: SessionEvent, role: 'start' | 'update', location: ConversationLocation): ConversationMatch {
-  return { event, role, location }
+function startMatch(event: SessionEvent, location: ConversationLocation): ConversationStartMatch {
+  return { event, role: 'start', location }
+}
+
+function updateMatch(event: SessionEvent, location: ConversationLocation): ConversationMatch {
+  return { event, role: 'update', location }
+}
+
+type QuotaViewContext = Parameters<NonNullable<ConversationNodeDefinition<QuotaWaitState>['buildViewNode']>>[0]
+
+function viewOf(context: QuotaViewContext) {
+  return quotaWaitDefinition.buildViewNode?.(context) ?? null
+}
+
+function waitState(node: { readonly data: unknown } | null): unknown {
+  if (node === null) return undefined
+  const data = node.data
+  if (typeof data !== 'object' || data === null || !('waitState' in data)) return undefined
+  return data.waitState
 }
 
 const openLocation = { kind: 'unresolved' } as const
@@ -54,33 +73,36 @@ describe('quota wait conversation node', () => {
     expect(quotaWaitDefinition.match(started)).toEqual({ id: 'wait-1', role: 'update' })
     expect(quotaWaitDefinition.match({ ...started, data: { ...started.data, waitId: '' } } as SessionEvent)).toBeNull()
 
-    const start = matchOf(event, 'start', openLocation)
+    const start = startMatch(event, openLocation)
     const state = quotaWaitDefinition.start({} as never, start, {} as never)
-    const node = quotaWaitDefinition.buildViewNode({
+    const node = viewOf({
       key: 'k', kind: 'quota-wait', id: 'wait-1', matches: [start], start, state, current: new Map(),
     })
-    expect(node?.data.waitState).toBe('scheduled')
-    expect(node?.data.resumeAtMs).toBe(1_800_000_000_000)
+    expect(waitState(node)).toBe('scheduled')
+    expect(node !== null && typeof node.data === 'object' && node.data !== null && 'resumeAtMs' in node.data
+      ? node.data.resumeAtMs
+      : undefined).toBe(1_800_000_000_000)
 
-    const cancelled = quotaWaitDefinition.buildViewNode({
-      key: 'k', kind: 'quota-wait', id: 'wait-1', matches: [start], start: matchOf(event, 'start', closedTurn),
+    const cancelled = viewOf({
+      key: 'k', kind: 'quota-wait', id: 'wait-1', matches: [start], start: startMatch(event, closedTurn),
       state, current: new Map(),
     })
-    expect(cancelled?.data.waitState).toBe('cancelled')
-    expect(quotaWaitDefinition.buildViewNode({
-      key: 'k', kind: 'quota-wait', id: 'wait-1', matches: [matchOf(event, 'start', closedStep)],
-      start: matchOf(event, 'start', closedStep), state, current: new Map(),
-    })?.data.waitState).toBe('cancelled')
+    expect(waitState(cancelled)).toBe('cancelled')
+    expect(waitState(viewOf({
+      key: 'k', kind: 'quota-wait', id: 'wait-1', matches: [startMatch(event, closedStep)],
+      start: startMatch(event, closedStep), state, current: new Map(),
+    }))).toBe('cancelled')
 
-    const running = quotaWaitDefinition.update(state === undefined ? {} as never : { state } as never, matchOf(started, 'update', openLocation))
-    expect(quotaWaitDefinition.buildViewNode({
+    const context = { state } as ConversationNodeContext<QuotaWaitState> & { readonly state: QuotaWaitState }
+    const running = quotaWaitDefinition.update(context, updateMatch(started, openLocation))
+    expect(waitState(viewOf({
       key: 'k', kind: 'quota-wait', id: 'wait-1', matches: [start], start, state: running, current: new Map(),
-    })?.data.waitState).toBe('started')
-    expect(quotaWaitDefinition.update({ state } as never, matchOf(event, 'update', openLocation))).toBe(state)
-    expect(quotaWaitDefinition.buildViewNode({
+    }))).toBe('started')
+    expect(quotaWaitDefinition.update(context, updateMatch(event, openLocation))).toBe(state)
+    expect(viewOf({
       key: 'k', kind: 'quota-wait', id: 'wait-1', matches: [], start: undefined, state: undefined, current: new Map(),
     })).toBeNull()
-    expect(() => quotaWaitDefinition.start({} as never, matchOf(started, 'start', openLocation), {} as never)).toThrow(/quota-wait start/)
+    expect(() => quotaWaitDefinition.start({} as never, startMatch(started, openLocation), {} as never)).toThrow(/quota-wait start/)
   })
 
   it('renders the paused, cancelled, and resumed copy', () => {

@@ -289,10 +289,11 @@ describe('resolveMiniMaxQuotaWindow', () => {
       baseURL: 'https://api.minimax.io/anthropic',
       apiKey: 'secret',
       signal: new AbortController().signal,
-      fetch: async () => ({
-        ok: true,
-        text: async () => { throw new Error('unreadable') },
-      }) as Response,
+      fetch: async () => {
+        const response = new Response('clock', { status: 200 })
+        response.text = () => Promise.reject(new Error('unreadable'))
+        return response
+      },
     })).resolves.toEqual({ window: 'unknown' })
     await expect(resolveMiniMaxQuotaWindow({
       baseURL: 'https://api.minimax.io/anthropic',
@@ -372,7 +373,7 @@ describe('MiniMax route', () => {
     const prior = createAssistantMessage({
       content: [{ type: 'text', text: 'earlier' }],
       source: {
-        kind: 'model', provider: MINIMAX_PROVIDER, model: 'MiniMax-M3', replayState: { bogus: true },
+        provider: MINIMAX_PROVIDER, model: 'MiniMax-M3', replayState: { bogus: true },
       },
     })
     const chunks = []
