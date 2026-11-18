@@ -65,6 +65,8 @@ import { DesktopTray } from './tray.ts'
 import { DesktopBackgroundNotice } from './background-notice.ts'
 
 let focusPrimaryWindow = (): void => {}
+/** Reveal whichever startup window exists, so a fatal failure is never reported from an invisible shell. */
+let revealStartupWindow = (): void => {}
 let stopForRecovery = async (): Promise<void> => {}
 let shuttingDown = false
 /**
@@ -130,6 +132,9 @@ function reportFatal(error: unknown, source: CrashReportSource): void {
     void persistCrashReport(error, source)
     return
   }
+  // Boot failures happen before any window is shown. The recovery dialog has no parent there, so
+  // without a visible window it has no taskbar presence and can sit behind other applications.
+  revealStartupWindow()
   void recovery.report(error, source).catch((failure: unknown) => { console.error(failure); app.exit(1) })
 }
 
@@ -1252,6 +1257,11 @@ async function main(): Promise<void> {
     } else {
       await enterWorkspace()
     }
+  }
+  revealStartupWindow = () => {
+    const window = welcomeWindow ?? mainWindow
+    if (window === undefined || window.isDestroyed() || window.isVisible()) return
+    window.show()
   }
   focusPrimaryWindow = () => {
     if (quitting) return

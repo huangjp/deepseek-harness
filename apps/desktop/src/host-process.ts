@@ -3,6 +3,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { join } from 'node:path'
 import type { PlatformSession } from '@deepseek-ai/dsh-deepseek-account'
+import { resolveDurationMs } from './duration-env.ts'
 import { desktopNodeEnvironment } from './node-environment.ts'
 
 interface ReadyEvent {
@@ -52,6 +53,51 @@ export interface DesktopQuitInspection {
 
 /** Quit inspection deadline; a slower Host counts as unknown work and the shell asks before quitting. */
 export const QUIT_INSPECTION_DEADLINE_MS = 2_000
+
+/** Environment variable holding the Host startup deadline. */
+export const HOST_START_TIMEOUT_ENV = 'DSH_DESKTOP_HOST_START_TIMEOUT_MS'
+
+/**
+ * Default deadline for the Host to report ready. Boot awaits every plugin's activation, and a
+ * plugin waiting on an external tool (an MCP server in `cordis.patch.yml` is the usual one) never
+ * settles on its own; the shell owns no window before ready, so an unbounded wait is an invisible
+ * application.
+ */
+export const DEFAULT_HOST_START_TIMEOUT_MS = 180_000
+
+/**
+ * Resolve the Host startup deadline.
+ * @param env - Environment inherited by the Host.
+ * @returns Integer milliseconds from {@link HOST_START_TIMEOUT_ENV}, or the default when unset.
+ */
+export function resolveHostStartTimeout(env: NodeJS.ProcessEnv): number {
+  return resolveDurationMs(env, HOST_START_TIMEOUT_ENV, DEFAULT_HOST_START_TIMEOUT_MS)
+}
+
+/**
+ * Fail a readiness wait at its deadline instead of waiting forever.
+ * @param ready - The Host's readiness promise.
+ * @param milliseconds - Deadline for the Host to report ready.
+ * @returns Readiness, or a rejection naming the deadline and what to check.
+ */
+async function readyWithin(ready: Promise<DesktopHostReady>, milliseconds: number): Promise<DesktopHostReady> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`dsh desktop host did not report ready within ${String(milliseconds)} ms`
+        + ': a plugin activated during boot is waiting on something that never settles'
+        + ' (an MCP server configured in cordis.patch.yml is the usual cause).'
+        + ` Raise ${HOST_START_TIMEOUT_ENV} when the machine is merely slow.`))
+    }, milliseconds)
+    // The deadline must not hold the shell open on its own.
+    timer.unref()
+  })
+  try {
+    return await Promise.race([ready, deadline])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
 
 const MAX_HOST_DIAGNOSTIC_CHARS = 64 * 1024
 
@@ -155,6 +201,8 @@ export class DesktopHostProcess {
     this.readyResolve = resolve
     this.readyReject = reject
   })
+  /** Bounded view of {@link readyPromise}, created once per Host object. */
+  private readyOutcome: Promise<DesktopHostReady> | undefined
   private exitPromise: Promise<void> | undefined
   private stderr = ''
   private failureReported = false
@@ -193,10 +241,11 @@ export class DesktopHostProcess {
 
   /**
    * Start this child once and await its Web application URL.
-   * @returns Ready facts supplied by the child after application startup.
+   * @returns Ready facts supplied by the child after application startup; rejects at
+   * {@link HOST_START_TIMEOUT_ENV} when boot never settles.
    */
   async start(): Promise<DesktopHostReady> {
-    if (this.child !== undefined) return this.readyPromise
+    if (this.child !== undefined) return this.readyOutcome ?? this.readyPromise
     const entry = join(this.runtimeDir, 'node_modules', '@deepseek-ai', 'dsh-desktop-host', 'lib', 'index.js')
     const child = spawn(this.node, [
       '--expose-internals',
@@ -243,7 +292,7 @@ export class DesktopHostProcess {
         resolve()
       })
     })
-    return this.readyPromise
+    return this.readyOutcome ??= readyWithin(this.readyPromise, resolveHostStartTimeout(this.environment))
   }
 
   /**

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DesktopHostFatalError, DesktopHostProcess, DesktopHostUncleanExitError, QUIT_INSPECTION_DEADLINE_MS } from '../src/host-process.ts'
+import { DesktopHostFatalError, DesktopHostProcess, DesktopHostUncleanExitError, DEFAULT_HOST_START_TIMEOUT_MS, HOST_START_TIMEOUT_ENV, QUIT_INSPECTION_DEADLINE_MS, resolveHostStartTimeout } from '../src/host-process.ts'
 
 const roots: string[] = []
 const hosts: DesktopHostProcess[] = []
@@ -278,4 +278,22 @@ it.each([undefined, '', 7])('rejects malformed Platform account identity %s on p
   await expect(host.start()).rejects.toThrow('invalid IPC event')
   expect(changed.mock.calls).toEqual([[null]])
   await host.stop()
+})
+
+describe('host startup deadline', () => {
+  it('resolves the deadline from the environment and defaults to three minutes', () => {
+    expect(resolveHostStartTimeout({})).toBe(DEFAULT_HOST_START_TIMEOUT_MS)
+    expect(resolveHostStartTimeout({ [HOST_START_TIMEOUT_ENV]: '45000' })).toBe(45_000)
+    expect(() => resolveHostStartTimeout({ [HOST_START_TIMEOUT_ENV]: '500' }))
+      .toThrow(`${HOST_START_TIMEOUT_ENV} must be an integer from 1000 through 2147483647`)
+  })
+
+  it('fails a boot that never settles instead of waiting for ready forever', async () => {
+    // Boot never sends `ready`, so only the deadline can settle the shell's wait.
+    const runtime = projectWithHost("process.on('message', message => { if (message.type === 'shutdown') process.exit(0) })")
+    const host = hostProcess(runtime, undefined, undefined, { ...process.env, [HOST_START_TIMEOUT_ENV]: '1000' })
+    await expect(host.start()).rejects.toThrow('did not report ready within 1000 ms')
+    // A recovery resend of start observes the same failure rather than a fresh wait.
+    await expect(host.start()).rejects.toThrow('did not report ready within 1000 ms')
+  }, 15_000)
 })
