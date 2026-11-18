@@ -104,6 +104,11 @@
     - id: llm-retry
       name: '@deepseek-ai/dsh-llm-retry'
 
+    # Holds a step whose provider reported a replenishing quota window, then
+    # retries that same step. Short rate limits stay on llm-retry.
+    - id: llm-quota-wait
+      name: '@deepseek-ai/dsh-llm-quota-wait'
+
     # Live Config forms persist through the active profile patch.
 
     # Live configuration forms persist through the launcher's profile.

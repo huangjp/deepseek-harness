@@ -61,6 +61,21 @@ export interface ManualCompactionChatData {
   readonly compaction: CompactionSummaryNode | null
 }
 
+/** One step paused until a replenishing quota window opens. */
+export interface QuotaWaitChatData {
+  readonly waitId: string
+  readonly turn: number
+  readonly step: number
+  readonly provider: string
+  readonly window: 'interval' | 'weekly' | 'unknown'
+  readonly resumeAtMs: number
+  readonly delayMs: number
+  readonly failure: { readonly message: string; readonly code: string }
+  readonly waitState: 'scheduled' | 'started' | 'cancelled'
+  readonly seq: number
+  readonly time: number
+}
+
 /** One durable retry chain rendered as a single row. */
 export interface RetryChatData {
   readonly attempts: readonly ModelRetryNode[]

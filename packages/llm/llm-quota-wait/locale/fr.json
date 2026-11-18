@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Attente de quota",
+    "description": "Met la tâche en pause jusqu'à l'ouverture d'une fenêtre de quota renouvelable, puis la reprend."
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "formatVersion": 2,
+  "roots": [
+    {"key":"event:llm/quota-wait","kind":"event","event":"llm/quota-wait","surface":false,"digest":"fec0f1fff540f8cd732b9897899883b1e2fb2e597f84c90e07e04f4f277047c2"},
+    {"key":"event:llm/quota-wait-started","kind":"event","event":"llm/quota-wait-started","surface":false,"digest":"069031af248de8436f70f667089884ad1c02559577b853f619a2d28ca36a3589"},
+    {"key":"event:model/routing-mode","kind":"event","event":"model/routing-mode","surface":false,"digest":"f10b1ad5cdba9dfb73ed6cf0e9ba63c774e4523b8337958b9b51c22ef598acd5"}
+  ],
+  "types": [],
+  "nodes": {
+    "05a2796621b1ee6c": {"kind":"literal","value":"unknown"},
+    "0657d3ca5ac4e7bf": {"kind":"primitive","type":"number"},
+    "069031af248de843": {"kind":"object","properties":[{"name":"data","type":"a7aaccbbde098386","optional":false},{"name":"ignorable","type":"dacf3d5f3e4ff619","optional":true},{"name":"seq","type":"0657d3ca5ac4e7bf","optional":false},{"name":"time","type":"0657d3ca5ac4e7bf","optional":false},{"name":"type","type":"13408ba7be330c34","optional":false}],"indices":[]},
+    "13408ba7be330c34": {"kind":"literal","value":"llm/quota-wait-started"},
+    "2ae969dcc7cbc0a9": {"kind":"union","types":["62458c1f6c5e65dc","b3a4777d4a7e6102"]},
+    "3380f549d219eb83": {"kind":"literal","value":"interval"},
+    "4cd48f3e5108bd6e": {"kind":"primitive","type":"string"},
+    "5ca95ee04f72473b": {"kind":"union","types":["05a2796621b1ee6c","3380f549d219eb83","9ba974334c10a8b3"]},
+    "5f2117d1856a5ab4": {"kind":"object","properties":[{"name":"code","type":"4cd48f3e5108bd6e","optional":false},{"name":"message","type":"4cd48f3e5108bd6e","optional":false},{"name":"offloadImages","type":"0657d3ca5ac4e7bf","optional":true},{"name":"providerRetryAfterMs","type":"0657d3ca5ac4e7bf","optional":true},{"name":"requestId","type":"4cd48f3e5108bd6e","optional":true},{"name":"status","type":"0657d3ca5ac4e7bf","optional":true}],"indices":[]},
+    "62458c1f6c5e65dc": {"kind":"literal","value":"auto"},
+    "909e27c04f4a9410": {"kind":"object","properties":[{"name":"mode","type":"2ae969dcc7cbc0a9","optional":false}],"indices":[]},
+    "9ba974334c10a8b3": {"kind":"literal","value":"weekly"},
+    "a7aaccbbde098386": {"kind":"object","properties":[{"name":"step","type":"0657d3ca5ac4e7bf","optional":false},{"name":"turn","type":"0657d3ca5ac4e7bf","optional":false},{"name":"waitId","type":"4cd48f3e5108bd6e","optional":false}],"indices":[]},
+    "b3a4777d4a7e6102": {"kind":"literal","value":"fixed"},
+    "c40e84e486a9cb01": {"kind":"literal","value":"model/routing-mode"},
+    "d3011603e969620d": {"kind":"literal","value":"llm/quota-wait"},
+    "dacf3d5f3e4ff619": {"kind":"literal","value":true},
+    "f10b1ad5cdba9dfb": {"kind":"object","properties":[{"name":"data","type":"909e27c04f4a9410","optional":false},{"name":"ignorable","type":"dacf3d5f3e4ff619","optional":true},{"name":"seq","type":"0657d3ca5ac4e7bf","optional":false},{"name":"time","type":"0657d3ca5ac4e7bf","optional":false},{"name":"type","type":"c40e84e486a9cb01","optional":false}],"indices":[]},
+    "f5349685a56f74a5": {"kind":"object","properties":[{"name":"delayMs","type":"0657d3ca5ac4e7bf","optional":false},{"name":"failure","type":"5f2117d1856a5ab4","optional":false},{"name":"provider","type":"4cd48f3e5108bd6e","optional":false},{"name":"resumeAtMs","type":"0657d3ca5ac4e7bf","optional":false},{"name":"step","type":"0657d3ca5ac4e7bf","optional":false},{"name":"turn","type":"0657d3ca5ac4e7bf","optional":false},{"name":"waitId","type":"4cd48f3e5108bd6e","optional":false},{"name":"window","type":"5ca95ee04f72473b","optional":false}],"indices":[]},
+    "fec0f1fff540f8cd": {"kind":"object","properties":[{"name":"data","type":"f5349685a56f74a5","optional":false},{"name":"ignorable","type":"dacf3d5f3e4ff619","optional":true},{"name":"seq","type":"0657d3ca5ac4e7bf","optional":false},{"name":"time","type":"0657d3ca5ac4e7bf","optional":false},{"name":"type","type":"d3011603e969620d","optional":false}],"indices":[]}
+  }
+}

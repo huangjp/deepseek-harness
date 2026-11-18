@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {
   ConversationLocation, ConversationNodeContext, ConversationNodeDefinition, TurnLocation,
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type {} from '@deepseek-ai/dsh-llm-quota-wait/types'
 import type {} from '@deepseek-ai/dsh-llm-retry/types'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-tool-executor-ptc/client'
@@ -84,7 +85,8 @@ function processEvidence(event: ConversationEvent): ProcessEvidence | undefined 
   }
   if (event.type === 'tool/call'
     || (event.type === 'tool/result' && event.surfaceOp === 'append')
-    || event.type === 'llm/retry') return { kind: 'other', seq: event.seq }
+    || event.type === 'llm/retry'
+    || event.type === 'llm/quota-wait') return { kind: 'other', seq: event.seq }
   return undefined
 }
 
@@ -100,6 +102,7 @@ function durableEvidenceStep(event: ConversationEvent): { readonly turn: number;
     case 'tool/call':
     case 'tool/result':
     case 'llm/retry':
+    case 'llm/quota-wait':
       return { turn: event.data.turn, step: event.data.step }
     default:
       return undefined
@@ -258,6 +261,7 @@ export const turnProcessDefinition: ConversationNodeDefinition<TurnProcessState>
       || event.type === 'tool/call'
       || event.type === 'tool/result'
       || event.type === 'llm/retry'
+      || event.type === 'llm/quota-wait'
       || event.type === 'step/start'
       || event.type === 'step/end'
       || event.type === 'turn/end') {
@@ -356,6 +360,7 @@ export function registerTurnProcess(ctx: Context): void {
       'tool/call': match,
       'tool/result': match,
       'llm/retry': match,
+      'llm/quota-wait': match,
       'step/start': match,
       'step/end': match,
       'turn/end': match,
@@ -369,6 +374,7 @@ export function registerTurnProcess(ctx: Context): void {
       'tool/call': evidence,
       'tool/result': evidence,
       'llm/retry': evidence,
+      'llm/quota-wait': evidence,
     },
   })
 }

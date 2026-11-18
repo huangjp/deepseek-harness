@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Espera de cuota",
+    "description": "Mantiene la tarea en pausa hasta que se abra una ventana de cuota que se repone y luego la reanuda."
+  }
+}

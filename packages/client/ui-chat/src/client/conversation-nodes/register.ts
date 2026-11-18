@@ -7,6 +7,7 @@ import { registerUnknownConversationFallback } from './fallback.ts'
 import { registerInboxConversationNodes } from './inbox.ts'
 import { registerMessageConversationNode } from './message.ts'
 import { registerRequestPromptConversationNode } from './request-prompt.ts'
+import { registerQuotaWaitConversationNode } from './quota-wait.ts'
 import { registerRetryConversationNode } from './retry.ts'
 import { registerToolConversationNode } from './tool.ts'
 import { registerTurnErrorConversationNode } from './turn-error.ts'
@@ -29,6 +30,7 @@ export function registerConversationNodes(ctx: Context): void {
   registerCommandConversationNode(ctx)
   registerCompactionConversationNode(ctx)
   registerRetryConversationNode(ctx)
+  registerQuotaWaitConversationNode(ctx)
   registerTurnErrorConversationNode(ctx)
   registerTurnMaxTokensConversationNode(ctx)
   registerTurnTailConversationNode(ctx)

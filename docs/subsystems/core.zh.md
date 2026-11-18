@@ -557,6 +557,20 @@ currentSelection(): ModelSelection
  * @returns fulfillment after the optional profile write settles.
  */
 async saveSelection(next: ModelSelection): Promise<void>
+
+/**
+ * Read the routing mode new Sessions follow while they record none of their own.
+ * @returns the deployment's default routing mode.
+ */
+currentRoutingMode(): RoutingMode
+
+/**
+ * Save the default routing mode. The mode outlives the Session that chose it,
+ * so a Session that pinned a model keeps that choice in the Sessions that follow.
+ * @param mode - routing mode to store.
+ * @returns fulfillment after the optional profile write settles.
+ */
+async saveRoutingMode(mode: RoutingMode): Promise<void>
 ```
 
 Source: [`packages/core/agent-default-model/src/index.ts`](../../packages/core/agent-default-model/src/index.ts)

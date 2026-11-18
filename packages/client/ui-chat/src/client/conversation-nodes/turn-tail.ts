@@ -2,6 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {
   ConversationMatch, ConversationNodeContext, ConversationNodeDefinition, TurnLocation,
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type {} from '@deepseek-ai/dsh-llm-quota-wait/types'
 import type {} from '@deepseek-ai/dsh-llm-retry/types'
 import type { SessionEvent } from '@deepseek-ai/dsh-session/types'
 import { deriveTurnTokenUsage } from '@deepseek-ai/dsh-token-meter/client'
@@ -44,7 +45,8 @@ function turnCoordinates(event: Parameters<ConversationNodeDefinition['match']>[
     || event.type === 'step/end') {
     return { turn: event.data.turn, step: event.data.step }
   }
-  if (event.type === 'llm/retry' || event.type === 'llm/retry-started') {
+  if (event.type === 'llm/retry' || event.type === 'llm/retry-started'
+    || event.type === 'llm/quota-wait' || event.type === 'llm/quota-wait-started') {
     return { turn: event.data.turn, step: event.data.step }
   }
   return undefined
@@ -159,6 +161,8 @@ export function registerTurnTailConversationNode(ctx: Context): void {
       'step/end': match,
       'llm/retry': match,
       'llm/retry-started': match,
+      'llm/quota-wait': match,
+      'llm/quota-wait-started': match,
     },
   })
 }

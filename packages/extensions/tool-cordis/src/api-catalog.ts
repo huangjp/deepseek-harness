@@ -130,6 +130,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'next', description: 'resolved selection accepted by an entry point.' }],
         returns: 'fulfillment after the optional profile write settles.',
       },
+      {
+        signature: 'currentRoutingMode(): RoutingMode',
+        description: 'Read the routing mode new Sessions follow while they record none of their own.',
+        parameters: [],
+        returns: 'the deployment\'s default routing mode.',
+      },
+      {
+        signature: 'async saveRoutingMode(mode: RoutingMode): Promise<void>',
+        description: 'Save the default routing mode. The mode outlives the Session that chose it, so a Session that pinned a model keeps that choice in the Sessions that follow.',
+        parameters: [{ name: 'mode', description: 'routing mode to store.' }],
+        returns: 'fulfillment after the optional profile write settles.',
+      },
     ],
   },
   {
@@ -4585,6 +4597,22 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [],
   },
   {
+    name: 'llm/quota-hold',
+    mode: 'emit',
+    signature: '\'llm/quota-hold\'(notice: QuotaHoldNotice): void',
+    summary: 'A replenishing quota window is holding one route until `resumeAtMs`.',
+    description: 'A replenishing quota window is holding one route until `resumeAtMs`. Auto-routing skips that route until then. The in-flight step is unaffected.',
+    parameters: [{ name: 'notice', description: 'the route and the instant it should be tried again.' }],
+  },
+  {
+    name: 'llm/quota-window',
+    mode: 'waterfall',
+    signature: '\'llm/quota-window\'(request: QuotaWindowRequest, next: () => Promise<QuotaWindowPlan | undefined>): Promise<QuotaWindowPlan | undefined>',
+    summary: 'Ask a provider to name when a `QUOTA_WINDOW` failure can be retried.',
+    description: 'Ask a provider to name when a `QUOTA_WINDOW` failure can be retried. A listener that does not own `request.provider` calls `next()`. Returning a plan without `next()` owns the clock. The default is no plan, and the wait then probes.',
+    parameters: [{ name: 'request', description: 'the failed route, its failure facts, and the turn abort signal.' }],
+  },
+  {
     name: 'llm/stream',
     mode: 'waterfall',
     signature: '\'llm/stream\'(this: LlmRuntime, options: GenerateOptions, next: () => AsyncIterable<StreamChunk>): AsyncIterable<StreamChunk>',
@@ -4994,7 +5022,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'AgentOptions',
-    declaration: 'export interface AgentOptions {\n    provider?: string;\n    model?: string;\n    reasoningEffort?: ReasoningEffortId | undefined;\n    maxTokens?: number;\n}',
+    declaration: 'export interface AgentOptions {\n    provider?: string;\n    model?: string;\n    reasoningEffort?: ReasoningEffortId | undefined;\n    routingMode?: RoutingMode | undefined;\n    maxTokens?: number;\n}',
   },
   {
     name: 'AgentPresetComposition',
@@ -6529,18 +6557,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ModDefinition {\n    readonly name: string;\n    readonly version?: string;\n    readonly root?: string;\n    readonly options?: PluginOptions;\n    readonly register: ModRegister;\n}',
   },
   {
-    name: 'ModelCatalog',
-    declaration: 'export interface ModelCatalog {\n    readonly default: ModelSelection;\n    readonly routableProviders: readonly string[];\n    readonly groups: readonly ModelProviderGroup[];\n    readonly failures: readonly ModelCatalogFailure[];\n}',
-  },
-  {
-    name: 'ModelCatalogFailure',
-    declaration: 'export interface ModelCatalogFailure {\n    readonly id: string;\n    readonly name: string;\n    readonly message: string;\n}',
-  },
-  {
-    name: 'ModelCatalogModel',
-    declaration: 'export interface ModelCatalogModel {\n    readonly id: string;\n    readonly name: string;\n    readonly description?: string;\n    readonly reasoning?: ModelReasoning;\n}',
-  },
-  {
     name: 'ModelMessageSource',
     declaration: 'export interface ModelMessageSource extends AssistantProviderMetadata {\n    kind: \'model\';\n}',
   },
@@ -6551,18 +6567,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ModelModalityMap',
     declaration: 'export interface ModelModalityMap {\n    text: \'text\';\n    image: \'image\';\n}',
-  },
-  {
-    name: 'ModelProviderGroup',
-    declaration: 'export interface ModelProviderGroup {\n    readonly id: string;\n    readonly name: string;\n    readonly models: readonly ModelCatalogModel[];\n}',
-  },
-  {
-    name: 'ModelReasoning',
-    declaration: 'export interface ModelReasoning {\n    readonly efforts: readonly ModelReasoningEffort[];\n    readonly defaultEffort?: string;\n}',
-  },
-  {
-    name: 'ModelReasoningEffort',
-    declaration: 'export interface ModelReasoningEffort {\n    readonly id: string;\n    readonly name: string;\n    readonly description?: string;\n}',
   },
   {
     name: 'ModEvents',
@@ -6997,6 +7001,22 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type QueueAction = {\n    readonly kind: \'edit\';\n    readonly content: readonly TextBlock[];\n} | {\n    readonly kind: \'remove\';\n} | {\n    readonly kind: \'steer\';\n};',
   },
   {
+    name: 'QuotaHoldNotice',
+    declaration: 'export interface QuotaHoldNotice {\n    readonly provider: string;\n    readonly resumeAtMs: number;\n}',
+  },
+  {
+    name: 'QuotaWindowKind',
+    declaration: 'export type QuotaWindowKind = \'interval\' | \'weekly\' | \'unknown\';',
+  },
+  {
+    name: 'QuotaWindowPlan',
+    declaration: 'export interface QuotaWindowPlan {\n    readonly window: QuotaWindowKind;\n    readonly resetAtMs?: number;\n}',
+  },
+  {
+    name: 'QuotaWindowRequest',
+    declaration: 'export interface QuotaWindowRequest {\n    readonly provider: string;\n    readonly failure: LlmFailure;\n    readonly signal: AbortSignal;\n}',
+  },
+  {
     name: 'ReadFileLine',
     declaration: 'export interface ReadFileLine {\n    number: number;\n    text: string;\n}',
   },
@@ -7195,6 +7215,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ResumeAgentOptions',
     declaration: 'export interface ResumeAgentOptions {\n    readonly resumeSessionId: SessionId;\n    readonly parentAgent?: Agent;\n    readonly agentOptions?: AgentOptions;\n    readonly signal?: AbortSignal;\n    readonly setup?: AgentSetup;\n}',
+  },
+  {
+    name: 'RoutingMode',
+    declaration: 'export type RoutingMode = \'auto\' | \'fixed\';',
   },
   {
     name: 'RpcId',
@@ -7818,11 +7842,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionSelectModelRequest',
-    declaration: 'export interface SessionSelectModelRequest extends ModelSelection {\n    readonly sessionId: SessionId;\n}',
+    declaration: 'export interface SessionSelectModelRequest {\n    readonly sessionId: SessionId;\n    readonly provider?: string;\n    readonly model?: string;\n    readonly reasoningEffort?: string;\n    readonly routingMode?: RoutingMode;\n}',
   },
   {
     name: 'SessionSelectModelValue',
-    declaration: 'export interface SessionSelectModelValue {\n    readonly selected: ModelSelection;\n}',
+    declaration: 'export interface SessionSelectModelValue {\n    readonly selected: ModelSelection | null;\n    readonly routingMode: RoutingMode;\n}',
   },
   {
     name: 'SessionSeq',

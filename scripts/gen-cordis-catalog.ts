@@ -907,6 +907,10 @@ export const FOUNDATION_TYPE_NAMES: ReadonlySet<string> = new Set([
 
 /** Project types deliberately documented outside the subsystems catalog. */
 export const TYPE_LINK_EXEMPTIONS: Readonly<Record<string, string>> = {
+  RoutingMode: 'deployment routing mode is owned by packages/core/agent-default-model/README.md',
+  QuotaHoldNotice: 'quota hold notices are owned by packages/llm/llm/README.md and packages/llm/llm-quota-wait/README.md',
+  QuotaWindowPlan: 'quota window plans are owned by packages/llm/llm/README.md and packages/llm/llm/src/quota-window.ts',
+  QuotaWindowRequest: 'quota window clock requests are owned by packages/llm/llm/README.md and packages/llm/llm/src/quota-window.ts',
   ActionCardDecision: 'packages/experimental/action-cards/README.md',
   ActionCardKind: 'packages/experimental/action-cards/README.md',
   ActionCardResult: 'packages/experimental/action-cards/README.md',

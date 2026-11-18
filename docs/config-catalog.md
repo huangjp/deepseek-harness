@@ -2258,6 +2258,20 @@ export type PiAiThinkingTokenBudgetField = NonNullable<OpenAICompletionsCompat['
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-llm-pi-ai -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-llm-quota-wait -->
+<a id="deepseek-aidsh-llm-quota-wait"></a>
+
+## `@deepseek-ai/dsh-llm-quota-wait`
+
+- `inject`: `agents`
+- `source`: [`packages/llm/llm-quota-wait/src/index.ts:53`](../packages/llm/llm-quota-wait/src/index.ts)
+
+```ts config-catalog
+/** Accepted plugin configuration: no fields. */
+export type Config = Readonly<Record<string, unknown>>
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-llm-quota-wait -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-llm-replay -->
 <a id="deepseek-aidsh-llm-replay"></a>
 
@@ -2498,7 +2512,7 @@ export interface Config {
 
 - `inject`: `llm`
 - `refs`: `Volatile` (`@deepseek-ai/cordis`)
-- `source`: [`packages/core/model-router/src/index.ts:67`](../packages/core/model-router/src/index.ts)
+- `source`: [`packages/core/model-router/src/index.ts:68`](../packages/core/model-router/src/index.ts)
 
 ```ts config-catalog
 /** Deployment configuration for the routing table. */
@@ -3839,7 +3853,7 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-system-prompt`
 
-- `source`: [`packages/core/system-prompt/src/index.ts:263`](../packages/core/system-prompt/src/index.ts)
+- `source`: [`packages/core/system-prompt/src/index.ts:264`](../packages/core/system-prompt/src/index.ts)
 
 ```ts config-catalog
 /** Plugin config: the deployment-authored fragment of the system prompt (see {@link Config.personaPrefix} for its contract). */
@@ -4534,7 +4548,7 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-tool-todo`
 
-- `inject`: `tools` · `sessionProjections`
+- `inject`: `tools` · `sessionProjections` · `systemPrompt`
 - `source`: [`packages/todo/tool-todo/src/index.ts:29`](../packages/todo/tool-todo/src/index.ts)
 
 ```ts config-catalog

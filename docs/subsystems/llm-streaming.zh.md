@@ -1176,6 +1176,45 @@ The provider topology changed: an adapter registered or unregistered routes, or 
 
 Source: [`packages/llm/llm/src/types.ts`](../../packages/llm/llm/src/types.ts)
 
+<a id="llmquota-hold--emit"></a>
+
+#### `llm/quota-hold` — emit
+
+A replenishing quota window is holding one route until `resumeAtMs`. Auto-routing skips that route until then. The in-flight step is unaffected.
+
+```ts cordis-catalog
+/**
+ * A replenishing quota window is holding one route until `resumeAtMs`.
+ * Auto-routing skips that route until then. The in-flight step is unaffected.
+ * @param notice - the route and the instant it should be tried again.
+ * @mode emit
+ */
+'llm/quota-hold'(notice: QuotaHoldNotice): void
+```
+
+Source: [`packages/llm/llm/src/index.ts`](../../packages/llm/llm/src/index.ts)
+
+<a id="llmquota-window--waterfall"></a>
+
+#### `llm/quota-window` — waterfall
+
+Ask a provider to name when a `QUOTA_WINDOW` failure can be retried. A listener that does not own `request.provider` calls `next()`. Returning a plan without `next()` owns the clock. The default is no plan, and the wait then probes.
+
+```ts cordis-catalog
+/**
+ * Ask a provider to name when a `QUOTA_WINDOW` failure can be
+ * retried. A listener that does not own `request.provider` calls `next()`.
+ * Returning a plan without `next()` owns the clock. The default is no plan,
+ * and the wait then probes.
+ * @param request - the failed route, its failure facts, and the turn abort signal.
+ * @returns the provider's window plan, or undefined when no listener owns the route.
+ * @mode waterfall
+ */
+'llm/quota-window'(request: QuotaWindowRequest, next: () => Promise<QuotaWindowPlan | undefined>): Promise<QuotaWindowPlan | undefined>
+```
+
+Source: [`packages/llm/llm/src/index.ts`](../../packages/llm/llm/src/index.ts)
+
 <a id="llmstream--waterfall"></a>
 
 #### `llm/stream` — waterfall
