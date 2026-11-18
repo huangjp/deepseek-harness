@@ -1,0 +1,6 @@
+{
+    "meta":  {
+                 "title":  "MiniMax",
+                 "description":  "MiniMax como rota de provedor de primeira classe: o endpoint Messages compatível com Anthropic, as próprias profundidades de raciocínio da MiniMax e uma única chave de API para todos os modelos."
+             }
+}

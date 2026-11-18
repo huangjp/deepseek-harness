@@ -1,0 +1,46 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/llm/llm-minimax/README.md
+/:
+  en: b7c718dc6ba3bbec
+  zh: b7b5f22366b3f7c8
+/deepseek-ai-dsh-llm-minimax:
+  en: 873f7b79954deb5c
+  zh: 62853fb2d7eefe9d
+/deepseek-ai-dsh-llm-minimax/summary:
+  en: b032cfef2befd69e
+  zh: d17976c59a9959cf
+/deepseek-ai-dsh-llm-minimax/table-of-contents:
+  en: b563e4ec4727d0de
+  zh: af6306104c97c56f
+/deepseek-ai-dsh-llm-minimax/use-this-package:
+  en: e605bd351d1ec2af
+  zh: 7d8aa8425d40cef9
+/deepseek-ai-dsh-llm-minimax/understand-the-implementation:
+  en: fc9c244fdbddbe3a
+  zh: e11da8f1cfc27e4d
+/deepseek-ai-dsh-llm-minimax/further-exploration:
+  en: 583af3d9db3a96f4
+  zh: 6e42dc88581384bc
+/deepseek-ai-dsh-llm-minimax/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-llm-minimax/model-experience/chat-turn-through-the-built-in-route:
+  en: 6451e4882cbb0275
+  zh: e9246ab41b480916
+/deepseek-ai-dsh-llm-minimax/model-experience/chat-turn-through-the-built-in-route/what-the-model-sees:
+  en: 63f076d5c0498fba
+  zh: 474d40dc2ab136e8
+/deepseek-ai-dsh-llm-minimax/model-experience/chat-turn-through-the-built-in-route/token-effect:
+  en: acf72dc8eed4dcf8
+  zh: fba903c0a132b6f0
+/deepseek-ai-dsh-llm-minimax/model-experience/chat-turn-through-the-built-in-route/kv-cache-effect:
+  en: f3dee26537fc7673
+  zh: 6cc0d46c7652c221
+/deepseek-ai-dsh-llm-minimax/known-limitations-and-deferred-work:
+  en: c8be0da21217ec92
+  zh: 0364124fa419de49
+/deepseek-ai-dsh-llm-minimax/known-limitations-and-deferred-work/dev-note:
+  en: fddb927caddc7675
+  zh: 9bffda3072695dfd

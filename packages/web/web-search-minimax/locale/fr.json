@@ -1,0 +1,6 @@
+{
+    "meta":  {
+                 "title":  "Recherche web MiniMax",
+                 "description":  "Recherche côté serveur MiniMax pour l\u0027outil web_search ; utilise la même clé d\u0027API que la route du modèle."
+             }
+}

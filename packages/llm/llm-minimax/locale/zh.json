@@ -1,0 +1,6 @@
+{
+    "meta":  {
+                 "title":  "MiniMax 模型",
+                 "description":  "把 MiniMax 作为一等 provider 路由接入：Anthropic 兼容的 Messages 接口、MiniMax 自己的思考深度，一把 API key 通吃所有模型。"
+             }
+}

@@ -1,0 +1,46 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/web/web-search-minimax/README.md
+/:
+  en: 0c595d380e044632
+  zh: 651ad6ccd43d1d20
+/deepseek-ai-dsh-web-search-minimax:
+  en: 4fb30594074701c4
+  zh: f83fbb09f2d8bf2b
+/deepseek-ai-dsh-web-search-minimax/summary:
+  en: 9b9ae4c0b75b7a86
+  zh: 64bab3627401c03a
+/deepseek-ai-dsh-web-search-minimax/table-of-contents:
+  en: b563e4ec4727d0de
+  zh: af6306104c97c56f
+/deepseek-ai-dsh-web-search-minimax/use-this-package:
+  en: 61cbdbc0b51b4a52
+  zh: 4aeb14e898464f8f
+/deepseek-ai-dsh-web-search-minimax/understand-the-implementation:
+  en: 86e05b137ed9f02d
+  zh: 86ae3e679fd62f37
+/deepseek-ai-dsh-web-search-minimax/further-exploration:
+  en: c9027e38ce167a66
+  zh: 0c0aa418d253f28b
+/deepseek-ai-dsh-web-search-minimax/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-web-search-minimax/model-experience/one-web-search-call:
+  en: aaea69e2952d5353
+  zh: f6773983051468cc
+/deepseek-ai-dsh-web-search-minimax/model-experience/one-web-search-call/what-the-model-sees:
+  en: 23f35a4e76704d34
+  zh: 7e204ada9ef7de60
+/deepseek-ai-dsh-web-search-minimax/model-experience/one-web-search-call/token-effect:
+  en: ffca4aee132b5763
+  zh: f65522383803cde4
+/deepseek-ai-dsh-web-search-minimax/model-experience/one-web-search-call/kv-cache-effect:
+  en: c288a3e6cf2bb38e
+  zh: 150d0a69a5ed109f
+/deepseek-ai-dsh-web-search-minimax/known-limitations-and-deferred-work:
+  en: fc1c31304cd6cce8
+  zh: cf36215c71fcfe5f
+/deepseek-ai-dsh-web-search-minimax/known-limitations-and-deferred-work/dev-note:
+  en: 449071eff72d42fa
+  zh: 72d711bc5ef99b45

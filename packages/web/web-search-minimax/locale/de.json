@@ -1,0 +1,6 @@
+{
+    "meta":  {
+                 "title":  "MiniMax-Websuche",
+                 "description":  "Serverseitige Suche von MiniMax für das web_search-Werkzeug; nutzt denselben API-Schlüssel wie die Modellroute."
+             }
+}

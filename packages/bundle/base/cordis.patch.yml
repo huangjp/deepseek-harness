@@ -140,6 +140,15 @@
     - id: llm-pi-ai
       name: '@deepseek-ai/dsh-llm-pi-ai'
 
+    # MiniMax is a first-party route rather than a `llm-pi-ai` entry: the route
+    # id stays `minimax` no matter what the deployment configures, and one API
+    # key stored through the Models page (the `MINIMAX_API_KEY` reference by
+    # default) serves every model and capability on it. Thinking depths are
+    # MiniMax's own — `low` through `max` with `max` as the default, no `off`
+    # for the model that always thinks.
+    - id: llm-minimax
+      name: '@deepseek-ai/dsh-llm-minimax'
+
     - id: session-persistence-jsonl
       name: '@deepseek-ai/dsh-session-persistence-jsonl'
       config:
@@ -476,6 +485,15 @@
       config:
         apiKeyEnv: DEEPSEEK_API_KEY
 
+    # MiniMax's own server-side search, authenticated by the same key the
+    # `minimax` model route uses. A surface selects it with
+    # `web.searchProvider: minimax`; the desktop composition does, so one
+    # MiniMax key covers both the models and the agent's search.
+    - id: web-search-minimax
+      name: '@deepseek-ai/dsh-web-search-minimax'
+      config:
+        apiKeyEnv: MINIMAX_API_KEY
+
     - id: web-deepseek-api
       name: '@deepseek-ai/dsh-web-deepseek-api'
       config:
@@ -489,6 +507,18 @@
       config:
         fetch: true
         searchTimeoutMs: 60000
+
+    # MiniMax video generation and video understanding, on the same key as the
+    # `minimax` model route. Registered at this layer rather than per preset:
+    # the tools hold no per-agent state, and a deployment without the key gets
+    # an actionable failure on the call instead of a missing tool.
+    - id: tool-minimax-video
+      name: '@deepseek-ai/dsh-tool-minimax-video'
+
+    # MiniMax image, speech, music, and file tools: the rest of the same key's
+    # capability surface.
+    - id: tool-minimax-media
+      name: '@deepseek-ai/dsh-tool-minimax-media'
 
     - id: mcp-resources
       name: '@deepseek-ai/dsh-mcp-resources'

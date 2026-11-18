@@ -1,0 +1,6 @@
+{
+    "meta":  {
+                 "title":  "MiniMax video",
+                 "description":  "Generate short videos with MiniMax and ask a MiniMax model what happens in a video."
+             }
+}

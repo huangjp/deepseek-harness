@@ -1,0 +1,6 @@
+{
+    "meta":  {
+                 "title":  "MiniMax-Video",
+                 "description":  "Kurze Videos mit MiniMax erzeugen und ein MiniMax-Modell fragen, was in einem Video passiert."
+             }
+}

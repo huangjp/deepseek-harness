@@ -1,0 +1,6 @@
+{
+    "meta":  {
+                 "title":  "MiniMax 视频",
+                 "description":  "用 MiniMax 生成短视频，并让 MiniMax 模型看懂一段视频里发生了什么。"
+             }
+}

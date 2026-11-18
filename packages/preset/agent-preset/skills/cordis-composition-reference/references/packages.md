@@ -101,6 +101,7 @@ Every package below exports a Cordis plugin that a bundle patch can name in a Lo
 | `@deepseek-ai/dsh-client-ui-settings-agent-loop` | no | Settings page of the agent loop on the dsh web client's Plugins page: the parallel tool-call cap of the agent-loop namespace |
 | `@deepseek-ai/dsh-client-ui-settings-general` | no | Settings ownerless-copy and product onboarding plugin: the General section, shell trigger/header chrome content, settings dictionaries, and the versioned welcome notice |
 | `@deepseek-ai/dsh-client-ui-settings-local-bridge` | no | Settings page for the two locally bundled model relays: their listeners, the Copilot access token's age, the refresh prerequisites, and the manual token refresh |
+| `@deepseek-ai/dsh-client-ui-settings-model-router` | no | Settings page of the model router on the dsh web client's Plugins page: the task-to-route rule table |
 | `@deepseek-ai/dsh-client-ui-settings-models` | yes | Models settings and shared product-onboarding dialogs over existing settings and credential joins |
 | `@deepseek-ai/dsh-client-ui-settings-plugin-inventory` | no | Read-only Cordis Loader inventory tab in Web Plugins settings |
 | `@deepseek-ai/dsh-client-ui-settings-plugins` | no | Built-in plugins settings section for the dsh web client: the Settings navigation entry and the tab chrome feature-owned tabs register into |
@@ -158,6 +159,7 @@ Every package below exports a Cordis plugin that a bundle patch can name in a Lo
 | `@deepseek-ai/dsh-agent-default-model` | yes | Default model selection shared by Agent entry points |
 | `@deepseek-ai/dsh-agent-loop` | yes | The concrete agent loop plugin for the DeepSeek Harness |
 | `@deepseek-ai/dsh-agent-tool-presentation` | yes | Deprecated tool presentation selector; use dsh-tool-executor-native or dsh-tool-executor-ptc directly |
+| `@deepseek-ai/dsh-model-router` | yes | Task-driven model routing: picks the registered provider route that fits the task about to run |
 | `@deepseek-ai/dsh-session` | no | Event-sourced session store for the DeepSeek Harness |
 | `@deepseek-ai/dsh-system-prompt` | yes | System prompt assembly registry for the DeepSeek Harness |
 | `@deepseek-ai/dsh-tool-executor-native` | no | Native tool execution plugin |
@@ -315,6 +317,7 @@ Every package below exports a Cordis plugin that a bundle patch can name in a Lo
 | `@deepseek-ai/dsh-llm-deepseek-account` | yes | DeepSeek account provider authentication and discovery |
 | `@deepseek-ai/dsh-llm-deepseek-api-key` | yes | DeepSeek api-key provider authentication and discovery |
 | `@deepseek-ai/dsh-llm-local-bridge` | no | Built-in local-bridge LLM providers (WorkBuddy relay 127.0.0.1:8787, Copilot relay 127.0.0.1:8899, Huawei Celia relay 127.0.0.1:8123) registered as fixed, non-deletable routes on the LLM seam. |
+| `@deepseek-ai/dsh-llm-minimax` | yes | MiniMax as a first-party provider route: the Anthropic-compatible Messages endpoint with MiniMax's thinking depths, registered from code rather than as a user-declared custom model. |
 | `@deepseek-ai/dsh-llm-pi-ai` | yes | pi-ai-backed DeepSeek adapter for the DeepSeek Harness LLM seam (design-verification twin of dsh-llm-deepseek) |
 | `@deepseek-ai/dsh-llm-retry` | yes | Provider-routed LLM request retry policy for the DeepSeek Harness |
 | `@deepseek-ai/dsh-plugin-package-inventory-deepseek` | yes | Active Loader-backed plugin package inventory for official DeepSeek LLM API requests |
@@ -334,6 +337,13 @@ Every package below exports a Cordis plugin that a bundle patch can name in a Lo
 |---|---|---|
 | `@deepseek-ai/dsh-mcp-client` | yes | MCP client bridge: connects to MCP servers and registers their tools on ctx.tools |
 | `@deepseek-ai/dsh-mcp-resources` | no | Scoped MCP resource discovery and reading through shared model tools |
+
+## media
+
+| Package | Config | Description |
+|---|---|---|
+| `@deepseek-ai/dsh-tool-minimax-media` | yes | MiniMax media tools: image generation, speech synthesis and recognition, music generation, and file upload, all on the same MiniMax API key as the model route. |
+| `@deepseek-ai/dsh-tool-minimax-video` | yes | MiniMax video tools: generate a video through MiniMax's task endpoint (polling and storing the finished MP4), and ask a MiniMax model what happens in a video. |
 
 ## plan
 
@@ -516,6 +526,7 @@ Every package below exports a Cordis plugin that a bundle patch can name in a Lo
 | `@deepseek-ai/dsh-web-fetch-http` | yes | Anonymous HTTP(S) fetch provider for the DeepSeek Harness web capability seam (ctx.web) |
 | `@deepseek-ai/dsh-web-search-deepseek` | yes | DeepSeek-backed search provider (native web_search via the Anthropic-compatible API) for the DeepSeek Harness web capability seam (ctx.web) |
 | `@deepseek-ai/dsh-web-search-exa` | yes | Exa-backed search provider for the DeepSeek Harness web capability seam (ctx.web) |
+| `@deepseek-ai/dsh-web-search-minimax` | yes | MiniMax server-side web search as a ctx.web search provider: one MiniMax API key makes the harness web_search tool answer from MiniMax's own search. |
 | `@deepseek-ai/dsh-web-search-perplexity` | yes | Perplexity-backed search provider for the DeepSeek Harness web capability seam (ctx.web) |
 
 ## workflow

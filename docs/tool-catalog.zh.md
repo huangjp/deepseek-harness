@@ -54,6 +54,8 @@
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`、`ctx.workflowEngine`、`ctx.systemPrompt`、`a calling Agent (exec.agent parents the script children)` | `tool/call`、`tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-workspace-dependencies` | `load_workspace_dependencies` | `ctx.tools` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`、`web_search` | `ctx.tools`、`ctx.web`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | web_search 和 web_fetch 将提供方选择置于 ctx.web 之后，使模型可见 schema 在更换后端时保持稳定。 |
+| `@deepseek-ai/dsh-tool-minimax-video` | `minimax_video_context_enrich`、`minimax_video_generate`、`minimax_video_generate_hailuo`、`minimax_video_regenerate`、`minimax_video_task_cancel`、`minimax_video_task_list`、`minimax_video_understand` | `ctx.tools` | `tool/call`、`tool/result` | - | 两套 schema 都是静态的；MiniMax 的 key 逐次调用时解析，所以没有 key 的机器仍然能列出这些工具，并在调用时以可操作的错误失败。 |
+| `@deepseek-ai/dsh-tool-minimax-media` | `minimax_count_tokens`、`minimax_file_delete`、`minimax_file_download`、`minimax_file_list`、`minimax_file_upload`、`minimax_image_generate`、`minimax_list_voices`、`minimax_lyrics_generate`、`minimax_music_cover`、`minimax_music_cover_preprocess`、`minimax_music_generate`、`minimax_speech_synthesize`、`minimax_speech_synthesize_async`、`minimax_speech_transcribe`、`minimax_voice_clone`、`minimax_voice_delete`、`minimax_voice_design` | `ctx.tools` | `tool/call`、`tool/result` | - | 产出的是文件而不是对话内容：每个以 URL 作答的端点都会把文件下载进附件存储，而上传则以视频工具接受的 mm_file:// 引用作答。 |
 
 <a id="deepseek-aidsh-plugin-manager"></a>
 
@@ -2920,3 +2922,1068 @@ todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为
 来源：[`packages/web/tool-web/src/index.ts`](../packages/web/tool-web/src/index.ts)
 
 web_search 和 web_fetch 将提供方选择置于 ctx.web 之后，使模型可见 schema 在更换后端时保持稳定。
+
+<a id="deepseek-aidsh-tool-minimax-video"></a>
+
+## `@deepseek-ai/dsh-tool-minimax-video`
+
+### `minimax_video_context_enrich`
+
+用 MiniMax 把素材变成一段增强过的视频提示词。给它一段文字、一张图片、一段视频或一段音频参考，它返回生成时该用的提示词。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "description": "What the video should show."
+    },
+    "durationSeconds": {
+      "type": "number",
+      "description": "Target video length in seconds, 4–15; deployment default when omitted."
+    },
+    "ratio": {
+      "type": "string",
+      "description": "Aspect ratio such as 16:9 or 9:16."
+    },
+    "firstFrameImageUrl": {
+      "type": "string",
+      "description": "Public image URL to use as the first frame."
+    },
+    "lastFrameImageUrl": {
+      "type": "string",
+      "description": "Public image URL to use as the last frame."
+    },
+    "referenceImageUrls": {
+      "type": "array",
+      "description": "Public image URLs the video should look like.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "referenceVideoUrl": {
+      "type": "string",
+      "description": "Public video URL the result should follow."
+    },
+    "referenceAudioUrl": {
+      "type": "string",
+      "description": "Public audio URL the result should carry."
+    }
+  },
+  "required": [
+    "prompt"
+  ]
+}
+```
+
+来源：[`packages/media/tool-minimax-video/src/index.ts`](../packages/media/tool-minimax-video/src/index.ts)
+
+### `minimax_video_generate`
+
+用 MiniMax 生成一段短视频（文字生成视频，或以首帧做图生视频）。返回落盘的文件路径与任务 id。生成要花几分钟，所以这个调用会一直轮询，直到任务有结果或超过它的期限。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "description": "What the video should show."
+    },
+    "model": {
+      "type": "string",
+      "description": "Video model; deployment default when omitted.",
+      "enum": [
+        "MiniMax-H3",
+        "MiniMax-H3-Highspeed",
+        "MiniMax-H3-Lite",
+        "MiniMax-H3-Max"
+      ]
+    },
+    "resolution": {
+      "type": "string",
+      "description": "Output resolution; deployment default when omitted.",
+      "enum": [
+        "480P",
+        "768P",
+        "2K"
+      ]
+    },
+    "durationSeconds": {
+      "type": "number",
+      "description": "Clip length in seconds, 4–15; deployment default when omitted."
+    },
+    "ratio": {
+      "type": "string",
+      "description": "Aspect ratio such as 16:9 or 9:16; ignored for image-to-video."
+    },
+    "firstFrameImageUrl": {
+      "type": "string",
+      "description": "Public image URL to use as the first frame (image-to-video)."
+    },
+    "lastFrameImageUrl": {
+      "type": "string",
+      "description": "Public image URL to use as the last frame; pairs with the first frame."
+    },
+    "referenceImageUrls": {
+      "type": "array",
+      "description": "Public image URLs the video should look like; a reference-based request, never combined with frames.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "referenceVideoUrl": {
+      "type": "string",
+      "description": "Public video URL the result should follow; a reference-based request."
+    },
+    "referenceAudioUrl": {
+      "type": "string",
+      "description": "Public audio URL the result should carry; a reference-based request."
+    },
+    "promptExpansionMode": {
+      "type": "string",
+      "description": "How hard MiniMax rewrites the prompt; accepted only by MiniMax-H3-Max.",
+      "enum": [
+        "disabled",
+        "balanced",
+        "quality"
+      ]
+    }
+  },
+  "required": [
+    "prompt"
+  ]
+}
+```
+
+来源：[`packages/media/tool-minimax-video/src/index.ts`](../packages/media/tool-minimax-video/src/index.ts)
+
+### `minimax_video_generate_hailuo`
+
+用较早的 MiniMax 海螺模型生成视频，可达 1080P。支持只给提示词、给首帧、给首帧与尾帧，或给角色参考图。返回落盘的文件路径。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "description": "What the video should show (≤2000 characters)."
+    },
+    "model": {
+      "type": "string",
+      "description": "Hailuo model; the model must suit the material given.",
+      "enum": [
+        "MiniMax-Hailuo-2.3",
+        "MiniMax-Hailuo-2.3-Fast",
+        "MiniMax-Hailuo-02",
+        "T2V-01-Director",
+        "T2V-01",
+        "I2V-01-Director",
+        "I2V-01-live",
+        "I2V-01",
+        "S2V-01"
+      ]
+    },
+    "firstFrameImageUrl": {
+      "type": "string",
+      "description": "Public image URL to use as the first frame."
+    },
+    "lastFrameImageUrl": {
+      "type": "string",
+      "description": "Public image URL to use as the last frame; needs a first frame too."
+    },
+    "subjectReferenceImages": {
+      "type": "array",
+      "description": "Public image URLs of the character to keep; needs the S2V-01 model.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "duration": {
+      "type": "number",
+      "description": "Clip length in seconds; the model decides which lengths it serves."
+    },
+    "resolution": {
+      "type": "string",
+      "description": "Output resolution; the model decides which resolutions it serves.",
+      "enum": [
+        "512P",
+        "720P",
+        "768P",
+        "1080P"
+      ]
+    },
+    "promptOptimizer": {
+      "type": "boolean",
+      "description": "Let MiniMax rewrite the prompt; defaults to true."
+    },
+    "fastPretreatment": {
+      "type": "boolean",
+      "description": "Faster pretreatment; only the 2.3 and 02 models accept it."
+    }
+  },
+  "required": [
+    "prompt",
+    "model"
+  ]
+}
+```
+
+来源：[`packages/media/tool-minimax-video/src/index.ts`](../packages/media/tool-minimax-video/src/index.ts)
+
+### `minimax_video_regenerate`
+
+把一段已完成的 MiniMax 视频重新生成为 2K，来源可以是产出它的那次任务，也可以是一段 768P 的源视频。来源任务必须是最近一周内成功的那一次。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "sourceTaskId": {
+      "type": "string",
+      "description": "The finished task to regenerate; mutually exclusive with baseVideoUrl."
+    },
+    "baseVideoUrl": {
+      "type": "string",
+      "description": "Public URL of a 768P source video; mutually exclusive with sourceTaskId."
+    },
+    "prompt": {
+      "type": "string",
+      "description": "The final prompt to send to the model for the regeneration."
+    },
+    "firstFrameImageUrl": {
+      "type": "string",
+      "description": "Public image URL to use as the first frame of the regeneration."
+    },
+    "lastFrameImageUrl": {
+      "type": "string",
+      "description": "Public image URL to use as the last frame of the regeneration."
+    },
+    "watermark": {
+      "type": "boolean",
+      "description": "Append an AIGC watermark tone to the result."
+    }
+  }
+}
+```
+
+来源：[`packages/media/tool-minimax-video/src/index.ts`](../packages/media/tool-minimax-video/src/index.ts)
+
+### `minimax_video_task_cancel`
+
+取消一个还没开始的 MiniMax 视频任务，或删除一个已经结束的任务的记录。正在运行的任务无法取消，MiniMax 会拒绝这次调用。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "taskId": {
+      "type": "string",
+      "description": "The task id to cancel or delete."
+    }
+  },
+  "required": [
+    "taskId"
+  ]
+}
+```
+
+来源：[`packages/media/tool-minimax-video/src/index.ts`](../packages/media/tool-minimax-video/src/index.ts)
+
+### `minimax_video_task_list`
+
+列出最近一周的 MiniMax 视频生成任务，最新的在前。用它找任务 id、看哪些任务还在跑，或回顾生成了什么。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "status": {
+      "type": "string",
+      "description": "Only tasks in this state; all states when omitted.",
+      "enum": [
+        "queued",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "model": {
+      "type": "string",
+      "description": "Only tasks of this model.",
+      "enum": [
+        "MiniMax-H3",
+        "MiniMax-H3-Highspeed",
+        "MiniMax-H3-Lite",
+        "MiniMax-H3-Max"
+      ]
+    },
+    "taskIds": {
+      "type": "array",
+      "description": "Only these task ids.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "pageNum": {
+      "type": "number",
+      "description": "Page number, starting at 1."
+    },
+    "pageSize": {
+      "type": "number",
+      "description": "How many tasks per page."
+    }
+  }
+}
+```
+
+来源：[`packages/media/tool-minimax-video/src/index.ts`](../packages/media/tool-minimax-video/src/index.ts)
+
+### `minimax_video_understand`
+
+问 MiniMax 一段视频里发生了什么。给一个公网 URL（或此前 MiniMax 上传得到的 `mm_file://` 引用），以及要问的问题。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "videoUrl": {
+      "type": "string",
+      "description": "Public video URL or mm_file:// reference."
+    },
+    "prompt": {
+      "type": "string",
+      "description": "What to answer about the video; defaults to describing what happens in it."
+    },
+    "fps": {
+      "type": "number",
+      "description": "Frame sampling rate 0.2–5; MiniMax defaults to 1."
+    },
+    "detail": {
+      "type": "string",
+      "description": "Frame detail level; higher costs more tokens.",
+      "enum": [
+        "low",
+        "default",
+        "high"
+      ]
+    }
+  },
+  "required": [
+    "videoUrl"
+  ]
+}
+```
+
+来源：[`packages/media/tool-minimax-video/src/index.ts`](../packages/media/tool-minimax-video/src/index.ts)
+
+两套 schema 都是静态的；MiniMax 的 key 逐次调用时解析，所以没有 key 的机器仍然能列出这些工具，并在调用时以可操作的错误失败。
+
+<a id="deepseek-aidsh-tool-minimax-media"></a>
+
+## `@deepseek-ai/dsh-tool-minimax-media`
+
+### `minimax_count_tokens`
+
+算一条消息在 MiniMax 模型上要花多少 token，不生成任何内容。发送长文本前用它确认放得进上下文。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "text": {
+      "type": "string",
+      "description": "The text to measure."
+    },
+    "model": {
+      "type": "string",
+      "description": "The model to measure against; deployment default when omitted.",
+      "enum": [
+        "MiniMax-M3.1-Flash",
+        "MiniMax-M3"
+      ]
+    },
+    "serviceTier": {
+      "type": "string",
+      "description": "Admission tier to measure at; priority costs 1.5× and MiniMax-M3.1-Flash rejects it.",
+      "enum": [
+        "standard",
+        "priority"
+      ]
+    }
+  },
+  "required": [
+    "text"
+  ]
+}
+```
+
+来源：[`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_file_delete`
+
+删除 MiniMax 存下的一个文件，比如一段不再需要的已上传视频。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "fileId": {
+      "type": "number",
+      "description": "The file id to delete."
+    },
+    "purpose": {
+      "type": "string",
+      "description": "The purpose the file was stored under.",
+      "enum": [
+        "voice_clone",
+        "prompt_audio",
+        "t2a_async",
+        "t2a_async_input",
+        "video_generation"
+      ]
+    }
+  },
+  "required": [
+    "fileId",
+    "purpose"
+  ]
+}
+```
+
+来源：[`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_file_download`
+
+下载 MiniMax 存下的一个文件并留在工作区里。用它把此前上传的视频或生成的音频取回来。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "fileId": {
+      "type": "number",
+      "description": "The file id to download."
+    },
+    "name": {
+      "type": "string",
+      "description": "Name to save the file under; defaults to the stored name."
+    }
+  },
+  "required": [
+    "fileId"
+  ]
+}
+```
+
+来源：[`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_file_list`
+
+列出 MiniMax 为某个用途存下的文件，比如已上传的视频或音色样本。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "purpose": {
+      "type": "string",
+      "description": "Which stored files to read.",
+      "enum": [
+        "voice_clone",
+        "prompt_audio",
+        "t2a_async",
+        "t2a_async_input",
+        "video_generation"
+      ]
+    }
+  },
+  "required": [
+    "purpose"
+  ]
+}
+```
+
+来源：[`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_file_upload`
+
+把文件上传到 MiniMax，返回其它 MiniMax 工具接受的 `mm_file://` 引用。大到没法用 URL 传的视频用用途 `video_understanding` 上传。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "File path in the workspace."
+    },
+    "purpose": {
+      "type": "string",
+      "description": "Declared upload purpose; video_understanding for videos, video_generation_input for generation inputs.",
+      "enum": [
+        "voice_clone",
+        "prompt_audio",
+        "t2a_async_input",
+        "video_understanding",
+        "video_generation_input"
+      ]
+    }
+  },
+  "required": [
+    "path",
+    "purpose"
+  ]
+}
+```
+
+来源：[`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_image_generate`
+
+用 MiniMax 依一段文字提示词生成图片，可以再给一张参考图引导。返回生成图片的落盘路径。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "description": "What the image should show (≤1500 characters)."
+    },
+    "aspectRatio": {
+      "type": "string",
+      "description": "Output aspect ratio; deployment default when omitted.",
+      "enum": [
+        "1:1",
+        "16:9",
+        "4:3",
+        "3:2",
+        "2:3",
+        "3:4",
+        "9:16",
+        "21:9"
+      ]
+    },
+    "count": {
+      "type": "number",
+      "description": "How many images, 1–9; defaults to 1."
+    },
+    "promptOptimizer": {
+      "type": "boolean",
+      "description": "Let MiniMax rewrite the prompt for a better result; defaults to false."
+    },
+    "seed": {
+      "type": "number",
+      "description": "Seed for a reproducible result; random when omitted."
+    },
+    "subjectReferenceUrl": {
+      "type": "string",
+      "description": "Public image URL used as a character reference (image-to-image)."
+    }
+  },
+  "required": [
+    "prompt"
+  ]
+}
+```
+
+来源：[`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_list_voices`
+
+列出这个 MiniMax 账号可用来合成的音色：内置系统音色、从样本克隆的音色，以及依描述设计的音色。把返回的音色 id 配 minimax_speech_synthesize 使用。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "voiceType": {
+      "type": "string",
+      "description": "Which voices to read; defaults to all of them.",
+      "enum": [
+        "system",
+        "voice_cloning",
+        "voice_generation",
+        "all"
+      ]
+    }
+  }
+}
+```
+
+来源：[`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_lyrics_generate`
+
+用 MiniMax 写歌词，或改写、续写已有的歌词。结果可以由 minimax_music_generate 唱出来。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "mode": {
+      "type": "string",
+      "description": "Write a whole song, or edit and continue existing lyrics.",
+      "enum": [
+        "write_full_song",
+        "edit"
+      ]
+    },
+    "prompt": {
+      "type": "string",
+      "description": "What the song should be about (≤2000 characters)."
+    },
+    "lyrics": {
+      "type": "string",
+      "description": "Existing lyrics to edit or continue (≤3500 characters)."
+    },
+    "title": {
+      "type": "string",
+      "description": "Title to keep in the result."
+    }
+  },
+  "required": [
+    "mode"
+  ]
+}
+```
+
+来源：[`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_music_cover`
+
+用 MiniMax 翻唱一首参考歌曲。给它翻唱的风格，以及参考歌曲的 URL 或 minimax_music_cover_preprocess 给出的翻唱特征 id。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "description": "The style of the cover (10–300 characters)."
+    },
+    "audioUrl": {
+      "type": "string",
+      "description": "Public URL of the reference song; mutually exclusive with coverFeatureId."
+    },
+    "coverFeatureId": {
+      "type": "string",
+      "description": "Feature id from minimax_music_cover_preprocess; needs lyrics."
+    },
+    "lyrics": {
+      "type": "string",
+      "description": "Lyrics for the cover (10–1000 characters); required with coverFeatureId."
+    },
+    "format": {
+      "type": "string",
+      "description": "Audio container; deployment default when omitted.",
+      "enum": [
+        "mp3",
+        "wav",
+        "pcm"
+      ]
+    }
+  },
+  "required": [
+    "prompt"
+  ]
+}
+```
+
+来源：[`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_music_cover_preprocess`
+
+读入一首参考歌曲，提取它的歌词与结构，minimax_music_cover 再据此翻唱。这个特征 id 24 小时内有效。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "audioUrl": {
+      "type": "string",
+      "description": "Public URL of the reference song (6 seconds to 6 minutes)."
+    }
+  },
+  "required": [
+    "audioUrl"
+  ]
+}
+```
+
+来源：[`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_music_generate`
+
+用 MiniMax 依一段风格提示词（可带歌词）生成一首歌，返回落盘的音频路径。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "description": "Style and mood of the music (1–2000 characters)."
+    },
+    "lyrics": {
+      "type": "string",
+      "description": "Lyrics with [Verse]/[Chorus] tags; omit for instrumental output."
+    },
+    "instrumental": {
+      "type": "boolean",
+      "description": "Produce instrumental music with no vocals."
+    },
+    "format": {
+      "type": "string",
+      "description": "Audio container; deployment default when omitted.",
+      "enum": [
+        "mp3",
+        "wav",
+        "flac",
+        "pcm",
+        "opus"
+      ]
+    }
+  },
+  "required": [
+    "prompt"
+  ]
+}
+```
+
+来源：[`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_speech_synthesize`
+
+用 MiniMax 把文字合成语音，返回落盘的音频文件路径。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "text": {
+      "type": "string",
+      "description": "Text to speak (≤10,000 characters)."
+    },
+    "voiceId": {
+      "type": "string",
+      "description": "MiniMax voice id; deployment default when omitted. List them with minimax_list_voices."
+    },
+    "format": {
+      "type": "string",
+      "description": "Audio container; deployment default when omitted.",
+      "enum": [
+        "mp3",
+        "wav",
+        "flac",
+        "pcm",
+        "opus"
+      ]
+    },
+    "emotion": {
+      "type": "string",
+      "description": "Tone of the voice; not supported by the 2.8 speech models.",
+      "enum": [
+        "happy",
+        "sad",
+        "angry",
+        "fearful",
+        "disgusted",
+        "surprised",
+        "calm",
+        "fluent",
+        "whisper"
+      ]
+    },
+    "speed": {
+      "type": "number",
+      "description": "Speaking rate, 0.5–2.0; defaults to 1."
+    },
+    "volume": {
+      "type": "number",
+      "description": "Volume, above 0 and up to 10; defaults to 1."
+    },
+    "pitch": {
+      "type": "number",
+      "description": "Pitch shift, −12 to 12; defaults to 0."
+    },
+    "languageBoost": {
+      "type": "string",
+      "description": "Language to boost recognition of, such as Chinese, English, Japanese, or auto."
+    },
+    "channel": {
+      "type": "number",
+      "description": "Audio channels: 1 for mono, 2 for stereo; defaults to 1."
+    },
+    "bitrate": {
+      "type": "number",
+      "description": "Audio bitrate for mp3: 32000, 64000, 128000, or 256000."
+    }
+  },
+  "required": [
+    "text"
+  ]
+}
+```
+
+来源：[`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_speech_synthesize_async`
+
+用 MiniMax 把长文本作为后台任务合成语音。同步端点最多收 10,000 字符，这个端点收 50,000，一个文件可以承载一百万字符。返回落盘的音频文件路径。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "text": {
+      "type": "string",
+      "description": "Text to speak (≤50,000 characters)."
+    },
+    "voiceId": {
+      "type": "string",
+      "description": "MiniMax voice id; deployment default when omitted."
+    },
+    "format": {
+      "type": "string",
+      "description": "Audio container; deployment default when omitted.",
+      "enum": [
+        "mp3",
+        "wav",
+        "flac",
+        "pcm",
+        "opus"
+      ]
+    },
+    "emotion": {
+      "type": "string",
+      "description": "Tone of the voice.",
+      "enum": [
+        "happy",
+        "sad",
+        "angry",
+        "fearful",
+        "disgusted",
+        "surprised",
+        "calm",
+        "fluent",
+        "whisper"
+      ]
+    },
+    "speed": {
+      "type": "number",
+      "description": "Speaking rate, 0.5–2.0; defaults to 1."
+    },
+    "volume": {
+      "type": "number",
+      "description": "Volume, above 0 and up to 10; defaults to 1."
+    },
+    "pitch": {
+      "type": "number",
+      "description": "Pitch shift, −12 to 12; defaults to 0."
+    },
+    "languageBoost": {
+      "type": "string",
+      "description": "Language to boost recognition of, such as Chinese, English, or auto."
+    }
+  },
+  "required": [
+    "text"
+  ]
+}
+```
+
+来源：[`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_speech_transcribe`
+
+用 MiniMax 语音识别转写音频文件并返回文字。verbose 形式还会报出谁在什么时候说的；字幕形式返回 SRT 或 VTT。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Audio file path in the workspace."
+    },
+    "language": {
+      "type": "string",
+      "description": "Language of the audio; omit for mixed-language audio.",
+      "enum": [
+        "zh",
+        "yue",
+        "en",
+        "ja",
+        "ko",
+        "th",
+        "vi",
+        "id",
+        "ms",
+        "fil",
+        "ar",
+        "tr",
+        "fr",
+        "de",
+        "es",
+        "it",
+        "pt",
+        "pl",
+        "ru",
+        "uk"
+      ]
+    },
+    "responseFormat": {
+      "type": "string",
+      "description": "json for plain text, verbose_json for speaker segments, srt or vtt for subtitles; defaults to json.",
+      "enum": [
+        "json",
+        "verbose_json",
+        "srt",
+        "vtt"
+      ]
+    },
+    "timestampLevel": {
+      "type": "string",
+      "description": "Timestamp granularity for the subtitle forms; defaults to sentence.",
+      "enum": [
+        "sentence",
+        "word"
+      ]
+    }
+  },
+  "required": [
+    "path"
+  ]
+}
+```
+
+来源：[`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_voice_clone`
+
+从一段音频样本克隆音色，让语音合成可以把它当作自己的音色使用。样本必须是 10 秒到 5 分钟的 mp3、m4a 或 wav。MiniMax 会删除 7 天内从未使用过的克隆音色。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Sample audio file in the workspace (mp3, m4a, or wav)."
+    },
+    "voiceId": {
+      "type": "string",
+      "description": "Id for the cloned voice: 8–256 characters, starting with a letter, using letters, digits, - and _."
+    },
+    "previewText": {
+      "type": "string",
+      "description": "Text to read in the cloned voice as a preview (≤1000 characters)."
+    },
+    "previewModel": {
+      "type": "string",
+      "description": "Speech model for the preview, such as speech-2.8-hd; required with previewText."
+    },
+    "promptAudioPath": {
+      "type": "string",
+      "description": "Short sample under 8 seconds that improves the cloning accuracy."
+    },
+    "promptText": {
+      "type": "string",
+      "description": "Transcript of the short sample; must match it and end with punctuation."
+    },
+    "textValidation": {
+      "type": "string",
+      "description": "Expected transcript of the sample, checked against the recognition of it (≤200 characters)."
+    },
+    "accuracy": {
+      "type": "number",
+      "description": "Similarity threshold for that check, 0–1; defaults to 0.7."
+    },
+    "languageBoost": {
+      "type": "string",
+      "description": "Language to boost recognition of, such as Chinese, English, or auto."
+    },
+    "noiseReduction": {
+      "type": "boolean",
+      "description": "Reduce noise in the cloned voice."
+    },
+    "volumeNormalization": {
+      "type": "boolean",
+      "description": "Normalize the volume of the cloned voice."
+    }
+  },
+  "required": [
+    "path",
+    "voiceId"
+  ]
+}
+```
+
+来源：[`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_voice_delete`
+
+删除一个从样本克隆或依描述设计的 MiniMax 音色。之后这个 id 不能再用。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "voiceId": {
+      "type": "string",
+      "description": "The voice id to delete."
+    },
+    "voiceType": {
+      "type": "string",
+      "description": "Whether the voice was cloned or designed.",
+      "enum": [
+        "voice_cloning",
+        "voice_generation"
+      ]
+    }
+  },
+  "required": [
+    "voiceId",
+    "voiceType"
+  ]
+}
+```
+
+来源：[`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_voice_design`
+
+依描述设计一个音色，返回它的 id 与一段试听录音。新音色可以配 minimax_speech_synthesize 使用。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "description": "What the voice should sound like, for example a deep and measured narrator."
+    },
+    "previewText": {
+      "type": "string",
+      "description": "Text to read in the designed voice as a preview (≤500 characters)."
+    },
+    "voiceId": {
+      "type": "string",
+      "description": "Id for the designed voice; MiniMax generates a unique one when omitted."
+    }
+  },
+  "required": [
+    "prompt",
+    "previewText"
+  ]
+}
+```
+
+来源：[`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+产出的是文件而不是对话内容：每个以 URL 作答的端点都会把文件下载进附件存储，而上传则以视频工具接受的 mm_file:// 引用作答。

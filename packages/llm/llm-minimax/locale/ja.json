@@ -1,0 +1,6 @@
+{
+    "meta":  {
+                 "title":  "MiniMax",
+                 "description":  "MiniMax を第一級プロバイダールートとして接続します。Anthropic 互換の Messages エンドポイントと MiniMax 自身の思考深度、1 つの API キーですべてのモデルを利用できます。"
+             }
+}

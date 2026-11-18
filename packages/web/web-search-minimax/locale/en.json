@@ -1,0 +1,6 @@
+{
+    "meta":  {
+                 "title":  "MiniMax web search",
+                 "description":  "MiniMax server-side search for the harness web_search tool; uses the same MiniMax API key as the model route."
+             }
+}

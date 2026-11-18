@@ -1,0 +1,46 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/media/tool-minimax-video/README.md
+/:
+  en: f48cee944f1468fa
+  zh: ab2af7a1ca19da77
+/deepseek-ai-dsh-tool-minimax-video:
+  en: 3a4880fcba253257
+  zh: 52dfe6aecfb3752e
+/deepseek-ai-dsh-tool-minimax-video/summary:
+  en: f22fa53ea9b5261e
+  zh: 0541d696a5d3cf8f
+/deepseek-ai-dsh-tool-minimax-video/table-of-contents:
+  en: b563e4ec4727d0de
+  zh: af6306104c97c56f
+/deepseek-ai-dsh-tool-minimax-video/use-this-package:
+  en: 59d26f81b1fed78b
+  zh: 14b8b012e96b6077
+/deepseek-ai-dsh-tool-minimax-video/understand-the-implementation:
+  en: 551ebc2e8aa00964
+  zh: 2ea827e6cd0f95a1
+/deepseek-ai-dsh-tool-minimax-video/further-exploration:
+  en: 07517c72f8772996
+  zh: 8dd0ad009669dd33
+/deepseek-ai-dsh-tool-minimax-video/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-tool-minimax-video/model-experience/one-generation-call:
+  en: 035300426ce90af8
+  zh: 04cc81ae02cf3c87
+/deepseek-ai-dsh-tool-minimax-video/model-experience/one-generation-call/what-the-model-sees:
+  en: e7fb7f40df6ccfda
+  zh: f38dad18125bc8cd
+/deepseek-ai-dsh-tool-minimax-video/model-experience/one-generation-call/token-effect:
+  en: 8bd85f0858d2087e
+  zh: 7fba4241fadc3ca8
+/deepseek-ai-dsh-tool-minimax-video/model-experience/one-generation-call/kv-cache-effect:
+  en: f8d2bd7bfc512bad
+  zh: ae7a142d9b3a869e
+/deepseek-ai-dsh-tool-minimax-video/known-limitations-and-deferred-work:
+  en: 55967732d3d1615e
+  zh: e3d11f84f07b08df
+/deepseek-ai-dsh-tool-minimax-video/known-limitations-and-deferred-work/dev-note:
+  en: 8cb7334e773f0a77
+  zh: ced3c4d342c5cc19

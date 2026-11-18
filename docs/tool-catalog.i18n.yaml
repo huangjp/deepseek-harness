@@ -9,8 +9,8 @@
   en: 6cc2cd9ced70bb09
   zh: 1c0e6cb4ba2ed637
 /tool-schema-catalog/tool-package-map:
-  en: 4d42222acd39d083
-  zh: 8153a5065bf2ebd6
+  en: a66803bcebb0cb89
+  zh: afac927cfe989560
 /tool-schema-catalog/deepseek-ai-dsh-plugin-manager:
   en: e0143916bb634762
   zh: e0143916bb634762
@@ -339,5 +339,83 @@
   en: 8673f203aea9bdf2
   zh: 4e17783ffdf34c83
 /tool-schema-catalog/deepseek-ai-dsh-tool-web/web-search:
-  en: cc1ad38bf0006710
-  zh: 324eacb827a09e93
+  en: 060d802f066bc912
+  zh: bb747f98bf481fb4
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-video:
+  en: f42d1ba1f8ed3826
+  zh: f42d1ba1f8ed3826
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-video/minimax-video-context-enrich:
+  en: f806f533cd7c5d76
+  zh: 0c50cf555e3d4d90
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-video/minimax-video-generate:
+  en: 5e8be9475685f273
+  zh: fb73c677abbf6b23
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-video/minimax-video-generate-hailuo:
+  en: 96fbd60533c8a5b7
+  zh: 36301da060f74cdc
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-video/minimax-video-regenerate:
+  en: 84291a892083cce0
+  zh: 115aa2ccd392f102
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-video/minimax-video-task-cancel:
+  en: fe146e27dad5bc21
+  zh: 64f66e84ac06d29e
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-video/minimax-video-task-list:
+  en: 1c4694cb34da7ff6
+  zh: 31f8630c909159b4
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-video/minimax-video-understand:
+  en: f44dcf1fbde0ad74
+  zh: 6f412be0c11cd08a
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-media:
+  en: 870fa39d6c4c3f13
+  zh: 870fa39d6c4c3f13
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-media/minimax-count-tokens:
+  en: 6c96ddb5cffd0e6d
+  zh: 5f31a6b5ff6e2444
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-media/minimax-file-delete:
+  en: 2ab95ee820170a03
+  zh: a96e133c0d902352
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-media/minimax-file-download:
+  en: 4b1307738522614b
+  zh: 93965301e7aefcc4
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-media/minimax-file-list:
+  en: 670e61ff547ef561
+  zh: e5c58238bf81c1c3
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-media/minimax-file-upload:
+  en: 290b60a0f6aab19f
+  zh: 077ad46876465ba7
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-media/minimax-image-generate:
+  en: c50d75d605bac23f
+  zh: 451baa6e361e7e4c
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-media/minimax-list-voices:
+  en: 96a465f6bd0bbf53
+  zh: 68cf2bb0ed51943d
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-media/minimax-lyrics-generate:
+  en: 3804c96b0ae145f6
+  zh: 8fe725a14b4eb798
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-media/minimax-music-cover:
+  en: 0de258427c918eed
+  zh: f4e3ee6e6915347f
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-media/minimax-music-cover-preprocess:
+  en: b5cb0e4ce546e1a0
+  zh: 6a30d4f5089289cf
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-media/minimax-music-generate:
+  en: 0e8b2679d09a4c88
+  zh: f618bd01f10bf401
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-media/minimax-speech-synthesize:
+  en: 1b219234fec0a85d
+  zh: d55b4061b53df7da
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-media/minimax-speech-synthesize-async:
+  en: e7b16145613c11a9
+  zh: bcbdb27ceb4e7bc6
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-media/minimax-speech-transcribe:
+  en: 8632886077696a62
+  zh: ea1774022c9408cb
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-media/minimax-voice-clone:
+  en: 85d06b203f28fde4
+  zh: 9c8c564fc81f3033
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-media/minimax-voice-delete:
+  en: 16ca99d88fd21d98
+  zh: c821ff95e6bb8b87
+/tool-schema-catalog/deepseek-ai-dsh-tool-minimax-media/minimax-voice-design:
+  en: 14af4d717461a0fc
+  zh: 1b56d66961a6e8e9

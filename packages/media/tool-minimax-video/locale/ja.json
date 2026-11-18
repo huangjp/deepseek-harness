@@ -1,0 +1,6 @@
+{
+    "meta":  {
+                 "title":  "MiniMax 動画",
+                 "description":  "MiniMax で短い動画を生成し、MiniMax モデルに動画の内容を説明させます。"
+             }
+}

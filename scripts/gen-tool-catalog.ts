@@ -81,6 +81,8 @@ import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
 import McpResources from '@deepseek-ai/dsh-mcp-resources'
 import * as ToolSubagent from '@deepseek-ai/dsh-tool-subagent'
 import * as ToolSubagentOar from '@deepseek-ai/dsh-experimental-tool-subagent-oar'
+import * as ToolMinimaxMedia from '@deepseek-ai/dsh-tool-minimax-media'
+import * as ToolMinimaxVideo from '@deepseek-ai/dsh-tool-minimax-video'
 import * as ToolWeb from '@deepseek-ai/dsh-tool-web'
 import WorkflowEngine from '@deepseek-ai/dsh-workflow'
 import type { WorkflowRun, WorkflowStartRequest } from '@deepseek-ai/dsh-workflow'
@@ -717,6 +719,30 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
     note:
       'web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-minimax-video',
+    dir: 'tool-minimax-video',
+    source: 'packages/media/tool-minimax-video/src/index.ts',
+    requires: ['ctx.tools'],
+    writes: ['tool/call', 'tool/result'],
+    async mount(ctx) {
+      await ctx.plugin(ToolMinimaxVideo)
+    },
+    note:
+      'Both schemas are static; the MiniMax key resolves per call, so a machine without one still lists the tools and fails the call with an actionable error.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-minimax-media',
+    dir: 'tool-minimax-media',
+    source: 'packages/media/tool-minimax-media/src/index.ts',
+    requires: ['ctx.tools'],
+    writes: ['tool/call', 'tool/result'],
+    async mount(ctx) {
+      await ctx.plugin(ToolMinimaxMedia)
+    },
+    note:
+      'Produces files rather than conversation content: every endpoint that answers with a URL is downloaded into the attachment store, and uploads answer with the mm_file:// reference the video tools accept.',
   },
 ]
 

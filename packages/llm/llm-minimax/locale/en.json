@@ -1,0 +1,6 @@
+{
+    "meta":  {
+                 "title":  "MiniMax",
+                 "description":  "MiniMax as a first-party provider route: the Anthropic-compatible Messages endpoint with MiniMax\u0027s own thinking depths and one API key for every model."
+             }
+}

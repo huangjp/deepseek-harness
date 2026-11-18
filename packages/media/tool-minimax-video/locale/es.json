@@ -1,0 +1,6 @@
+{
+    "meta":  {
+                 "title":  "Vídeo de MiniMax",
+                 "description":  "Genera vídeos cortos con MiniMax y pregunta a un modelo de MiniMax qué ocurre en un vídeo."
+             }
+}

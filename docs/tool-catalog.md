@@ -50,6 +50,8 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`, `ctx.workflowEngine`, `ctx.systemPrompt`, `a calling Agent (exec.agent parents the script children)` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-workspace-dependencies` | `load_workspace_dependencies` | `ctx.tools` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`, `web_search` | `ctx.tools`, `ctx.web`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps. |
+| `@deepseek-ai/dsh-tool-minimax-video` | `minimax_video_context_enrich`, `minimax_video_generate`, `minimax_video_generate_hailuo`, `minimax_video_regenerate`, `minimax_video_task_cancel`, `minimax_video_task_list`, `minimax_video_understand` | `ctx.tools` | `tool/call`, `tool/result` | - | Both schemas are static; the MiniMax key resolves per call, so a machine without one still lists the tools and fails the call with an actionable error. |
+| `@deepseek-ai/dsh-tool-minimax-media` | `minimax_count_tokens`, `minimax_file_delete`, `minimax_file_download`, `minimax_file_list`, `minimax_file_upload`, `minimax_image_generate`, `minimax_list_voices`, `minimax_lyrics_generate`, `minimax_music_cover`, `minimax_music_cover_preprocess`, `minimax_music_generate`, `minimax_speech_synthesize`, `minimax_speech_synthesize_async`, `minimax_speech_transcribe`, `minimax_voice_clone`, `minimax_voice_delete`, `minimax_voice_design` | `ctx.tools` | `tool/call`, `tool/result` | - | Produces files rather than conversation content: every endpoint that answers with a URL is downloaded into the attachment store, and uploads answer with the mm_file:// reference the video tools accept. |
 
 <a id="deepseek-aidsh-plugin-manager"></a>
 
@@ -2912,3 +2914,1068 @@ Search the web for current information. Returns an optional summary answer and a
 Source: [`packages/web/tool-web/src/index.ts`](../packages/web/tool-web/src/index.ts)
 
 web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps.
+
+<a id="deepseek-aidsh-tool-minimax-video"></a>
+
+## `@deepseek-ai/dsh-tool-minimax-video`
+
+### `minimax_video_context_enrich`
+
+Turn material into an enriched video prompt with MiniMax. Give it a text, image, video, or audio reference and it returns the prompt a generation should use.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "description": "What the video should show."
+    },
+    "durationSeconds": {
+      "type": "number",
+      "description": "Target video length in seconds, 4–15; deployment default when omitted."
+    },
+    "ratio": {
+      "type": "string",
+      "description": "Aspect ratio such as 16:9 or 9:16."
+    },
+    "firstFrameImageUrl": {
+      "type": "string",
+      "description": "Public image URL to use as the first frame."
+    },
+    "lastFrameImageUrl": {
+      "type": "string",
+      "description": "Public image URL to use as the last frame."
+    },
+    "referenceImageUrls": {
+      "type": "array",
+      "description": "Public image URLs the video should look like.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "referenceVideoUrl": {
+      "type": "string",
+      "description": "Public video URL the result should follow."
+    },
+    "referenceAudioUrl": {
+      "type": "string",
+      "description": "Public audio URL the result should carry."
+    }
+  },
+  "required": [
+    "prompt"
+  ]
+}
+```
+
+Source: [`packages/media/tool-minimax-video/src/index.ts`](../packages/media/tool-minimax-video/src/index.ts)
+
+### `minimax_video_generate`
+
+Generate a short video with MiniMax (text-to-video, or image-to-video from a first frame). Returns the stored file path and the task id. Generation takes minutes, so the call polls until the task settles or its deadline passes.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "description": "What the video should show."
+    },
+    "model": {
+      "type": "string",
+      "description": "Video model; deployment default when omitted.",
+      "enum": [
+        "MiniMax-H3",
+        "MiniMax-H3-Highspeed",
+        "MiniMax-H3-Lite",
+        "MiniMax-H3-Max"
+      ]
+    },
+    "resolution": {
+      "type": "string",
+      "description": "Output resolution; deployment default when omitted.",
+      "enum": [
+        "480P",
+        "768P",
+        "2K"
+      ]
+    },
+    "durationSeconds": {
+      "type": "number",
+      "description": "Clip length in seconds, 4–15; deployment default when omitted."
+    },
+    "ratio": {
+      "type": "string",
+      "description": "Aspect ratio such as 16:9 or 9:16; ignored for image-to-video."
+    },
+    "firstFrameImageUrl": {
+      "type": "string",
+      "description": "Public image URL to use as the first frame (image-to-video)."
+    },
+    "lastFrameImageUrl": {
+      "type": "string",
+      "description": "Public image URL to use as the last frame; pairs with the first frame."
+    },
+    "referenceImageUrls": {
+      "type": "array",
+      "description": "Public image URLs the video should look like; a reference-based request, never combined with frames.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "referenceVideoUrl": {
+      "type": "string",
+      "description": "Public video URL the result should follow; a reference-based request."
+    },
+    "referenceAudioUrl": {
+      "type": "string",
+      "description": "Public audio URL the result should carry; a reference-based request."
+    },
+    "promptExpansionMode": {
+      "type": "string",
+      "description": "How hard MiniMax rewrites the prompt; accepted only by MiniMax-H3-Max.",
+      "enum": [
+        "disabled",
+        "balanced",
+        "quality"
+      ]
+    }
+  },
+  "required": [
+    "prompt"
+  ]
+}
+```
+
+Source: [`packages/media/tool-minimax-video/src/index.ts`](../packages/media/tool-minimax-video/src/index.ts)
+
+### `minimax_video_generate_hailuo`
+
+Generate a video with the older MiniMax Hailuo models, which reach 1080P. Supports a prompt alone, a first frame, a first and a last frame, or a character reference. Returns the stored file path.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "description": "What the video should show (≤2000 characters)."
+    },
+    "model": {
+      "type": "string",
+      "description": "Hailuo model; the model must suit the material given.",
+      "enum": [
+        "MiniMax-Hailuo-2.3",
+        "MiniMax-Hailuo-2.3-Fast",
+        "MiniMax-Hailuo-02",
+        "T2V-01-Director",
+        "T2V-01",
+        "I2V-01-Director",
+        "I2V-01-live",
+        "I2V-01",
+        "S2V-01"
+      ]
+    },
+    "firstFrameImageUrl": {
+      "type": "string",
+      "description": "Public image URL to use as the first frame."
+    },
+    "lastFrameImageUrl": {
+      "type": "string",
+      "description": "Public image URL to use as the last frame; needs a first frame too."
+    },
+    "subjectReferenceImages": {
+      "type": "array",
+      "description": "Public image URLs of the character to keep; needs the S2V-01 model.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "duration": {
+      "type": "number",
+      "description": "Clip length in seconds; the model decides which lengths it serves."
+    },
+    "resolution": {
+      "type": "string",
+      "description": "Output resolution; the model decides which resolutions it serves.",
+      "enum": [
+        "512P",
+        "720P",
+        "768P",
+        "1080P"
+      ]
+    },
+    "promptOptimizer": {
+      "type": "boolean",
+      "description": "Let MiniMax rewrite the prompt; defaults to true."
+    },
+    "fastPretreatment": {
+      "type": "boolean",
+      "description": "Faster pretreatment; only the 2.3 and 02 models accept it."
+    }
+  },
+  "required": [
+    "prompt",
+    "model"
+  ]
+}
+```
+
+Source: [`packages/media/tool-minimax-video/src/index.ts`](../packages/media/tool-minimax-video/src/index.ts)
+
+### `minimax_video_regenerate`
+
+Regenerate a finished MiniMax video at 2K, either from the task that produced it or from a 768P source video. The source task must have succeeded within the last week.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "sourceTaskId": {
+      "type": "string",
+      "description": "The finished task to regenerate; mutually exclusive with baseVideoUrl."
+    },
+    "baseVideoUrl": {
+      "type": "string",
+      "description": "Public URL of a 768P source video; mutually exclusive with sourceTaskId."
+    },
+    "prompt": {
+      "type": "string",
+      "description": "The final prompt to send to the model for the regeneration."
+    },
+    "firstFrameImageUrl": {
+      "type": "string",
+      "description": "Public image URL to use as the first frame of the regeneration."
+    },
+    "lastFrameImageUrl": {
+      "type": "string",
+      "description": "Public image URL to use as the last frame of the regeneration."
+    },
+    "watermark": {
+      "type": "boolean",
+      "description": "Append an AIGC watermark tone to the result."
+    }
+  }
+}
+```
+
+Source: [`packages/media/tool-minimax-video/src/index.ts`](../packages/media/tool-minimax-video/src/index.ts)
+
+### `minimax_video_task_cancel`
+
+Cancel a MiniMax video task that has not started yet, or delete the record of a task that already finished. A running task cannot be cancelled and MiniMax refuses the call.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "taskId": {
+      "type": "string",
+      "description": "The task id to cancel or delete."
+    }
+  },
+  "required": [
+    "taskId"
+  ]
+}
+```
+
+Source: [`packages/media/tool-minimax-video/src/index.ts`](../packages/media/tool-minimax-video/src/index.ts)
+
+### `minimax_video_task_list`
+
+List the MiniMax video generation tasks of the last week, newest first. Use it to find a task id, to see which tasks are still running, or to review what was generated.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "status": {
+      "type": "string",
+      "description": "Only tasks in this state; all states when omitted.",
+      "enum": [
+        "queued",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "model": {
+      "type": "string",
+      "description": "Only tasks of this model.",
+      "enum": [
+        "MiniMax-H3",
+        "MiniMax-H3-Highspeed",
+        "MiniMax-H3-Lite",
+        "MiniMax-H3-Max"
+      ]
+    },
+    "taskIds": {
+      "type": "array",
+      "description": "Only these task ids.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "pageNum": {
+      "type": "number",
+      "description": "Page number, starting at 1."
+    },
+    "pageSize": {
+      "type": "number",
+      "description": "How many tasks per page."
+    }
+  }
+}
+```
+
+Source: [`packages/media/tool-minimax-video/src/index.ts`](../packages/media/tool-minimax-video/src/index.ts)
+
+### `minimax_video_understand`
+
+Ask MiniMax what happens in a video. Provide a public URL (or an mm_file:// reference from an earlier MiniMax upload) and the question to answer about it.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "videoUrl": {
+      "type": "string",
+      "description": "Public video URL or mm_file:// reference."
+    },
+    "prompt": {
+      "type": "string",
+      "description": "What to answer about the video; defaults to describing what happens in it."
+    },
+    "fps": {
+      "type": "number",
+      "description": "Frame sampling rate 0.2–5; MiniMax defaults to 1."
+    },
+    "detail": {
+      "type": "string",
+      "description": "Frame detail level; higher costs more tokens.",
+      "enum": [
+        "low",
+        "default",
+        "high"
+      ]
+    }
+  },
+  "required": [
+    "videoUrl"
+  ]
+}
+```
+
+Source: [`packages/media/tool-minimax-video/src/index.ts`](../packages/media/tool-minimax-video/src/index.ts)
+
+Both schemas are static; the MiniMax key resolves per call, so a machine without one still lists the tools and fails the call with an actionable error.
+
+<a id="deepseek-aidsh-tool-minimax-media"></a>
+
+## `@deepseek-ai/dsh-tool-minimax-media`
+
+### `minimax_count_tokens`
+
+Count the tokens a message would cost on a MiniMax model, without generating anything. Use it before sending a long text to check it fits the context.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "text": {
+      "type": "string",
+      "description": "The text to measure."
+    },
+    "model": {
+      "type": "string",
+      "description": "The model to measure against; deployment default when omitted.",
+      "enum": [
+        "MiniMax-M3.1-Flash",
+        "MiniMax-M3"
+      ]
+    },
+    "serviceTier": {
+      "type": "string",
+      "description": "Admission tier to measure at; priority costs 1.5× and MiniMax-M3.1-Flash rejects it.",
+      "enum": [
+        "standard",
+        "priority"
+      ]
+    }
+  },
+  "required": [
+    "text"
+  ]
+}
+```
+
+Source: [`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_file_delete`
+
+Delete a file MiniMax stores, such as an uploaded video that is no longer needed.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "fileId": {
+      "type": "number",
+      "description": "The file id to delete."
+    },
+    "purpose": {
+      "type": "string",
+      "description": "The purpose the file was stored under.",
+      "enum": [
+        "voice_clone",
+        "prompt_audio",
+        "t2a_async",
+        "t2a_async_input",
+        "video_generation"
+      ]
+    }
+  },
+  "required": [
+    "fileId",
+    "purpose"
+  ]
+}
+```
+
+Source: [`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_file_download`
+
+Download a file MiniMax stores and keep it in the workspace. Use it to bring back an uploaded video or a generated audio file.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "fileId": {
+      "type": "number",
+      "description": "The file id to download."
+    },
+    "name": {
+      "type": "string",
+      "description": "Name to save the file under; defaults to the stored name."
+    }
+  },
+  "required": [
+    "fileId"
+  ]
+}
+```
+
+Source: [`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_file_list`
+
+List the files MiniMax stores for one purpose, such as uploaded videos or voice samples.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "purpose": {
+      "type": "string",
+      "description": "Which stored files to read.",
+      "enum": [
+        "voice_clone",
+        "prompt_audio",
+        "t2a_async",
+        "t2a_async_input",
+        "video_generation"
+      ]
+    }
+  },
+  "required": [
+    "purpose"
+  ]
+}
+```
+
+Source: [`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_file_upload`
+
+Upload a file to MiniMax and return the mm_file:// reference other MiniMax tools accept. Use purpose video_understanding for a video that is too large to pass by URL.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "File path in the workspace."
+    },
+    "purpose": {
+      "type": "string",
+      "description": "Declared upload purpose; video_understanding for videos, video_generation_input for generation inputs.",
+      "enum": [
+        "voice_clone",
+        "prompt_audio",
+        "t2a_async_input",
+        "video_understanding",
+        "video_generation_input"
+      ]
+    }
+  },
+  "required": [
+    "path",
+    "purpose"
+  ]
+}
+```
+
+Source: [`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_image_generate`
+
+Generate images with MiniMax from a text prompt, optionally guided by a reference image. Returns the stored file paths of the produced images.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "description": "What the image should show (≤1500 characters)."
+    },
+    "aspectRatio": {
+      "type": "string",
+      "description": "Output aspect ratio; deployment default when omitted.",
+      "enum": [
+        "1:1",
+        "16:9",
+        "4:3",
+        "3:2",
+        "2:3",
+        "3:4",
+        "9:16",
+        "21:9"
+      ]
+    },
+    "count": {
+      "type": "number",
+      "description": "How many images, 1–9; defaults to 1."
+    },
+    "promptOptimizer": {
+      "type": "boolean",
+      "description": "Let MiniMax rewrite the prompt for a better result; defaults to false."
+    },
+    "seed": {
+      "type": "number",
+      "description": "Seed for a reproducible result; random when omitted."
+    },
+    "subjectReferenceUrl": {
+      "type": "string",
+      "description": "Public image URL used as a character reference (image-to-image)."
+    }
+  },
+  "required": [
+    "prompt"
+  ]
+}
+```
+
+Source: [`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_list_voices`
+
+List the voices this MiniMax account may synthesize with: the built-in system voices, the voices cloned from samples, and the voices designed from a description. Use the returned voice id with minimax_speech_synthesize.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "voiceType": {
+      "type": "string",
+      "description": "Which voices to read; defaults to all of them.",
+      "enum": [
+        "system",
+        "voice_cloning",
+        "voice_generation",
+        "all"
+      ]
+    }
+  }
+}
+```
+
+Source: [`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_lyrics_generate`
+
+Write song lyrics with MiniMax, or edit and continue existing ones. The result can be sung by minimax_music_generate.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "mode": {
+      "type": "string",
+      "description": "Write a whole song, or edit and continue existing lyrics.",
+      "enum": [
+        "write_full_song",
+        "edit"
+      ]
+    },
+    "prompt": {
+      "type": "string",
+      "description": "What the song should be about (≤2000 characters)."
+    },
+    "lyrics": {
+      "type": "string",
+      "description": "Existing lyrics to edit or continue (≤3500 characters)."
+    },
+    "title": {
+      "type": "string",
+      "description": "Title to keep in the result."
+    }
+  },
+  "required": [
+    "mode"
+  ]
+}
+```
+
+Source: [`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_music_cover`
+
+Make a cover of a reference song with MiniMax. Give it the style of the cover and either the reference song URL or a cover feature id from minimax_music_cover_preprocess.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "description": "The style of the cover (10–300 characters)."
+    },
+    "audioUrl": {
+      "type": "string",
+      "description": "Public URL of the reference song; mutually exclusive with coverFeatureId."
+    },
+    "coverFeatureId": {
+      "type": "string",
+      "description": "Feature id from minimax_music_cover_preprocess; needs lyrics."
+    },
+    "lyrics": {
+      "type": "string",
+      "description": "Lyrics for the cover (10–1000 characters); required with coverFeatureId."
+    },
+    "format": {
+      "type": "string",
+      "description": "Audio container; deployment default when omitted.",
+      "enum": [
+        "mp3",
+        "wav",
+        "pcm"
+      ]
+    }
+  },
+  "required": [
+    "prompt"
+  ]
+}
+```
+
+Source: [`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_music_cover_preprocess`
+
+Read a reference song and extract its lyrics and structure, which minimax_music_cover then turns into a cover. The feature id is valid for 24 hours.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "audioUrl": {
+      "type": "string",
+      "description": "Public URL of the reference song (6 seconds to 6 minutes)."
+    }
+  },
+  "required": [
+    "audioUrl"
+  ]
+}
+```
+
+Source: [`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_music_generate`
+
+Generate a song with MiniMax from a style prompt and optional lyrics, returning the stored audio path.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "description": "Style and mood of the music (1–2000 characters)."
+    },
+    "lyrics": {
+      "type": "string",
+      "description": "Lyrics with [Verse]/[Chorus] tags; omit for instrumental output."
+    },
+    "instrumental": {
+      "type": "boolean",
+      "description": "Produce instrumental music with no vocals."
+    },
+    "format": {
+      "type": "string",
+      "description": "Audio container; deployment default when omitted.",
+      "enum": [
+        "mp3",
+        "wav",
+        "flac",
+        "pcm",
+        "opus"
+      ]
+    }
+  },
+  "required": [
+    "prompt"
+  ]
+}
+```
+
+Source: [`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_speech_synthesize`
+
+Synthesize speech from text with MiniMax and return the stored audio file path.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "text": {
+      "type": "string",
+      "description": "Text to speak (≤10,000 characters)."
+    },
+    "voiceId": {
+      "type": "string",
+      "description": "MiniMax voice id; deployment default when omitted. List them with minimax_list_voices."
+    },
+    "format": {
+      "type": "string",
+      "description": "Audio container; deployment default when omitted.",
+      "enum": [
+        "mp3",
+        "wav",
+        "flac",
+        "pcm",
+        "opus"
+      ]
+    },
+    "emotion": {
+      "type": "string",
+      "description": "Tone of the voice; not supported by the 2.8 speech models.",
+      "enum": [
+        "happy",
+        "sad",
+        "angry",
+        "fearful",
+        "disgusted",
+        "surprised",
+        "calm",
+        "fluent",
+        "whisper"
+      ]
+    },
+    "speed": {
+      "type": "number",
+      "description": "Speaking rate, 0.5–2.0; defaults to 1."
+    },
+    "volume": {
+      "type": "number",
+      "description": "Volume, above 0 and up to 10; defaults to 1."
+    },
+    "pitch": {
+      "type": "number",
+      "description": "Pitch shift, −12 to 12; defaults to 0."
+    },
+    "languageBoost": {
+      "type": "string",
+      "description": "Language to boost recognition of, such as Chinese, English, Japanese, or auto."
+    },
+    "channel": {
+      "type": "number",
+      "description": "Audio channels: 1 for mono, 2 for stereo; defaults to 1."
+    },
+    "bitrate": {
+      "type": "number",
+      "description": "Audio bitrate for mp3: 32000, 64000, 128000, or 256000."
+    }
+  },
+  "required": [
+    "text"
+  ]
+}
+```
+
+Source: [`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_speech_synthesize_async`
+
+Synthesize a long text with MiniMax as a background task. The synchronous endpoint takes at most 10,000 characters; this one takes 50,000, and a file may carry a million. Returns the stored audio file path.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "text": {
+      "type": "string",
+      "description": "Text to speak (≤50,000 characters)."
+    },
+    "voiceId": {
+      "type": "string",
+      "description": "MiniMax voice id; deployment default when omitted."
+    },
+    "format": {
+      "type": "string",
+      "description": "Audio container; deployment default when omitted.",
+      "enum": [
+        "mp3",
+        "wav",
+        "flac",
+        "pcm",
+        "opus"
+      ]
+    },
+    "emotion": {
+      "type": "string",
+      "description": "Tone of the voice.",
+      "enum": [
+        "happy",
+        "sad",
+        "angry",
+        "fearful",
+        "disgusted",
+        "surprised",
+        "calm",
+        "fluent",
+        "whisper"
+      ]
+    },
+    "speed": {
+      "type": "number",
+      "description": "Speaking rate, 0.5–2.0; defaults to 1."
+    },
+    "volume": {
+      "type": "number",
+      "description": "Volume, above 0 and up to 10; defaults to 1."
+    },
+    "pitch": {
+      "type": "number",
+      "description": "Pitch shift, −12 to 12; defaults to 0."
+    },
+    "languageBoost": {
+      "type": "string",
+      "description": "Language to boost recognition of, such as Chinese, English, or auto."
+    }
+  },
+  "required": [
+    "text"
+  ]
+}
+```
+
+Source: [`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_speech_transcribe`
+
+Transcribe an audio file with MiniMax speech recognition and return the text. The verbose form also reports who spoke when; the subtitle forms return SRT or VTT.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Audio file path in the workspace."
+    },
+    "language": {
+      "type": "string",
+      "description": "Language of the audio; omit for mixed-language audio.",
+      "enum": [
+        "zh",
+        "yue",
+        "en",
+        "ja",
+        "ko",
+        "th",
+        "vi",
+        "id",
+        "ms",
+        "fil",
+        "ar",
+        "tr",
+        "fr",
+        "de",
+        "es",
+        "it",
+        "pt",
+        "pl",
+        "ru",
+        "uk"
+      ]
+    },
+    "responseFormat": {
+      "type": "string",
+      "description": "json for plain text, verbose_json for speaker segments, srt or vtt for subtitles; defaults to json.",
+      "enum": [
+        "json",
+        "verbose_json",
+        "srt",
+        "vtt"
+      ]
+    },
+    "timestampLevel": {
+      "type": "string",
+      "description": "Timestamp granularity for the subtitle forms; defaults to sentence.",
+      "enum": [
+        "sentence",
+        "word"
+      ]
+    }
+  },
+  "required": [
+    "path"
+  ]
+}
+```
+
+Source: [`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_voice_clone`
+
+Clone a voice from an audio sample so speech synthesis can use it as its own voice. The sample must be 10 seconds to 5 minutes of mp3, m4a, or wav. MiniMax deletes a cloned voice that is never used within 7 days.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Sample audio file in the workspace (mp3, m4a, or wav)."
+    },
+    "voiceId": {
+      "type": "string",
+      "description": "Id for the cloned voice: 8–256 characters, starting with a letter, using letters, digits, - and _."
+    },
+    "previewText": {
+      "type": "string",
+      "description": "Text to read in the cloned voice as a preview (≤1000 characters)."
+    },
+    "previewModel": {
+      "type": "string",
+      "description": "Speech model for the preview, such as speech-2.8-hd; required with previewText."
+    },
+    "promptAudioPath": {
+      "type": "string",
+      "description": "Short sample under 8 seconds that improves the cloning accuracy."
+    },
+    "promptText": {
+      "type": "string",
+      "description": "Transcript of the short sample; must match it and end with punctuation."
+    },
+    "textValidation": {
+      "type": "string",
+      "description": "Expected transcript of the sample, checked against the recognition of it (≤200 characters)."
+    },
+    "accuracy": {
+      "type": "number",
+      "description": "Similarity threshold for that check, 0–1; defaults to 0.7."
+    },
+    "languageBoost": {
+      "type": "string",
+      "description": "Language to boost recognition of, such as Chinese, English, or auto."
+    },
+    "noiseReduction": {
+      "type": "boolean",
+      "description": "Reduce noise in the cloned voice."
+    },
+    "volumeNormalization": {
+      "type": "boolean",
+      "description": "Normalize the volume of the cloned voice."
+    }
+  },
+  "required": [
+    "path",
+    "voiceId"
+  ]
+}
+```
+
+Source: [`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_voice_delete`
+
+Delete a MiniMax voice that was cloned from a sample or designed from a description. The id cannot be used again afterwards.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "voiceId": {
+      "type": "string",
+      "description": "The voice id to delete."
+    },
+    "voiceType": {
+      "type": "string",
+      "description": "Whether the voice was cloned or designed.",
+      "enum": [
+        "voice_cloning",
+        "voice_generation"
+      ]
+    }
+  },
+  "required": [
+    "voiceId",
+    "voiceType"
+  ]
+}
+```
+
+Source: [`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+### `minimax_voice_design`
+
+Design a voice from a description and return its id with a preview recording. The new voice can be used with minimax_speech_synthesize.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "description": "What the voice should sound like, for example a deep and measured narrator."
+    },
+    "previewText": {
+      "type": "string",
+      "description": "Text to read in the designed voice as a preview (≤500 characters)."
+    },
+    "voiceId": {
+      "type": "string",
+      "description": "Id for the designed voice; MiniMax generates a unique one when omitted."
+    }
+  },
+  "required": [
+    "prompt",
+    "previewText"
+  ]
+}
+```
+
+Source: [`packages/media/tool-minimax-media/src/index.ts`](../packages/media/tool-minimax-media/src/index.ts)
+
+Produces files rather than conversation content: every endpoint that answers with a URL is downloaded into the attachment store, and uploads answer with the mm_file:// reference the video tools accept.

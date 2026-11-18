@@ -1,0 +1,6 @@
+{
+    "meta":  {
+                 "title":  "MiniMax Web 検索",
+                 "description":  "harness の web_search ツールに MiniMax のサーバー側検索を提供します。モデルルートと同じ MiniMax API キーを使います。"
+             }
+}
