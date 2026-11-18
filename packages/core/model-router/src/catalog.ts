@@ -7,7 +7,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { ModelModality } from '@deepseek-ai/dsh-llm'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
-import type { RouteRule } from './rules.ts'
+import type { RouteEndpoint, RouteRule } from './rules.ts'
+import { ruleEndpoints } from './rules.ts'
 
 /** What one cached model route can accept and offer. */
 interface CatalogEntry {
@@ -60,22 +61,27 @@ export class ModelCatalog {
    * registered but whose model is unknown is skipped as well, because the
    * deployment named a model that route does not serve.
    * @param rules - the rule table the deployment declared.
+   * @param extra - tier route lists, which are not rules but still need a cached model.
    * @returns a promise that settles once the cache is replaced.
    */
-  async refresh(rules: readonly RouteRule[]): Promise<void> {
+  async refresh(rules: readonly RouteRule[], extra: readonly RouteEndpoint[] = []): Promise<void> {
     const next = new Map<string, Map<string, CatalogEntry>>()
     const registered = new Set(this.ctx.llm.listProviders().map(provider => provider.id))
-    for (const rule of rules) {
-      if (!registered.has(rule.provider)) continue
-      const entries = next.get(rule.provider) ?? new Map<string, CatalogEntry>()
-      if (entries.has(rule.model)) continue
-      const resolved = await this.ctx.llm.resolveModelInfo(rule.provider, rule.model).catch(() => undefined)
+    const endpoints = [
+      ...rules.flatMap(rule => ruleEndpoints(rule)),
+      ...extra,
+    ]
+    for (const endpoint of endpoints) {
+      if (!registered.has(endpoint.provider)) continue
+      const entries = next.get(endpoint.provider) ?? new Map<string, CatalogEntry>()
+      if (entries.has(endpoint.model)) continue
+      const resolved = await this.ctx.llm.resolveModelInfo(endpoint.provider, endpoint.model).catch(() => undefined)
       if (resolved === undefined) continue
-      entries.set(rule.model, {
+      entries.set(endpoint.model, {
         modalities: resolved.inputModalities,
         efforts: resolved.reasoning?.efforts.map(effort => effort.id) ?? [],
       })
-      next.set(rule.provider, entries)
+      next.set(endpoint.provider, entries)
     }
     this.routes = next
   }
@@ -93,16 +99,40 @@ export class ModelCatalog {
   /**
    * Whether every provider the rule table names is registered.
    * @param rules - the rule table the deployment declared.
+   * @param extra - tier route lists that must be registered too.
    * @returns true when no rule names an unregistered route.
    */
-  covers(rules: readonly RouteRule[]): boolean {
+  covers(rules: readonly RouteRule[], extra: readonly RouteEndpoint[] = []): boolean {
     let registered: Set<string>
     try {
       registered = new Set(this.ctx.llm.listProviders().map(provider => provider.id))
-    } catch {
+    } catch (error: unknown) {
+      // A registry that is still starting throws; the startup wait treats that as uncovered.
+      void error
       return false
     }
-    return rules.every(rule => registered.has(rule.provider))
+    const providers = [
+      ...rules.flatMap(rule => ruleEndpoints(rule).map(endpoint => endpoint.provider)),
+      ...extra.map(endpoint => endpoint.provider),
+    ]
+    return providers.every(provider => registered.has(provider))
+  }
+
+  /**
+   * Whether one cached route accepts an image.
+   *
+   * Unknown modalities are not a refusal: the route did not say it cannot
+   * take an image. A route missing from the cache does not accept one,
+   * because the router has nothing to send the image to.
+   * @param provider - provider route to look up.
+   * @param model - model id on that route.
+   * @returns true when the route accepts an image or has not declared a modality.
+   */
+  acceptsImage(provider: string, model: string): boolean {
+    const entry = this.routes.get(provider)?.get(model)
+    if (entry === undefined) return false
+    if (entry.modalities === undefined) return true
+    return entry.modalities.includes('image')
   }
 
   /**
@@ -118,16 +148,26 @@ export class ModelCatalog {
    * @returns the target route, or undefined when the rule cannot be honored.
    */
   resolve(rule: RouteRule, needsImage: boolean): RouteTarget | undefined {
-    const entry = this.routes.get(rule.provider)?.get(rule.model)
+    return this.resolveEndpoint(rule, needsImage)
+  }
+
+  /**
+   * Resolve one endpoint into a target route, or decline it.
+   * @param endpoint - provider, model, and optional effort.
+   * @param needsImage - whether the task carries an image.
+   * @returns the target route, or undefined when the endpoint cannot be honored.
+   */
+  resolveEndpoint(endpoint: RouteEndpoint, needsImage: boolean): RouteTarget | undefined {
+    const entry = this.routes.get(endpoint.provider)?.get(endpoint.model)
     if (entry === undefined) return undefined
     if (needsImage && entry.modalities !== undefined && !entry.modalities.includes('image')) return undefined
-    const effort = rule.reasoningEffort === undefined ? undefined : ReasoningEffortId(rule.reasoningEffort)
+    const effort = endpoint.reasoningEffort === undefined ? undefined : ReasoningEffortId(endpoint.reasoningEffort)
     if (effort !== undefined && !entry.efforts.includes(effort)) {
-      return { provider: rule.provider, model: rule.model }
+      return { provider: endpoint.provider, model: endpoint.model }
     }
     return {
-      provider: rule.provider,
-      model: rule.model,
+      provider: endpoint.provider,
+      model: endpoint.model,
       ...(effort === undefined ? {} : { reasoningEffort: effort }),
     }
   }

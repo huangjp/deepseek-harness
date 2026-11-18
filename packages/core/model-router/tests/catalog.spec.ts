@@ -122,6 +122,35 @@ describe('model-router catalog', () => {
     expect(catalog.resolve(rule(), false)).toBeUndefined()
   })
 
+  it('reports whether a route accepts an image', async () => {
+    const unknown = new ModelCatalog(fakeContext())
+    await unknown.refresh([rule()])
+    expect(unknown.acceptsImage('p1', 'm1')).toBe(true)
+    expect(unknown.acceptsImage('p1', 'absent')).toBe(false)
+    const text = new ModelCatalog(fakeContext({ modalities: { 'p1/m1': ['text'] } }))
+    await text.refresh([rule()])
+    expect(text.acceptsImage('p1', 'm1')).toBe(false)
+    const image = new ModelCatalog(fakeContext({ modalities: { 'p1/m1': ['text', 'image'] } }))
+    await image.refresh([rule()])
+    expect(image.acceptsImage('p1', 'm1')).toBe(true)
+  })
+
+  it('caches models named by a route list or an extra tier route', async () => {
+    const catalog = new ModelCatalog(fakeContext({ models: { p1: ['m1', 'm2'] } }))
+    await catalog.refresh([
+      rule({ routes: [{ provider: 'p1', model: 'm2', reasoningEffort: undefined }] }),
+    ], [{ provider: 'p1', model: 'm1', reasoningEffort: undefined }])
+    expect(catalog.has('p1', 'm2')).toBe(true)
+    expect(catalog.has('p1', 'm1')).toBe(true)
+    expect(catalog.covers([rule({ routes: [{ provider: 'p1', model: 'm2', reasoningEffort: undefined }] })])).toBe(true)
+    expect(catalog.covers([], [{ provider: 'absent', model: 'm1', reasoningEffort: undefined }])).toBe(false)
+  })
+
+  it('reports the rules uncovered when the registry cannot be listed', () => {
+    const catalog = new ModelCatalog(fakeContext({ listFails: true }))
+    expect(catalog.covers([rule()])).toBe(false)
+  })
+
   it('reports whether the rules are covered by registered routes', async () => {
     const catalog = new ModelCatalog(fakeContext())
     expect(catalog.covers([rule()])).toBe(true)

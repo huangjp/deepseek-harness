@@ -68,7 +68,59 @@ A target is honored only when the deployment registers that provider and model. 
 
 Because a rule that states no condition matches nothing, a deployment expresses "everything else" as the two `hasImage` rules shown above: one for a task without an image, one for a task with an image. Those same two rules are what lets the breaker move a task: when a rule's route is skipped, the next rule that **fits** the task takes it, and a table without a rule that fits leaves the Agent on the route it already had — the one that just failed.
 
-A route that cannot answer is worse than no route at all: an exhausted quota, a revoked credential and an unreachable relay all make the request fail. The plugin therefore watches each route's own outcomes and routes around a route that keeps failing. `failureThreshold` consecutive failures — two by default — skip that route for `cooldownMs` milliseconds (five minutes by default), and the next rule that fits the task takes the task instead. A route that answers again becomes eligible at once, and a threshold of zero never routes around anything. The cooldown is a **wall-clock window**, not a retry budget: once it expires the route is eligible again and the next matching task tries it once more, and a fresh failure skips it again at once — the failure count is kept, so an expired cooldown does not clear it.
+A route that cannot answer is worse than no route at all: an exhausted quota, a revoked credential and an unreachable relay all make the request fail. The plugin therefore watches each route's own outcomes and routes around a route that keeps failing. `failureThreshold` consecutive failures — two by default — skip that route for `cooldownMs` milliseconds (five minutes by default), and the next rule that fits the task takes the task instead. A route that answers again becomes eligible at once, and a threshold of zero never routes around an ordinary failure. The cooldown is a **wall-clock window**, not a retry budget: once it expires the route is eligible again and the next matching task tries it once more, and a fresh failure skips it again at once — the failure count is kept, so an expired cooldown does not clear it.
+
+Leaving the three sections below unset keeps an existing rule table on its previous behavior: classification only writes a debug log, stickiness stays off, and health stays the consecutive-failure breaker above.
+
+### Difficulty tiers
+
+The classifier assigns `simple`, `standard`, or `hard` when the message is claimed, and by default it does not call a model. It reads prompt length, the latest usage total in the session, images or files, the number of `tool/call` events, whether `todo_write` or `plan` has run, fenced code, a step list of three or more lines, the selected reasoning effort, and Chinese and English keywords and hints (for example "深度思考", "think hard", "简短"). An empty keyword array means the built-in list; a non-empty array replaces that list.
+
+A rule may add a `tier` condition, which must hold together with its keywords and `hasImage`. A non-empty `routes` list replaces that rule's own `provider` and `model` as the candidate list. `tierRoutes` is consulted after the rule table: when no earlier rule takes the task, the list for the classified tier is tried. Another plugin may `provide` a service named `modelRouterClassifier` to replace the classifier. The decision cannot wait, so that service must return synchronously.
+
+```yaml
+classifier:
+  enabled: true
+stickiness:
+  enabled: false
+health:
+  mode: consecutive
+tierRoutes:
+  hard:
+    - provider: minimax-official
+      model: MiniMax-M3.1-Flash
+      reasoningEffort: high
+rules:
+  - name: hard-writing
+    tier: hard
+    keywords: ['小说']
+    routes:
+      - provider: slefminimax
+        model: MiniMax-M3.1-Flash
+        reasoningEffort: max
+      - provider: dpv41f
+        model: deepseek-v4.1-flash
+    provider: slefminimax
+    model: MiniMax-M3.1-Flash
+```
+
+Every claim writes a debug log with the tier and the three scores, for example `tier hard (simple=0 standard=1 hard=8; hint-hard)`.
+
+### Session stickiness
+
+`stickiness.enabled` defaults to `false`. When it is on, an Agent routed in auto mode keeps that route on later turns, so the prompt cache and the reply's style stay put. It leaves the route only when the route is cooling down, held by `hold`, or marked unusable by an auth or other 4xx configuration failure; when the tier rises by at least `upgradeSteps` (1 by default, so simple to standard switches; 2 switches only from simple to hard); or when the task carries an image and the route does not accept one. A drop in tier does not switch. The record hangs off the in-process Agent object, so the turn after a process restart is chosen from the rule table again.
+
+The reason for leaving is the same info log as a route selection, for example `leaving p1/m1 because the task rose from simple to hard`.
+
+### Route health
+
+`health.mode` defaults to `consecutive`, which is the "`failureThreshold` failures, then `cooldownMs`" breaker above. With `scored`, auto routing picks the healthier candidate among the routes that match and can be honored. Equal scores keep rule order, so a table of healthy routes behaves as it did before.
+
+The score is an exponential moving average of success, latency, and time to first token. Failures are weighted: timeout, 5xx, network, and unclassified each count as 1; a short 429 (`RATE_LIMIT`) counts as 0.5 by default, so it trips more slowly; one `QUOTA` counts as the whole threshold. Auth codes and other 4xx statuses do not open a cooldown. They mark the route unusable until `llm/adapters-updated` or `loader/volatile-update`, which is a configuration or route-registration change. Once the weighted penalty reaches the threshold the circuit opens. The cooldown starts at `cooldownMs`, doubles by `backoffFactor` (2 by default) with `jitterRatio` jitter, and is capped by `maxCooldownMs`. After the cooldown, `probeLimit` requests (1 by default) are admitted. A successful probe closes the circuit; a failed probe lengthens the cooldown.
+
+`failureThreshold: 0` still does not open a cooldown for an ordinary failure. An auth mark and a `hold` are not affected by that zero.
+
+The failure code `QUOTA_WINDOW` does not move the breaker. A quota-window plugin that knows when the route can serve again calls `ProviderHealth.hold(provider, resumeAtMs)`, and auto routing skips the route until that instant. This plugin does not wait out the window itself.
 
 ### Routing mode
 
@@ -87,12 +139,12 @@ Two pieces make the decision synchronous. The rule table and the signals come fr
 
 The catalog resolves each rule's exact model rather than listing a route's models. A route's own listing reports the route as empty while that route's credential does not resolve, and a route that cannot answer yet is still the route a rule names. The plugin's own startup waits, for a bounded time, for the routes its rules name to register, so the first turn of a session is routed instead of falling back to the Agent's own route.
 
-Failures are read from the `agent/request-error` waterfall, which every failed request attempt passes through, and answers are read from the `assistant/message` session event, which names the provider that produced them. The plugin listens ahead of the retry policy on that waterfall, so it sees every failed attempt rather than only the ones the retry policy passes on. The state is held per plugin rather than per session: a route that cannot answer for one session cannot answer for another either, so the next session's decision does not pay for the failure the last one already paid for.
+Failures are read from the `agent/request-error` waterfall, which every failed request attempt passes through, and answers are read from the `assistant/message` session event, which names the provider that produced them. The plugin listens ahead of the retry policy on that waterfall, so it sees every failed attempt rather than only the ones the retry policy passes on. Stream frames supply latency and time to first token, which feed the health score and not the consecutive-failure count. The state is held per plugin rather than per session: a route that cannot answer for one session cannot answer for another either, so the next session's decision does not pay for the failure the last one already paid for. Classification, stickiness, and selection all happen in that same claim, and the decision stays synchronous.
 
 <a id="further-exploration"></a>
 ## Further Exploration
 
-- The rules themselves are data: `packages/core/model-router/src/rules.ts` holds the matcher, and `packages/core/model-router/src/catalog.ts` holds the cached registry view.
+- The rules themselves are data: `packages/core/model-router/src/rules.ts` holds the matcher, `packages/core/model-router/src/classify.ts` holds the default classifier, `packages/core/model-router/src/health.ts` holds the breaker, and `packages/core/model-router/src/catalog.ts` holds the cached registry view.
 - `packages/client/ui-settings-model-router` is the browser half that edits this table from the Plugins page.
 - The seam the plugin writes to is `agent.model.select()` in `packages/core/agent/src/runtime-types.ts`; the loop's capture point is `packages/core/agent-loop/src/agent.ts`.
 - `packages/llm/llm-local-bridge` registers the bundled local relay routes this plugin usually routes between.
@@ -118,7 +170,7 @@ Routing adds no tokens to the request. The rule table is read from the plugin's 
 
 #### KV Cache effect
 
-The routed route replaces the request's provider and model, so the cached prefix the previous provider held for this conversation is not reused: a request that follows a route change is an independent model request rather than an append onto the previous one. A decision that keeps the route the Agent already holds changes nothing in the request, and therefore leaves an already-reusable prefix intact.
+The routed route replaces the request's provider and model, so the cached prefix the previous provider held for this conversation is not reused: a request that follows a route change is an independent model request rather than an append onto the previous one. A decision that keeps the route the Agent already holds changes nothing in the request, and therefore leaves an already-reusable prefix intact. With stickiness on, later turns keep that route, so the prefix stays reusable; the route changes when the tier rises, the route is unhealthy, or the task starts carrying an image, and that change still uses the harness's existing model-switch notice.
 
 ## Known Limitations and Deferred Work
 
@@ -128,6 +180,10 @@ The routed route replaces the request's provider and model, so the cached prefix
 - **A route change drops the previous provider's replay state.** The harness keeps assistant history in a form only its owning adapter can replay, so switching routes sends the history without that state. A task whose earlier turns carried provider-specific replay data may lose it mid-conversation.
 - **Effort is not validated against the deployment's credentials.** The plugin checks that the target route offers the requested effort and declines one it does not, but a target whose credential is missing fails at request time with the provider's own error rather than at routing time.
 - **No cross-provider fallback.** A route that fails after the decision is not retried on another route; the harness's own retry policy stays with the route it selected. The next decision routes around a route that keeps failing, so the tasks after it land elsewhere — but the task that hit the failure still fails.
+- **The classifier does not call a model.** It reads length, usage, attachments, tool history, and keywords. The same request phrased differently can land in a different tier. `modelRouterClassifier` can be another synchronous implementation, but the claim cannot wait for a second model call.
+- **Stickiness does not cross a process.** The record hangs off the current Agent object. The turn after a restart is chosen from the rule table again.
+- **The Plugins page does not edit tier or the candidate list.** A save writes `tier` and `routes` back unchanged, and the page has no controls for them. Change them in YAML.
+- **Scored health is off unless configured.** Without `health.mode: scored` the breaker stays consecutive failures. `QUOTA_WINDOW` is not counted; skipping until a resume instant is `hold`, which a quota-window plugin calls.
 
 <a id="dev-note"></a>
 ### Dev Note

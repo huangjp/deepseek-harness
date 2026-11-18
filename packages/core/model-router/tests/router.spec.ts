@@ -2,10 +2,14 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type { RoutingMode } from '@deepseek-ai/dsh-agent'
-import { apply, toRouteRule, type Config, type RuleConfig } from '../src/index.ts'
+import { apply, toRouteRule, type ClassifierConfig, type Config, type HealthConfig, type RuleConfig, type StickinessConfig, type TierRoutesConfig } from '../src/index.ts'
 
 /** A context stub that records the listeners the plugin installs. */
-function fakeContext(options: { readonly listProvidersFails?: boolean } = {}): {
+function fakeContext(options: {
+  readonly listProvidersFails?: boolean
+  readonly omitGet?: boolean
+  readonly classifier?: { classify: (observation: unknown) => unknown }
+} = {}): {
   readonly ctx: Context
   readonly emit: (event: string, ...args: unknown[]) => void
   readonly options: Map<string, unknown>
@@ -26,6 +30,9 @@ function fakeContext(options: { readonly listProvidersFails?: boolean } = {}): {
       registered.set(event, listenerOptions)
       return () => {}
     },
+    ...(options.omitGet === true ? {} : {
+      get: (service: string) => service === 'modelRouterClassifier' ? options.classifier : undefined,
+    }),
     llm: {
       listProviders: () => {
         if (options.listProvidersFails === true) throw new Error('registry unavailable')
@@ -64,19 +71,74 @@ function fakeContext(options: { readonly listProvidersFails?: boolean } = {}): {
   }
 }
 
-/** The health knobs a configuration declares. */
-interface HealthConfig {
+/** The historical breaker knobs a configuration declares. */
+interface BreakerConfig {
   readonly failureThreshold?: number
   readonly cooldownMs?: number
 }
 
-/** A configuration with the given rules, read through volatile references. */
-function fakeConfig(rules: readonly RuleConfig[], enabled = true, health: HealthConfig = {}): Config {
+/** Fields a test overrides on top of the defaults that keep old tables unchanged. */
+interface ConfigExtras {
+  readonly classifier?: Partial<ClassifierConfig>
+  readonly stickiness?: Partial<StickinessConfig>
+  readonly health?: Partial<HealthConfig>
+  readonly tierRoutes?: Partial<TierRoutesConfig>
+}
+
+/** A volatile reference around one value. */
+function volatile<T>(value: T): { get: () => T } {
+  return { get: () => value }
+}
+
+/** Classifier section whose defaults match the schema. */
+function classifierConfig(overrides: Partial<ClassifierConfig> = {}): ClassifierConfig {
   return {
-    enabled: { get: () => enabled },
-    rules: { get: () => rules },
-    failureThreshold: { get: () => health.failureThreshold ?? 2 },
-    cooldownMs: { get: () => health.cooldownMs ?? 300_000 },
+    enabled: true,
+    promptCharsStandard: 1_200,
+    promptCharsHard: 4_000,
+    contextTokensStandard: 8_000,
+    contextTokensHard: 32_000,
+    toolUseStandard: 1,
+    toolUseHard: 6,
+    hardMark: 4,
+    simpleMark: 3,
+    ...overrides,
+  }
+}
+
+/** Scored-health section. Mode stays consecutive unless a test says otherwise. */
+function healthConfig(overrides: Partial<HealthConfig> = {}): HealthConfig {
+  return {
+    mode: 'consecutive',
+    windowSize: 20,
+    ewmaAlpha: 0.3,
+    maxCooldownMs: 1_800_000,
+    backoffFactor: 2,
+    jitterRatio: 0,
+    probeLimit: 1,
+    latencyBudgetMs: 20_000,
+    ttftBudgetMs: 4_000,
+    weights: { timeout: 1, server: 1, network: 1, rateLimit: 0.5, unknown: 1 },
+    ...overrides,
+  }
+}
+
+/** A configuration with the given rules, read through volatile references. */
+function fakeConfig(
+  rules: readonly RuleConfig[],
+  enabled = true,
+  breaker: BreakerConfig = {},
+  extras: ConfigExtras = {},
+): Config {
+  return {
+    enabled: volatile(enabled),
+    rules: volatile(rules),
+    failureThreshold: volatile(breaker.failureThreshold ?? 2),
+    cooldownMs: volatile(breaker.cooldownMs ?? 300_000),
+    classifier: volatile(classifierConfig(extras.classifier)),
+    stickiness: volatile({ enabled: false, upgradeSteps: 1, ...extras.stickiness }),
+    health: volatile(healthConfig(extras.health)),
+    tierRoutes: volatile({ simple: [], standard: [], hard: [], ...extras.tierRoutes }),
   }
 }
 
@@ -84,13 +146,23 @@ function fakeConfig(rules: readonly RuleConfig[], enabled = true, health: Health
 function fakeAgent(
   current?: { provider: string; model: string; reasoningEffort?: string },
   routingMode: RoutingMode = 'auto',
+  events: readonly { type: string; data?: unknown }[] = [],
 ): {
-  readonly agent: unknown
+  readonly agent: {
+    model: { current: () => typeof current; select: ReturnType<typeof vi.fn>; routingMode: () => RoutingMode }
+    session: { snapshotEvents: () => typeof events }
+  }
   readonly select: ReturnType<typeof vi.fn>
 } {
-  const select = vi.fn()
+  let selected = current
+  const select = vi.fn((target: { provider: string; model: string; reasoningEffort?: string }) => {
+    selected = target
+  })
   return {
-    agent: { model: { current: () => current, select, routingMode: () => routingMode } },
+    agent: {
+      model: { current: () => selected, select, routingMode: () => routingMode },
+      session: { snapshotEvents: () => events },
+    },
     select,
   }
 }
@@ -133,6 +205,11 @@ describe('model-router rule mapping', () => {
       model: 'm1',
       reasoningEffort: 'max',
     })
+    expect(toRouteRule({
+      ...LONG_FORM,
+      tier: 'hard',
+      routes: [{ provider: 'p2', model: 'm2', reasoningEffort: 'low' }],
+    }).routes).toEqual([{ provider: 'p2', model: 'm2', reasoningEffort: 'low' }])
   })
 })
 
@@ -279,8 +356,12 @@ describe('model-router route health', () => {
   }
 
   /** Report one failed request against a provider route. */
-  function fail(emit: (event: string, ...args: unknown[]) => void, provider: string): void {
-    emit('agent/request-error', { provider }, () => Promise.resolve(undefined))
+  function fail(
+    emit: (event: string, ...args: unknown[]) => void,
+    provider: string,
+    failure?: { code: string; message: string },
+  ): void {
+    emit('agent/request-error', { provider, ...(failure === undefined ? {} : { failure }) }, () => Promise.resolve(undefined))
   }
 
   /** Report one answered request from a provider route. */
@@ -355,5 +436,289 @@ describe('model-router route health', () => {
     const { ctx, options } = fakeContext()
     await apply(ctx, fakeConfig([LONG_FORM]))
     expect(options.get('agent/request-error')).toEqual({ prepend: true })
+  })
+
+  it('does not count a replenishing quota window toward the breaker', async () => {
+    const { ctx, emit } = fakeContext()
+    await apply(ctx, fakeConfig([LONG_FORM, FALLBACK]))
+    fail(emit, 'p1', { code: 'QUOTA_WINDOW', message: 'window' })
+    fail(emit, 'p1', { code: 'QUOTA_WINDOW', message: 'window' })
+    const { agent, select } = fakeAgent()
+    emit('agent/inbox/claimed', { agent, message: claimed('写一部小说') })
+    expect(select).toHaveBeenCalledWith({ provider: 'p1', model: 'm1', reasoningEffort: 'max' })
+  })
+
+  it('skips an auth failure until configuration changes', async () => {
+    const { ctx, emit } = fakeContext()
+    await apply(ctx, fakeConfig([LONG_FORM, FALLBACK]))
+    fail(emit, 'p1', { code: 'AUTH', message: 'bad key' })
+    const blocked = fakeAgent()
+    emit('agent/inbox/claimed', { agent: blocked.agent, message: claimed('写一部小说') })
+    expect(blocked.select).toHaveBeenCalledWith({ provider: 'p2', model: 'm2' })
+    emit('loader/volatile-update', [['rules']])
+    await flush()
+    const restored = fakeAgent()
+    emit('agent/inbox/claimed', { agent: restored.agent, message: claimed('写一部小说') })
+    expect(restored.select).toHaveBeenCalledWith({ provider: 'p1', model: 'm1', reasoningEffort: 'max' })
+  })
+})
+
+describe('model-router tiers and stickiness', () => {
+  const SIMPLE: RuleConfig = { name: 'simple', keywords: [], tier: 'simple', provider: 'p1', model: 'm1' }
+  const HARD: RuleConfig = { name: 'hard', keywords: [], tier: 'hard', provider: 'p2', model: 'm2' }
+
+  it('routes a classified tier and logs the scores', async () => {
+    const { ctx, emit, logger } = fakeContext()
+    await apply(ctx, fakeConfig([SIMPLE, HARD]))
+    const { agent, select } = fakeAgent()
+    emit('agent/inbox/claimed', { agent, message: claimed('你好') })
+    expect(select).toHaveBeenCalledWith({ provider: 'p1', model: 'm1' })
+    expect(logger.debug).toHaveBeenCalledWith(
+      'model-router: tier %s (simple=%d standard=%d hard=%d; %s)',
+      'simple',
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.stringContaining('keyword-simple'),
+    )
+  })
+
+  it('keeps the route across a later easier turn and switches when the tier rises', async () => {
+    const { ctx, emit, logger } = fakeContext()
+    await apply(ctx, fakeConfig([SIMPLE, HARD], true, {}, { stickiness: { enabled: true } }))
+    const { agent, select } = fakeAgent()
+    emit('agent/inbox/claimed', { agent, message: claimed('你好') })
+    expect(select).toHaveBeenCalledWith({ provider: 'p1', model: 'm1' })
+    select.mockClear()
+    emit('agent/inbox/claimed', { agent, message: claimed('你好') })
+    expect(select).not.toHaveBeenCalled()
+    emit('agent/inbox/claimed', { agent, message: claimed('请深度思考这段架构') })
+    expect(select).toHaveBeenCalledWith({ provider: 'p2', model: 'm2' })
+    expect(logger.info).toHaveBeenCalledWith(
+      'model-router: leaving %s/%s because %s',
+      'p1',
+      'm1',
+      'the task rose from simple to hard',
+    )
+  })
+
+  it('does not downgrade when the rise is below upgradeSteps', async () => {
+    const { ctx, emit } = fakeContext()
+    await apply(ctx, fakeConfig(
+      [SIMPLE, { name: 'standard', keywords: [], tier: 'standard', provider: 'p2', model: 'm2' }, HARD],
+      true,
+      {},
+      { stickiness: { enabled: true, upgradeSteps: 2 } },
+    ))
+    const { agent, select } = fakeAgent()
+    emit('agent/inbox/claimed', { agent, message: claimed('你好') })
+    expect(select).toHaveBeenLastCalledWith({ provider: 'p1', model: 'm1' })
+    emit('agent/inbox/claimed', { agent, message: claimed('帮我看看这个函数怎么写') })
+    expect(select).toHaveBeenLastCalledWith({ provider: 'p1', model: 'm1' })
+  })
+
+  it('leaves a sticky route that cannot accept an image', async () => {
+    const { ctx, emit, logger } = fakeContext()
+    await apply(ctx, fakeConfig([
+      { name: 'text', keywords: [], tier: 'simple', hasImage: false, provider: 'p1', model: 'm1' },
+      { name: 'image', keywords: [], tier: 'simple', hasImage: true, provider: 'p2', model: 'm2' },
+    ], true, {}, { stickiness: { enabled: true } }))
+    const { agent, select } = fakeAgent()
+    emit('agent/inbox/claimed', { agent, message: claimed('你好') })
+    expect(select).toHaveBeenLastCalledWith({ provider: 'p1', model: 'm1' })
+    emit('agent/inbox/claimed', { agent, message: claimedWithImage('你好') })
+    expect(select).toHaveBeenLastCalledWith({ provider: 'p2', model: 'm2' })
+    expect(logger.info).toHaveBeenCalledWith(
+      'model-router: leaving %s/%s because %s',
+      'p1',
+      'm1',
+      'the task carries an image and p1/m1 does not accept images',
+    )
+  })
+
+  it('leaves a sticky route that is cooling down', async () => {
+    const { ctx, emit, logger } = fakeContext()
+    await apply(ctx, fakeConfig([LONG_FORM, {
+      name: 'fallback', keywords: [], hasImage: false, provider: 'p2', model: 'm2',
+    }], true, {}, { stickiness: { enabled: true } }))
+    const { agent, select } = fakeAgent()
+    emit('agent/inbox/claimed', { agent, message: claimed('写一部小说') })
+    emit('agent/request-error', { provider: 'p1' }, () => Promise.resolve(undefined))
+    emit('agent/request-error', { provider: 'p1' }, () => Promise.resolve(undefined))
+    emit('agent/inbox/claimed', { agent, message: claimed('写一部小说') })
+    expect(select).toHaveBeenLastCalledWith({ provider: 'p2', model: 'm2' })
+    expect(logger.info).toHaveBeenCalledWith(
+      'model-router: leaving %s/%s because %s',
+      'p1',
+      'm1',
+      expect.stringContaining('cooling down'),
+    )
+  })
+
+  it('uses the tier route list when no rule matches', async () => {
+    const { ctx, emit } = fakeContext()
+    await apply(ctx, fakeConfig([], true, {}, {
+      tierRoutes: { hard: [{ provider: 'p2', model: 'm2', reasoningEffort: 'max' }] },
+    }))
+    const { agent, select } = fakeAgent()
+    emit('agent/inbox/claimed', { agent, message: claimed('请深度思考') })
+    expect(select).toHaveBeenCalledWith({ provider: 'p2', model: 'm2', reasoningEffort: 'max' })
+  })
+
+  it('ignores tier rules while classification is off', async () => {
+    const { ctx, emit } = fakeContext()
+    await apply(ctx, fakeConfig([SIMPLE], true, {}, { classifier: { enabled: false } }))
+    const { agent, select } = fakeAgent()
+    emit('agent/inbox/claimed', { agent, message: claimed('你好') })
+    expect(select).not.toHaveBeenCalled()
+  })
+
+  it('uses a provided classifier when one is registered', async () => {
+    const { ctx, emit } = fakeContext({
+      classifier: {
+        classify: () => ({ tier: 'hard', scores: { simple: 0, standard: 0, hard: 9 }, reasons: ['custom'] }),
+      },
+    })
+    await apply(ctx, fakeConfig([HARD]))
+    const { agent, select } = fakeAgent()
+    emit('agent/inbox/claimed', { agent, message: claimed('你好') })
+    expect(select).toHaveBeenCalledWith({ provider: 'p2', model: 'm2' })
+  })
+
+  it('keeps routing when the classifier throws', async () => {
+    const { ctx, emit, logger } = fakeContext({
+      classifier: { classify: () => { throw new Error('classifier down') } },
+    })
+    await apply(ctx, fakeConfig([LONG_FORM]))
+    const { agent, select } = fakeAgent()
+    emit('agent/inbox/claimed', { agent, message: claimed('写一部小说') })
+    expect(select).toHaveBeenCalledWith({ provider: 'p1', model: 'm1', reasoningEffort: 'max' })
+    expect(logger.warn).toHaveBeenCalledWith(
+      'model-router: classifier failed; this claim is unclassified: %s',
+      'classifier down',
+    )
+  })
+
+  it('prefers the healthier matching route when scoring is on', async () => {
+    const { ctx, emit } = fakeContext()
+    await apply(ctx, fakeConfig([LONG_FORM, {
+      name: 'fallback', keywords: [], hasImage: false, provider: 'p2', model: 'm2',
+    }], true, {}, { health: { mode: 'scored' } }))
+    const healthy = fakeAgent()
+    emit('agent/inbox/claimed', { agent: healthy.agent, message: claimed('写一部小说') })
+    expect(healthy.select).toHaveBeenCalledWith({ provider: 'p1', model: 'm1', reasoningEffort: 'max' })
+    emit('agent/request-error', { provider: 'p1', failure: { code: 'TIMEOUT', message: 'slow' } }, () => Promise.resolve(undefined))
+    const degraded = fakeAgent()
+    emit('agent/inbox/claimed', { agent: degraded.agent, message: claimed('写一部小说') })
+    expect(degraded.select).toHaveBeenCalledWith({ provider: 'p2', model: 'm2' })
+  })
+
+  it('records stream latency against the route that answered', async () => {
+    const { ctx, emit } = fakeContext()
+    await apply(ctx, fakeConfig([LONG_FORM]))
+    const { agent } = fakeAgent({ provider: 'p1', model: 'm1' })
+    emit('agent/assistant-stream', { agent, frame: { type: 'start', attemptId: 'a1', revision: 1, turn: 1, step: 1 } })
+    emit('agent/assistant-stream', {
+      agent, frame: { type: 'chunk', attemptId: 'a1', revision: 1, index: 0, time: 1, chunk: { type: 'text-delta', index: 0, text: 'hi' } },
+    })
+    emit('agent/assistant-stream', {
+      agent, frame: { type: 'chunk', attemptId: 'a1', revision: 1, index: 1, time: 2, chunk: { type: 'text-delta', index: 0, text: '!' } },
+    })
+    emit('agent/assistant-stream', {
+      agent,
+      frame: { type: 'end', attemptId: 'a1', revision: 1, index: 2, outcome: { kind: 'committed', eventType: 'assistant/message', seq: 1 } },
+    })
+    emit('agent/assistant-stream', { agent, frame: { type: 'chunk', attemptId: 'missing', revision: 1, index: 0, time: 1, chunk: { type: 'reasoning-delta', index: 0, text: 'x' } } })
+    emit('agent/assistant-stream', {
+      agent: { model: { current: () => undefined } },
+      frame: { type: 'start', attemptId: 'no-provider', revision: 1, turn: 1, step: 1 },
+    })
+    emit('agent/assistant-stream', {
+      agent,
+      frame: { type: 'end', attemptId: 'a1', revision: 1, index: 1, outcome: { kind: 'abandoned' } },
+    })
+    const next = fakeAgent()
+    emit('agent/inbox/claimed', { agent: next.agent, message: claimed('写一部小说') })
+    expect(next.select).toHaveBeenCalled()
+  })
+
+  it('records a stream that never produced a token and a non-error classifier failure', async () => {
+    const { ctx, emit, logger } = fakeContext({
+      classifier: { classify: () => { throw 'classifier down' } },
+    })
+    await apply(ctx, fakeConfig([LONG_FORM]))
+    const { agent, select } = fakeAgent({ provider: 'p1', model: 'm1' })
+    emit('agent/assistant-stream', { agent, frame: { type: 'start', attemptId: 'b1', revision: 1, turn: 1, step: 1 } })
+    emit('agent/assistant-stream', {
+      agent, frame: { type: 'chunk', attemptId: 'b1', revision: 1, index: 0, time: 1, chunk: { type: 'usage', usage: { inputTokens: 1, outputTokens: 1 } } },
+    })
+    emit('agent/assistant-stream', {
+      agent, frame: { type: 'end', attemptId: 'b1', revision: 1, index: 1, outcome: { kind: 'committed', eventType: 'assistant/attempt', seq: 1 } },
+    })
+    emit('agent/assistant-stream', { agent, frame: { type: 'start', attemptId: 'quiet', revision: 1, turn: 1, step: 1 } })
+    emit('agent/assistant-stream', {
+      agent, frame: { type: 'end', attemptId: 'quiet', revision: 1, index: 0, outcome: { kind: 'committed', eventType: 'assistant/message', seq: 3 } },
+    })
+    emit('agent/assistant-stream', { agent, frame: { type: 'start', attemptId: 'b2', revision: 1, turn: 1, step: 1 } })
+    emit('agent/assistant-stream', {
+      agent, frame: { type: 'chunk', attemptId: 'b2', revision: 1, index: 0, time: 1, chunk: { type: 'reasoning-delta', index: 0, text: 'think' } },
+    })
+    emit('agent/assistant-stream', {
+      agent, frame: { type: 'end', attemptId: 'b2', revision: 1, index: 1, outcome: { kind: 'committed', eventType: 'assistant/message', seq: 2 } },
+    })
+    emit('agent/request-error', { provider: 'p1', failure: { status: 502 } }, () => Promise.resolve(undefined))
+    emit('agent/request-error', { provider: 'p2', failure: { message: 'plain' } }, () => Promise.resolve(undefined))
+    emit('agent/inbox/claimed', {
+      agent: { model: agent.model },
+      message: claimed('写一部小说'),
+    })
+    emit('agent/inbox/claimed', {
+      agent: { model: agent.model, session: {} },
+      message: claimed('写一部小说'),
+    })
+    expect(select).toHaveBeenCalled()
+    expect(logger.warn).toHaveBeenCalledWith(
+      'model-router: classifier failed; this claim is unclassified: %s',
+      'classifier down',
+    )
+  })
+
+  it('accepts keyword-list overrides, including an empty list that keeps the built-in set', async () => {
+    const replaced = fakeContext()
+    await apply(replaced.ctx, fakeConfig([LONG_FORM], true, {}, {
+      classifier: {
+        hardKeywords: ['小说'],
+        simpleKeywords: ['你好'],
+        hardHints: ['深度思考'],
+        simpleHints: ['简短'],
+      },
+    }))
+    const first = fakeAgent()
+    replaced.emit('agent/inbox/claimed', { agent: first.agent, message: claimed('写一部小说') })
+    expect(first.select).toHaveBeenCalled()
+    const emptied = fakeContext()
+    await apply(emptied.ctx, fakeConfig([LONG_FORM], true, {}, {
+      classifier: { hardKeywords: [], simpleKeywords: [], hardHints: [], simpleHints: [] },
+    }))
+    const second = fakeAgent()
+    emptied.emit('agent/inbox/claimed', { agent: second.agent, message: claimed('写一部小说') })
+    expect(second.select).toHaveBeenCalledWith({ provider: 'p1', model: 'm1', reasoningEffort: 'max' })
+  })
+
+  it('routes when the context has no service lookup', async () => {
+    const { ctx, emit } = fakeContext({ omitGet: true })
+    await apply(ctx, fakeConfig([LONG_FORM]))
+    const { agent, select } = fakeAgent()
+    emit('agent/inbox/claimed', { agent, message: claimed('写一部小说') })
+    expect(select).toHaveBeenCalledWith({ provider: 'p1', model: 'm1', reasoningEffort: 'max' })
+  })
+
+  it('routes from the claimed message when the session log cannot be read', async () => {
+    const { ctx, emit } = fakeContext()
+    await apply(ctx, fakeConfig([LONG_FORM]))
+    const { agent, select } = fakeAgent()
+    agent.session.snapshotEvents = () => { throw new Error('closing') }
+    emit('agent/inbox/claimed', { agent, message: claimed('写一部小说') })
+    expect(select).toHaveBeenCalledWith({ provider: 'p1', model: 'm1', reasoningEffort: 'max' })
   })
 })
