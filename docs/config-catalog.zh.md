@@ -2369,6 +2369,52 @@ export type Config = Readonly<Record<string, never>>
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-llm-retry -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-llm-xai -->
+<a id="deepseek-aidsh-llm-xai"></a>
+
+## `@deepseek-ai/dsh-llm-xai`
+
+- `inject`: `llm`
+- `refs`: `Volatile` (`@deepseek-ai/cordis`)
+- `source`: [`packages/llm/llm-xai/src/index.ts:52`](../packages/llm/llm-xai/src/index.ts)
+
+```ts config-catalog
+/** Plugin configuration: where the route points, how it authenticates, and which models it serves. */
+export interface Config {
+  /** Credential reference holding the xAI API key. */
+  apiKeyEnv: Volatile<string>
+  /** Responses API root, including `/v1`. */
+  baseURL: Volatile<string>
+  /** Effort a request that names none materializes. xAI defaults to `high`. */
+  reasoningEffort: Volatile<XaiEffort>
+  /**
+   * Models that replace the shipped `grok-4.7` entry. An empty list keeps
+   * that flagship, including its image input.
+   */
+  models: Volatile<readonly XaiModelConfig[]>
+}
+
+/** One xAI reasoning effort. */
+export type XaiEffort = typeof XAI_EFFORTS[number]
+
+/** One model a deployment lists in place of the shipped default. */
+export interface XaiModelConfig {
+  /** Model id sent on the wire. */
+  id: string
+  /** Name shown in the model selector. Absent uses the id. */
+  name?: string
+  /**
+   * Whether the model accepts images. Absent is vision only for
+   * {@link XAI_DEFAULT_MODEL_ID}; every other id stays text-only until this
+   * is set.
+   */
+  vision?: boolean
+  /** Context window in tokens. Absent uses {@link XAI_DEFAULT_CONTEXT_WINDOW}. */
+  contextWindow?: number
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-llm-xai -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-lsp-stdio -->
 <a id="deepseek-aidsh-lsp-stdio"></a>
 

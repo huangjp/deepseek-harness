@@ -154,6 +154,13 @@
     - id: llm-minimax
       name: '@deepseek-ai/dsh-llm-minimax'
 
+    # xAI Grok is a first-party route rather than the pi-ai catalog id `xai`.
+    # The route id stays `xai-official`. One key stored as `XAI_API_KEY` (the
+    # Models page, or the launching environment) serves every model on it.
+    # The wire is the Responses API. The shipped model is `grok-4.7`.
+    - id: llm-xai
+      name: '@deepseek-ai/dsh-llm-xai'
+
     - id: session-persistence-jsonl
       name: '@deepseek-ai/dsh-session-persistence-jsonl'
       config:

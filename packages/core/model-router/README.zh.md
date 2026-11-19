@@ -154,6 +154,35 @@ fallback:
   maxHops: 2
 ```
 
+`xai-official` 可以排进同一条有序候选。提示不足 20 万 token 时，`grok-4.7` 是每百万输入 / 输出 2 / 6 美元，`grok-build-0.1` 是 1 / 2 美元；达到 20 万 token 后 xAI 对两者都按两倍计费。写进 `pricing` 就能改掉。没有 `XAI_API_KEY` 时这条路由不列出模型，路由器会跳过它。随包的网页规则表不默认改走 Grok。
+
+```yaml
+rules:
+  - name: grok-fallback
+    keywords: ['小说']
+    provider: minimax-official
+    model: MiniMax-M3.1-Flash
+    routes:
+      - provider: minimax-official
+        model: MiniMax-M3.1-Flash
+      - provider: xai-official
+        model: grok-4.7
+pricing:
+  - provider: xai-official
+    model: grok-4.7
+    inputPerMillion: 2
+    outputPerMillion: 6
+    currency: USD
+  - provider: xai-official
+    model: grok-build-0.1
+    inputPerMillion: 1
+    outputPerMillion: 2
+    currency: USD
+fallback:
+  enabled: true
+  maxHops: 1
+```
+
 ### 可观测性
 
 每次认领都记在进程内的 `ctx.modelRouter` 上：命中的规则、档位和分数、候选及当时的健康分、选中的通道、离开原因、累计 token、估算费用，以及这次回答结束后的延迟和首 token 时间。`snapshot()` 按通道汇总，`decisions()` 保留最近 50 次认领。插件页没有单独的统计远程接口，桌面设置页读不到这份内存。

@@ -154,6 +154,35 @@ fallback:
   maxHops: 2
 ```
 
+`xai-official` can sit in that same ordered list. Below 200k prompt tokens, `grok-4.7` is $2 / $6 and `grok-build-0.1` is $1 / $2 per million input / output tokens; at 200k and above xAI doubles both. Put different numbers under `pricing` to replace them. Without `XAI_API_KEY` the route lists no models and the router skips it. The shipped web rule table does not route to Grok.
+
+```yaml
+rules:
+  - name: grok-fallback
+    keywords: ['小说']
+    provider: minimax-official
+    model: MiniMax-M3.1-Flash
+    routes:
+      - provider: minimax-official
+        model: MiniMax-M3.1-Flash
+      - provider: xai-official
+        model: grok-4.7
+pricing:
+  - provider: xai-official
+    model: grok-4.7
+    inputPerMillion: 2
+    outputPerMillion: 6
+    currency: USD
+  - provider: xai-official
+    model: grok-build-0.1
+    inputPerMillion: 1
+    outputPerMillion: 2
+    currency: USD
+fallback:
+  enabled: true
+  maxHops: 1
+```
+
 ### Observability
 
 Every claim is recorded on the in-process `ctx.modelRouter`: the matched rule, the tier and scores, the candidates and their health scores, the chosen route, the reason for leaving, cumulative tokens, the estimated cost, and, once the answer finishes, latency and time to first token. `snapshot()` aggregates by route, and `decisions()` keeps the latest 50 claims. The Plugins page has no stats remote, so the desktop settings page cannot read this memory.

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "xAI",
+    "description": "把 xAI Grok 作为一等 provider 路由接入：Responses API、可配置的推理档位，一把 API key 通吃所有模型。"
+  }
+}
