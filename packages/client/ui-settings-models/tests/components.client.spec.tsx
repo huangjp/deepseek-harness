@@ -15,7 +15,7 @@ import {
 } from '../src/client/ModelsSection.tsx'
 import type { ModelsSectionInjected, ModelsSectionProps } from '../src/client/ModelsSection.tsx'
 import { ApiKeyInput } from '../src/client/ApiKeyInput.tsx'
-import { ProviderEditor, pathOps } from '../src/client/ProviderEditor.tsx'
+import { ProviderEditor, pathOps, relayBaseOps } from '../src/client/ProviderEditor.tsx'
 import type { ProviderEditorProps } from '../src/client/ProviderEditor.tsx'
 import {
   DeepSeekModelsEditor, formatCapacity, modelDrafts, parseCapacity, validateDeepSeekModels,
@@ -867,6 +867,116 @@ describe('ModelsSection', () => {
     />)
     expect(screen.getByLabelText<HTMLInputElement>(en.keyInput).type).toBe('password')
     expect(screen.queryByLabelText(en.baseUrl)).toBeNull()
+  })
+
+  it('offers the 4SAPI route a masked key and a relay host list', async () => {
+    const kept = scriptedFace()
+    const namespace: SettingsNamespaceView = {
+      ns: 'llm-4sapi',
+      schema: JSON.parse(JSON.stringify(Schema.object({
+        apiKeyEnv: Schema.string().role('credential-ref').default('FOURSAPI_API_KEY'),
+        baseURL: Schema.string().default('https://4sapi.com/v1'),
+      }).toJSON())) as JsonValue,
+      value: { apiKeyEnv: 'FOURSAPI_API_KEY', baseURL: 'https://4sapi.com/v1' },
+      base: { apiKeyEnv: 'FOURSAPI_API_KEY', baseURL: 'https://4sapi.com/v1' },
+      user: {},
+      autoGenerate: true,
+      applies: 'live',
+      secrets: [],
+      revision: 4,
+    }
+    render(<ProviderEditor
+      provider="4sapi-relay"
+      displayName="4SAPI"
+      namespace={namespace}
+      settingsPath={[]}
+      schema={settingsSchema}
+      operations={operationsWith(kept.face)}
+      t={t}
+      readOnly={false}
+      onClose={vi.fn()}
+    />)
+    const key = screen.getByLabelText<HTMLInputElement>(en.keyInput)
+    expect(key.type).toBe('password')
+    expect(screen.queryByText(en.customized)).toBeNull()
+    const host = screen.getByLabelText<HTMLSelectElement>(en.baseUrl)
+    expect(host.value).toBe('https://4sapi.com/v1')
+    expect(Array.from(host.options).map(option => option.value)).toContain('https://4sapi.org/v1')
+    fireEvent.change(key, { target: { value: 'sk-relay' } })
+    fireEvent.click(screen.getByRole('button', { name: en.apply }))
+    await waitFor(() => { expect(kept.set).toHaveBeenCalledWith('FOURSAPI_API_KEY', 'sk-relay') })
+    expect(kept.mutate).not.toHaveBeenCalled()
+    cleanup()
+
+    const face = scriptedFace()
+    render(<ProviderEditor
+      provider="4sapi-relay"
+      displayName="4SAPI"
+      namespace={{
+        ...namespace,
+        value: { apiKeyEnv: 'FOURSAPI_API_KEY', baseURL: 'https://relay.example/v1' },
+        base: { apiKeyEnv: 'FOURSAPI_API_KEY', baseURL: 'https://relay.example/v1' },
+      }}
+      settingsPath={[]}
+      schema={settingsSchema}
+      operations={operationsWith(face.face)}
+      t={t}
+      readOnly={false}
+      onClose={vi.fn()}
+    />)
+    const custom = screen.getByLabelText<HTMLSelectElement>(en.baseUrl)
+    expect(Array.from(custom.options).map(option => option.value)).toContain('https://relay.example/v1')
+    fireEvent.change(custom, { target: { value: 'https://4stoken.com/v1' } })
+    fireEvent.change(screen.getByLabelText(en.keyInput), { target: { value: 'sk-cn' } })
+    fireEvent.click(screen.getByRole('button', { name: en.apply }))
+    await waitFor(() => { expect(face.set).toHaveBeenCalledWith('FOURSAPI_API_KEY', 'sk-cn') })
+    expect(face.mutate).toHaveBeenCalledWith('llm-4sapi', [
+      { op: 'set', path: ['baseURL'], value: 'https://4stoken.com/v1' },
+    ], 4)
+    expect(relayBaseOps(null, { baseURL: '' })).toEqual([])
+    expect(relayBaseOps({ baseURL: 1 }, { baseURL: 'https://4sapi.net/v1' })).toEqual([
+      { op: 'set', path: ['baseURL'], value: 'https://4sapi.net/v1' },
+    ])
+    cleanup()
+    render(<ProviderEditor
+      provider="4sapi-relay"
+      displayName="4SAPI"
+      namespace={{
+        ...namespace,
+        value: { apiKeyEnv: 'FOURSAPI_API_KEY' },
+        base: { apiKeyEnv: 'FOURSAPI_API_KEY' },
+      }}
+      settingsPath={[]}
+      schema={settingsSchema}
+      operations={operationsWith(face.face)}
+      t={t}
+      readOnly={false}
+      onClose={vi.fn()}
+    />)
+    expect(screen.getByLabelText<HTMLSelectElement>(en.baseUrl).value).toBe('https://4sapi.com/v1')
+    cleanup()
+    const stored = scriptedFace()
+    render(<ProviderEditor
+      provider="4sapi-relay"
+      displayName="4SAPI"
+      namespace={{
+        ...namespace,
+        user: { baseURL: 'https://4sapi.com/v1' },
+      }}
+      settingsPath={[]}
+      schema={settingsSchema}
+      operations={operationsWith(stored.face)}
+      t={t}
+      readOnly={false}
+      onClose={vi.fn()}
+    />)
+    fireEvent.change(screen.getByLabelText(en.baseUrl), { target: { value: 'https://4sapi.ai/v1' } })
+    fireEvent.click(screen.getByRole('button', { name: en.apply }))
+    await waitFor(() => {
+      expect(stored.mutate).toHaveBeenCalledWith('llm-4sapi', [
+        { op: 'set', path: ['baseURL'], value: 'https://4sapi.ai/v1' },
+      ], 4)
+    })
   })
 
   it('names only changed fields instead of rebuilding the section', () => {

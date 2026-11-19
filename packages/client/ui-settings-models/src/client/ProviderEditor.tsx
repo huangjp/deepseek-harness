@@ -46,8 +46,22 @@ import { ApiKeyInput } from './ApiKeyInput.tsx'
 import { RetryPolicyEditor, retryPolicyDefaults, retryPolicyFailure } from './RetryPolicyEditor.tsx'
 import styles from './ModelsSection.module.css'
 
+/**
+ * OpenAI-compatible roots the 4SAPI card offers. Keep this list aligned with
+ * `FOURSAPI_BASE_URLS` in `@deepseek-ai/dsh-llm-4sapi`.
+ */
+const FOURSAPI_BASE_URLS = [
+  'https://4sapi.com/v1',
+  'https://4sapi.org/v1',
+  'https://4stoken.com/v1',
+  'https://4sapi.top/v1',
+  'https://us.4sapi.com/v1',
+  'https://4sapi.ai/v1',
+  'https://4sapi.net/v1',
+] as const
+
 /** Per-adapter-family curated field sets (unknown namespaces get the hint alone). */
-type EditorLayout = 'deepseek' | 'pi-ai' | 'minimax' | 'unknown'
+type EditorLayout = 'deepseek' | 'pi-ai' | 'minimax' | 'relay' | 'unknown'
 
 
 
@@ -159,6 +173,26 @@ export function pathOps(
   return ops
 }
 
+/**
+ * The base-URL write for the 4SAPI card.
+ *
+ * The card shows a host list and stores only a changed selection. An unchanged
+ * select produces no operation, so opening the card and saving a key leaves
+ * the composed root in place.
+ * @param before - the user-layer subtree as loaded.
+ * @param after - the subtree as edited.
+ * @returns one set operation, or none.
+ */
+export function relayBaseOps(before: unknown, after: Record<string, unknown>): SettingsPathOpView[] {
+  const previous = typeof before === 'object' && before !== null && !Array.isArray(before)
+    ? before as Record<string, unknown>
+    : {}
+  const prior = typeof previous['baseURL'] === 'string' ? previous['baseURL'] : undefined
+  const next = typeof after['baseURL'] === 'string' && after['baseURL'].length > 0 ? after['baseURL'] : undefined
+  if (next === undefined || next === prior) return []
+  return [{ op: 'set', path: ['baseURL'], value: next }]
+}
+
 /** The editor layout the owning namespace selects. */
 function layoutOf(ns: string): EditorLayout {
   if (ns === 'llm-deepseek') return 'deepseek'
@@ -168,6 +202,9 @@ function layoutOf(ns: string): EditorLayout {
   // so the one thing a user supplies here is the key.
   // MiniMax and xAI are code-registered routes: the user only supplies the key.
   if (ns === 'llm-minimax' || ns === 'llm-xai') return 'minimax'
+  // 4SAPI is code-registered like those routes, and the card also writes the
+  // relay host because the same key is valid on more than one domain.
+  if (ns === 'llm-4sapi') return 'relay'
   return 'unknown'
 }
 
@@ -229,7 +266,8 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
   const layout = layoutOf(namespace.ns)
   // A code-registered family owns every profile field, so its card is the key
   // input alone: no editable identity, endpoint, or model list to write back.
-  const credentialOnly = props.credentialOnly === true || layout === 'minimax'
+  // 4SAPI is the exception that also writes its relay host.
+  const credentialOnly = props.credentialOnly === true || layout === 'minimax' || layout === 'relay'
   const keyRef = refFor(schema, namespace, settingsPath, props.provider)
   // The same schema read the create card makes, so the choices offered here
   // and there cannot drift apart: both come from the adapter's own `Config`.
@@ -351,11 +389,13 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
       && fallback === undefined
       && committedOriginal === undefined
       && Object.keys(next).length === 0
-    const ops: SettingsPathOpView[] = credentialOnly
-      ? []
-      : materializesNativeProfile
-        ? [{ op: 'set', path: [...settingsPath], value: {} }]
-        : pathOps(settingsPath, committedOriginal, next)
+    const ops: SettingsPathOpView[] = layout === 'relay'
+      ? relayBaseOps(committedOriginal, next)
+      : credentialOnly
+        ? []
+        : materializesNativeProfile
+          ? [{ op: 'set', path: [...settingsPath], value: {} }]
+          : pathOps(settingsPath, committedOriginal, next)
     if (keyRemoval !== undefined && keyRemoval.removed !== true) {
       const removed = await operations.removeCredential(keyRemoval.ref)
       if (removed !== undefined) return removed
@@ -408,6 +448,31 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
   const inheritedModels = (): unknown => {
     const pinned = schema.getPath(namespace.base, [...settingsPath, 'models'])
     return pinned ?? schema.nodeAtPath(root, [...settingsPath, 'models'])?.meta.default
+  }
+
+  /**
+   * The host list for the 4SAPI card. A root the composition already stored
+   * that is not one of the documented hosts stays selectable.
+   */
+  const relayBaseSelect = (): ReactNode => {
+    const selected = stringAt(draft, 'baseURL') ?? stringAt(fallback, 'baseURL') ?? FOURSAPI_BASE_URLS[0]
+    const choices = (FOURSAPI_BASE_URLS as readonly string[]).includes(selected)
+      ? FOURSAPI_BASE_URLS
+      : [selected, ...FOURSAPI_BASE_URLS]
+    return (
+      <div className={styles['field']}>
+        <span className={styles['fieldLabel']}>{t('baseUrl')}</span>
+        <select
+          className={`${styles['input']} ${styles['selectInput']}`}
+          value={selected}
+          aria-label={t('baseUrl')}
+          disabled={disabled}
+          onChange={(event) => { setField('baseURL', event.target.value) }}
+        >
+          {choices.map(url => <option key={url} value={url}>{url}</option>)}
+        </select>
+      </div>
+    )
   }
 
   /**
@@ -525,6 +590,7 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
               ? null
               : <p className={styles[protocolKeyMissing ? 'advancedHint' : 'error']}>{t(shownKeyFailure)}</p>}
           </div>}
+        {layout === 'relay' ? relayBaseSelect() : null}
         {credentialOnly ? null : <details
           className={styles['customized']}
           onToggle={(event) => { setCustomizedOpen(event.currentTarget.open) }}

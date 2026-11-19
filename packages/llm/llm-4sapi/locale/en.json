@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "4SAPI",
+    "description": "4SAPI relay as a first-party provider route: OpenAI-compatible chat completions, a configurable base URL, and one API key for every model."
+  }
+}

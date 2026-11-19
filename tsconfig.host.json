@@ -524,6 +524,7 @@
     { "path": "./packages/llm/llm-local-bridge" },
     { "path": "./packages/llm/llm-minimax" },
     { "path": "./packages/llm/llm-xai" },
+    { "path": "./packages/llm/llm-4sapi" },
     { "path": "./packages/llm/llm-pi-ai" },
     { "path": "./packages/shell/bash-local" },
     { "path": "./packages/shell/shell-env" },

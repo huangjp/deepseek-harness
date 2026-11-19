@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "4SAPI",
+    "description": "O relay 4SAPI como rota de provedor de primeira classe: Chat Completions compatíveis com OpenAI, uma URL base configurável e uma única chave de API para todos os modelos."
+  }
+}

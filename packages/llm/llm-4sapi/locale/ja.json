@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "4SAPI",
+    "description": "4SAPI リレーを第一級プロバイダールートとして接続します。OpenAI 互換の Chat Completions、設定可能なベース URL、1 つの API キーですべてのモデルを利用できます。"
+  }
+}

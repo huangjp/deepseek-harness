@@ -2255,6 +2255,77 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-linear -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-llm-4sapi -->
+<a id="deepseek-aidsh-llm-4sapi"></a>
+
+## `@deepseek-ai/dsh-llm-4sapi`
+
+- `inject`: `llm`
+- `refs`: `Volatile` (`@deepseek-ai/cordis`)
+- `source`: [`packages/llm/llm-4sapi/src/index.ts:64`](../packages/llm/llm-4sapi/src/index.ts)
+
+```ts config-catalog
+/** Plugin configuration: where the relay points, how it authenticates, and which models it serves. */
+export interface Config {
+  /** Credential reference holding the 4SAPI key. */
+  apiKeyEnv: Volatile<string>
+  /** OpenAI-compatible root. A host without `/v1` gains that suffix. */
+  baseURL: Volatile<string>
+  /**
+   * Wire for `claude-*` models. `openai` keeps chat completions, which works
+   * for every relayed vendor. `anthropic` uses `/v1/messages` so thinking
+   * configuration is sent.
+   */
+  claudeProtocol: Volatile<FoursapiClaudeProtocol>
+  /**
+   * Models that replace `GET /v1/models`. An empty list fetches the catalog
+   * for the stored key. No key lists nothing either way.
+   */
+  models: Volatile<readonly FoursapiModelConfig[]>
+  /**
+   * Per-model token prices. A row replaces the `/api/pricing` default for
+   * that model. Prices are not hardcoded: the relay's group rates differ by
+   * account.
+   */
+  pricing: Volatile<readonly FoursapiPriceConfig[]>
+  /** Whether `GET /api/pricing` fills prices the `pricing` list does not name. */
+  usePricingEndpoint: Volatile<boolean>
+}
+
+/** Wire used for `claude-*` models. */
+export type FoursapiClaudeProtocol = 'openai' | 'anthropic'
+
+/** One model the route can serve. */
+export interface FoursapiModelConfig {
+  /** Model id sent on the wire. */
+  id: string
+  /** Name shown in the model selector. Absent uses the id. */
+  name?: string
+  /**
+   * Whether the model accepts images. Absent infers a conservative id match.
+   * `false` forces text even when the id looks multimodal.
+   */
+  vision?: boolean
+  /** Context window in tokens. Absent uses {@link FOURSAPI_DEFAULT_CONTEXT_WINDOW}. */
+  contextWindow?: number
+  /** Output capability in tokens. Absent uses {@link FOURSAPI_DEFAULT_MAX_TOKENS}. */
+  maxTokens?: number
+}
+
+/** One per-model price row. Currency absent means USD. */
+export interface FoursapiPriceConfig {
+  /** Model id the row prices. */
+  model: string
+  /** Price for one million input tokens. */
+  inputPerMillion: number
+  /** Price for one million output tokens. */
+  outputPerMillion: number
+  /** Currency label. Absent means USD. */
+  currency?: string
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-llm-4sapi -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-llm-deepseek-account -->
 <a id="deepseek-aidsh-llm-deepseek-account"></a>
 

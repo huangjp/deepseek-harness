@@ -345,6 +345,7 @@ Every package below exports a Cordis plugin that a bundle patch can name in a Lo
 |---|---|---|
 | `@deepseek-ai/dsh-deepseek-llm-api-extensions` | no | Additive request-field registry for the official DeepSeek LLM API adapter |
 | `@deepseek-ai/dsh-llm` | no | Provider-neutral LLM service interface for the DeepSeek Harness |
+| `@deepseek-ai/dsh-llm-4sapi` | yes | 4SAPI relay as a first-party provider route: OpenAI-compatible chat completions over a configurable base URL, with models listed from the key. |
 | `@deepseek-ai/dsh-llm-deepseek-account` | yes | DeepSeek account provider authentication and discovery |
 | `@deepseek-ai/dsh-llm-deepseek-api-key` | yes | DeepSeek api-key provider authentication and discovery |
 | `@deepseek-ai/dsh-llm-local-bridge` | no | Built-in local-bridge LLM providers (WorkBuddy relay 127.0.0.1:8787, Copilot relay 127.0.0.1:8899, Huawei Celia relay 127.0.0.1:8123) registered as fixed, non-deletable routes on the LLM seam. |
