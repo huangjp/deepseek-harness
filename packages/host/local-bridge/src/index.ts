@@ -395,8 +395,12 @@ function registerControlRoutes(ctx: Context, options: ControlRouteOptions & {
       return true
     }
 
+    // The connection service owns the trust fence inside each handler. Omitting
+    // `auth` now means `required`, and a composition with no authenticator
+    // answers 503 before the handler can apply that fence.
     scope.effect(() => scope.webServer.register({
       kind: 'exact',
+      auth: 'anonymous',
       path: LOCAL_BRIDGE_STATUS_PATH,
       handler: async (req, res) => {
         if (rejected(req, res)) return
@@ -411,6 +415,7 @@ function registerControlRoutes(ctx: Context, options: ControlRouteOptions & {
 
     scope.effect(() => scope.webServer.register({
       kind: 'exact',
+      auth: 'anonymous',
       path: LOCAL_BRIDGE_REFRESH_PATH,
       handler: async (req, res) => {
         if (rejected(req, res)) return
@@ -425,6 +430,7 @@ function registerControlRoutes(ctx: Context, options: ControlRouteOptions & {
 
     scope.effect(() => scope.webServer.register({
       kind: 'exact',
+      auth: 'anonymous',
       path: LOCAL_BRIDGE_LOG_PATH,
       handler: async (req, res) => {
         if (rejected(req, res)) return

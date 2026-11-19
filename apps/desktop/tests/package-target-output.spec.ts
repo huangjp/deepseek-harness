@@ -65,7 +65,9 @@ describe('clearPreviousElectronOutput', () => {
     expect(existsSync(appOutDir)).toBe(false)
   })
 
-  it('names the entries a running process still holds', async () => {
+  // The lock is a Windows file handle. Linux unlinks an open file, so the
+  // held-entry report only exists where PowerShell can keep the handle.
+  it.skipIf(process.platform !== 'win32')('names the entries a running process still holds', async () => {
     const root = workspace()
     const appOutDir = join(root, 'win-unpacked')
     const held = join(appOutDir, 'resources', 'app.asar')

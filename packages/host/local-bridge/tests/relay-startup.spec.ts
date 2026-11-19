@@ -444,7 +444,9 @@ describe('local-bridge relay lifecycle', () => {
    * 令牌陈旧时建连失败会带一句「很可能已失效」，而请求成功穿过刷新之后就不该再有
    * 那句 —— 说明它建连时用的已经是新令牌。
    */
-  it('hands the Copilot relay a refresh trigger that reaches the control plane', async () => {
+  // `control.refresh()` refuses every non-Windows host before it calls the
+  // preflight module, so this wiring is only observable where the refresh can start.
+  it.skipIf(process.platform !== 'win32')('hands the Copilot relay a refresh trigger that reaches the control plane', async () => {
     harvestRoot = await mkdtemp(join(tmpdir(), 'dsh-local-bridge-auto-'))
     const tokenFile = join(harvestRoot, 'token.json')
     await writeFile(tokenFile, token(3600), 'utf8')

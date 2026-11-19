@@ -396,8 +396,8 @@ describe('model list editing', () => {
     await waitFor(() => { expect(mutate).toHaveBeenCalled() })
     expect(firstMutate(mutate).ops).toEqual([{
       op: 'set',
-      path: ['providers', 'acme', 'compat'],
-      value: { supportsStore: true },
+      path: ['providers', 'acme', 'compat', 'supportsStore'],
+      value: true,
     }])
   })
 
