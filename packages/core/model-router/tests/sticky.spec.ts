@@ -30,6 +30,8 @@ describe('model-router stickiness', () => {
     expect(evaluateSticky(sticky(), 'simple', false, { kind: 'skip', cause: 'unavailable' }, 1)).toMatchObject({ reason: 'route-unavailable' })
     expect(evaluateSticky(sticky(), 'simple', false, { kind: 'skip', cause: 'cooldown' }, 1)).toMatchObject({ reason: 'route-unhealthy' })
     expect(evaluateSticky(sticky(), 'simple', true, { kind: 'open' }, 1)).toMatchObject({ reason: 'needs-vision' })
+    expect(evaluateSticky(sticky(), 'simple', false, { kind: 'skip', cause: 'budget' }, 1)).toMatchObject({ reason: 'budget' })
+    expect(evaluateSticky(sticky(), 'simple', false, { kind: 'skip', cause: 'quota' }, 1)).toMatchObject({ reason: 'quota' })
   })
 
   it('names each break in a log clause and copies a selected target', () => {
@@ -38,6 +40,8 @@ describe('model-router stickiness', () => {
     expect(stickyBreakText('route-held', 'p1/m1')).toContain('quota')
     expect(stickyBreakText('route-unavailable', 'p1/m1')).toContain('configuration')
     expect(stickyBreakText('needs-vision', 'p1/m1')).toContain('image')
+    expect(stickyBreakText('budget', 'p1/m1')).toContain('budget')
+    expect(stickyBreakText('quota', 'p1/m1')).toContain('quota')
     const target: RouteTarget = { provider: 'p2', model: 'm2' }
     expect(stickyFromTarget(target, 'hard', true, 'hard').tier).toBe('hard')
   })

@@ -70,7 +70,7 @@ Because a rule that states no condition matches nothing, a deployment expresses 
 
 A route that cannot answer is worse than no route at all: an exhausted quota, a revoked credential and an unreachable relay all make the request fail. The plugin therefore watches each route's own outcomes and routes around a route that keeps failing. `failureThreshold` consecutive failures — two by default — skip that route for `cooldownMs` milliseconds (five minutes by default), and the next rule that fits the task takes the task instead. A route that answers again becomes eligible at once, and a threshold of zero never routes around an ordinary failure. The cooldown is a **wall-clock window**, not a retry budget: once it expires the route is eligible again and the next matching task tries it once more, and a fresh failure skips it again at once — the failure count is kept, so an expired cooldown does not clear it.
 
-Leaving the three sections below unset keeps an existing rule table on its previous behavior: classification only writes a debug log, stickiness stays off, and health stays the consecutive-failure breaker above.
+Leaving the sections below unset keeps an existing rule table on its previous behavior: classification only writes a debug log, stickiness, cost, and fallback stay off, and health stays the consecutive-failure breaker above.
 
 ### Difficulty tiers
 
@@ -108,7 +108,7 @@ Every claim writes a debug log with the tier and the three scores, for example `
 
 ### Session stickiness
 
-`stickiness.enabled` defaults to `false`. When it is on, an Agent routed in auto mode keeps that route on later turns, so the prompt cache and the reply's style stay put. It leaves the route only when the route is cooling down, held by `hold`, or marked unusable by an auth or other 4xx configuration failure; when the tier rises by at least `upgradeSteps` (1 by default, so simple to standard switches; 2 switches only from simple to hard); or when the task carries an image and the route does not accept one. A drop in tier does not switch. The record hangs off the in-process Agent object, so the turn after a process restart is chosen from the rule table again.
+`stickiness.enabled` defaults to `false`. When it is on, an Agent routed in auto mode keeps that route on later turns, so the prompt cache and the reply's style stay put. It leaves the route only when the route is cooling down, held for a quota window, over its budget, out of remaining quota, or marked unusable by an auth or other 4xx configuration failure; when the tier rises by at least `upgradeSteps` (1 by default, so simple to standard switches; 2 switches only from simple to hard); or when the task carries an image and the route does not accept one. A drop in tier does not switch. The record hangs off the in-process Agent object, so the turn after a process restart is chosen from the rule table again.
 
 The reason for leaving is the same info log as a route selection, for example `leaving p1/m1 because the task rose from simple to hard`.
 
@@ -120,7 +120,45 @@ The score is an exponential moving average of success, latency, and time to firs
 
 `failureThreshold: 0` still does not open a cooldown for an ordinary failure. An auth mark and a `hold` are not affected by that zero.
 
-The failure code `QUOTA_WINDOW` does not move the breaker. A quota-window plugin that knows when the route can serve again calls `ProviderHealth.hold(provider, resumeAtMs)`, and auto routing skips the route until that instant. This plugin does not wait out the window itself.
+The failure code `QUOTA_WINDOW` does not move the breaker. This plugin listens for `llm/quota-hold` and calls `hold` with that notice's `resumeAtMs`. Later auto-mode claims skip the route until that instant, and stickiness logs the quota window as the reason for leaving. `fixed` mode does not consult the skip: the in-flight step stays on the same route and the quota-wait plugin resumes it when the window opens.
+
+### Quota and cost
+
+`cost.enabled` defaults to `false`. Turning it on without `pricing` does not change routing. Each price names the cost per million input tokens and per million output tokens, an optional currency, and optional 24-hour and 30-day budgets. Token totals and the estimate live in process memory and are cleared by a restart. A route that has spent its budget is skipped in auto mode, and the reason is budget.
+
+A provider that can report remaining quota answers `llm/quota-remaining`. MiniMax reuses the usage clock it already has, rather than a second endpoint. The claim reads it asynchronously, and the next claim is the one that uses the reading. When the remaining fraction falls below `cost.remainingThreshold` (0.2 by default), that route's health score is scaled down, before a 429. A reading of 0 skips the route, and the reason is quota.
+
+```yaml
+cost:
+  enabled: true
+  remainingThreshold: 0.2
+pricing:
+  - provider: minimax-official
+    model: MiniMax-M3.1-Flash
+    inputPerMillion: 1.2
+    outputPerMillion: 4
+    currency: USD
+    dailyBudget: 20
+    monthlyBudget: 400
+```
+
+### Fallback chain
+
+`fallback.enabled` defaults to `false`. When it is on, a rule's non-empty `routes` list is the ordered candidate list. If the chosen route fails before it has written any reply text, the recovery action names the next candidate that is still healthy, not held, and not over its budget or remaining quota, and the same step may switch up to `maxHops` times (1 by default). `model.select` during recovery still applies only to a later step. `fixed` mode and `QUOTA_WINDOW` do not switch routes.
+
+Text already written into the stream is not handed to the next route. The failed attempt is stored as `assistant/attempt` and is not part of the next request's model history. The next route sees the conversation from before this failure, plus the harness's existing model-switch notice.
+
+```yaml
+fallback:
+  enabled: true
+  maxHops: 2
+```
+
+### Observability
+
+Every claim is recorded on the in-process `ctx.modelRouter`: the matched rule, the tier and scores, the candidates and their health scores, the chosen route, the reason for leaving, cumulative tokens, the estimated cost, and, once the answer finishes, latency and time to first token. `snapshot()` aggregates by route, and `decisions()` keeps the latest 50 claims. The Plugins page has no stats remote, so the desktop settings page cannot read this memory.
+
+When auto mode leaves a route, or the same step falls back, the session appends `model-router/notice`. The chat shows that reason on one row, the same way it shows a quota wait. The event does not enter model history.
 
 ### Routing mode
 
@@ -179,11 +217,12 @@ The routed route replaces the request's provider and model, so the cached prefix
 - **Rules read the message only.** A rule sees the claimed message's text and whether it carries an image. It does not see the Agent's preset, its tool set, the task's history length, or the deployment's own notion of what kind of work is running, so two tasks that ask for the same thing in different words can land on different routes.
 - **A route change drops the previous provider's replay state.** The harness keeps assistant history in a form only its owning adapter can replay, so switching routes sends the history without that state. A task whose earlier turns carried provider-specific replay data may lose it mid-conversation.
 - **Effort is not validated against the deployment's credentials.** The plugin checks that the target route offers the requested effort and declines one it does not, but a target whose credential is missing fails at request time with the provider's own error rather than at routing time.
-- **No cross-provider fallback.** A route that fails after the decision is not retried on another route; the harness's own retry policy stays with the route it selected. The next decision routes around a route that keeps failing, so the tasks after it land elsewhere — but the task that hit the failure still fails.
+- **Fallback does not replay a partial reply.** `fallback.enabled` is off unless configured. When it is on, the same step moves to the next candidate only if the route fails before it writes reply text. Text already streamed stays on `assistant/attempt` and is not sent to the next route. `fixed` mode and `QUOTA_WINDOW` stay on the original route.
 - **The classifier does not call a model.** It reads length, usage, attachments, tool history, and keywords. The same request phrased differently can land in a different tier. `modelRouterClassifier` can be another synchronous implementation, but the claim cannot wait for a second model call.
 - **Stickiness does not cross a process.** The record hangs off the current Agent object. The turn after a restart is chosen from the rule table again.
 - **The Plugins page does not edit tier or the candidate list.** A save writes `tier` and `routes` back unchanged, and the page has no controls for them. Change them in YAML.
-- **Scored health is off unless configured.** Without `health.mode: scored` the breaker stays consecutive failures. `QUOTA_WINDOW` is not counted; skipping until a resume instant is `hold`, which a quota-window plugin calls.
+- **Scored health is off unless configured.** Without `health.mode: scored` the breaker stays consecutive failures. `QUOTA_WINDOW` is not counted. `llm/quota-hold` skips later auto routing until the resume instant; `fixed` mode still waits on the same route.
+- **Cost and stats do not cross a process.** Without price metadata the cost logic is a no-op. Usage, budgets, and `ctx.modelRouter` live in memory. A remaining-quota reading is asynchronous, so the claim that requested it does not use it yet. The Plugins page does not render the aggregate.
 
 <a id="dev-note"></a>
 ### Dev Note

@@ -4,6 +4,7 @@ import type {
   ConversationNodeContext, ConversationNodeDefinition,
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
+import type {} from '@deepseek-ai/dsh-llm-quota-wait/types'
 import type {} from '@deepseek-ai/dsh-llm-retry/types'
 import type { SessionEvent } from '@deepseek-ai/dsh-session/types'
 import type { AssistantChatData } from '../contract/chat-nodes.ts'
@@ -244,7 +245,7 @@ function fallbackState(context: ConversationNodeContext<AssistantState>): Assist
       state = settleMessage(state, match, match.event)
       continue
     }
-    if (match.event.type === 'llm/retry' && state !== undefined) {
+    if ((match.event.type === 'llm/retry' || match.event.type === 'llm/quota-wait') && state !== undefined) {
       state = resetForRetry(state)
     }
   }
@@ -303,7 +304,7 @@ export const assistantDefinition: ConversationNodeDefinition<AssistantState> = {
       || (event.type === 'assistant/message' && event.surfaceOp === 'append')) {
       return { id: `${event.data.turn}:${event.data.step}`, role: 'update' }
     }
-    if (event.type === 'llm/retry') {
+    if (event.type === 'llm/retry' || event.type === 'llm/quota-wait') {
       return { id: `${event.data.turn}:${event.data.step}`, role: 'update' }
     }
     return null
@@ -317,7 +318,7 @@ export const assistantDefinition: ConversationNodeDefinition<AssistantState> = {
       return updateChunk(context.state, match.event.data.chunk, match.event.seq, match.event.time)
     }
     if (match.event.type === 'assistant/message') return settleMessage(context.state, match, match.event)
-    if (match.event.type === 'llm/retry') {
+    if (match.event.type === 'llm/retry' || match.event.type === 'llm/quota-wait') {
       return resetForRetry(context.state)
     }
     return context.state
@@ -372,6 +373,7 @@ export function registerAssistantConversationNode(ctx: Context): void {
       'assistant/live-chunk': match,
       'assistant/message': match,
       'llm/retry': match,
+      'llm/quota-wait': match,
     },
   })
 }

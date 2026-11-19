@@ -4,7 +4,7 @@ import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import LlmRuntime, { createUserMessage, LlmError  } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createUserMessage, LlmError, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { LlmFailure, ResolvedRetryPolicy } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -102,6 +102,56 @@ describe('agent/request-error', () => {
     expect(statuses).toEqual(['running', 'idle'])
     expect(agent.session.snapshotEvents().flatMap(event =>
       event.type === 'request/header' ? [event.data.reason] : [])).toEqual(['initial'])
+  })
+
+  it('retries a failed step on the route selected during recovery', async () => {
+    const adapter = new MockAdapter([
+      fail('down', 'TRANSPORT'),
+      textResponse('ok'),
+    ])
+    const ctx = await harness(adapter)
+    ctx.llm.registerAdapter(['backup'], adapter)
+    const agent = await ctx.agentLoop.create(SessionId('request-error-fallback'), { provider: 'mock', model: 'mock' })
+    ctx.on('agent/request-error', async ({ agent: subject }) => {
+      const selection = { provider: 'backup', model: 'mock' }
+      subject.model.select(selection)
+      return { kind: 'retry', selection }
+    })
+
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await agent.whenIdle()
+
+    expect(adapter.requests.map(request => request.provider)).toEqual(['mock', 'backup'])
+  })
+
+  it('retries a failed step when recovery selects another model', async () => {
+    const adapter = new MockAdapter([fail('down', 'TRANSPORT'), textResponse('ok')])
+    const ctx = await harness(adapter)
+    const agent = await ctx.agentLoop.create(SessionId('request-error-model'), { provider: 'mock', model: 'mock' })
+    ctx.on('agent/request-error', async () => ({ kind: 'retry', selection: { provider: 'mock', model: 'other' } }))
+
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await agent.whenIdle()
+
+    expect(adapter.requests.map(request => request.model)).toEqual(['mock', 'other'])
+  })
+
+  it('retries a failed step when recovery changes only the reasoning effort', async () => {
+    const adapter = new MockAdapter(
+      [fail('down', 'TRANSPORT'), textResponse('ok')],
+      { efforts: [{ id: 'high', name: 'high' }] },
+    )
+    const ctx = await harness(adapter)
+    const agent = await ctx.agentLoop.create(SessionId('request-error-effort'), { provider: 'mock', model: 'mock' })
+    ctx.on('agent/request-error', async () => ({
+      kind: 'retry',
+      selection: { provider: 'mock', model: 'mock', reasoningEffort: ReasoningEffortId('high') },
+    }))
+
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await agent.whenIdle()
+
+    expect(adapter.requests.map(request => request.reasoningEffort)).toEqual([undefined, 'high'])
   })
 
   it('lets cancellation win over a retry action', async () => {

@@ -133,6 +133,9 @@
     - id: llm-retry
       name: '@deepseek-ai/dsh-llm-retry'
 
+    - id: llm-quota-wait
+      name: '@deepseek-ai/dsh-llm-quota-wait'
+
     - id: jobs
       name: '@deepseek-ai/dsh-jobs-local'
 

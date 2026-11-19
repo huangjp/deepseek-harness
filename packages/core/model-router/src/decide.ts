@@ -59,6 +59,8 @@ export type RoutingDecision =
     readonly kind: 'unchanged'
     readonly logs: readonly DecisionLog[]
     readonly sticky: StickyRecord | undefined
+    /** Candidates that matched, in rule order. */
+    readonly candidates: readonly RouteTarget[]
   }
   | {
     /** Select this route. */
@@ -66,6 +68,8 @@ export type RoutingDecision =
     readonly target: RouteTarget
     readonly sticky: StickyRecord | undefined
     readonly logs: readonly DecisionLog[]
+    /** Candidates that matched, in rule order. */
+    readonly candidates: readonly RouteTarget[]
   }
 
 /** Inputs for one claim. */
@@ -90,6 +94,10 @@ export interface DecisionInput {
   readonly catalog: RouteLookup
   /** Route the agent already holds. */
   readonly current: { readonly provider: string; readonly model: string; readonly reasoningEffort?: string } | undefined
+  /** Extra skip applied before health, for budget and exhausted quota. */
+  readonly blocked?: (provider: string, model: string) => 'budget' | 'quota' | undefined
+  /** Adjusts a health score, for example when remaining quota is low. */
+  readonly adjustScore?: (provider: string, score: number) => number
 }
 
 /** One candidate that survived matching and catalog checks. */
@@ -145,12 +153,15 @@ function collectCandidates(input: DecisionInput, logs: DecisionLog[]): Candidate
       })
       return
     }
-    const availability = input.health.availability(endpoint.provider)
+    const blocked = input.blocked?.(endpoint.provider, endpoint.model)
+    const availability = blocked === undefined
+      ? input.health.availability(endpoint.provider)
+      : { kind: 'skip' as const, cause: blocked }
     if (availability.kind === 'skip') {
       logs.push({
         level: 'info',
-        message: 'model-router: rule "%s" names %s, which is currently failing',
-        args: [ruleName, endpoint.provider],
+        message: 'model-router: rule "%s" names %s, which is currently %s',
+        args: [ruleName, endpoint.provider, availability.cause],
       })
       return
     }
@@ -182,18 +193,38 @@ function collectCandidates(input: DecisionInput, logs: DecisionLog[]): Candidate
  * @param health - route health.
  * @returns the chosen candidate, or undefined when none can serve.
  */
-function prefer(candidates: readonly Candidate[], health: ProviderHealth): Candidate | undefined {
+function prefer(
+  candidates: readonly Candidate[],
+  health: ProviderHealth,
+  adjustScore: ((provider: string, score: number) => number) | undefined,
+): Candidate | undefined {
   const open = candidates.filter(candidate => health.availability(candidate.target.provider).kind === 'open')
   const pool = open.length > 0
     ? open
     : candidates.filter(candidate => health.availability(candidate.target.provider).kind === 'probe')
   if (pool.length === 0) return undefined
   const ranked = [...pool].sort((left, right) => {
-    const delta = health.score(right.target.provider) - health.score(left.target.provider)
+    const delta = adjusted(right, health, adjustScore) - adjusted(left, health, adjustScore)
     if (delta !== 0) return delta
     return left.index - right.index
   })
   return ranked[0]
+}
+
+/**
+ * Health score after an optional remaining-quota adjustment.
+ * @param candidate - one open candidate.
+ * @param health - route health.
+ * @param adjustScore - optional adjustment.
+ * @returns the score used for ordering.
+ */
+function adjusted(
+  candidate: Candidate,
+  health: ProviderHealth,
+  adjustScore: ((provider: string, score: number) => number) | undefined,
+): number {
+  const score = health.score(candidate.target.provider)
+  return adjustScore === undefined ? score : adjustScore(candidate.target.provider, score)
 }
 
 /**
@@ -221,9 +252,12 @@ export function decide(input: DecisionInput): RoutingDecision {
   if (input.stickinessEnabled && input.sticky !== undefined) {
     const held = input.sticky
     const cached = input.catalog.has(held.provider, held.model)
-    const availability = cached
-      ? input.health.availability(held.provider)
-      : { kind: 'skip' as const, cause: 'cooldown' as const }
+    const blocked = input.blocked?.(held.provider, held.model)
+    const availability = blocked !== undefined
+      ? { kind: 'skip' as const, cause: blocked }
+      : cached
+        ? input.health.availability(held.provider)
+        : { kind: 'skip' as const, cause: 'cooldown' as const }
     const verdict = cached
       ? evaluateSticky(held, input.signals.tier, input.signals.hasImage, availability, input.upgradeSteps)
       : { action: 'break' as const, reason: 'route-unhealthy' as const, detail: `${held.provider}/${held.model}` }
@@ -234,17 +268,19 @@ export function decide(input: DecisionInput): RoutingDecision {
         ...(held.reasoningEffort === undefined ? {} : { reasoningEffort: held.reasoningEffort }),
       }
       if (availability.kind === 'probe') input.health.admit(held.provider)
-      if (sameSelection(input.current, target)) return { kind: 'unchanged', logs, sticky: held }
+      if (sameSelection(input.current, target)) return { kind: 'unchanged', logs, sticky: held, candidates: [target] }
       logs.push({
         level: 'info',
         message: 'model-router: keeping %s/%s for this session',
         args: [held.provider, held.model],
       })
-      return { kind: 'select', target, sticky: held, logs }
+      return { kind: 'select', target, sticky: held, logs, candidates: [target] }
     }
     pendingBreak = { reason: verdict.reason, detail: verdict.detail, provider: held.provider, model: held.model }
   }
-  const chosen = prefer(collectCandidates(input, logs), input.health)
+  const matched = collectCandidates(input, logs)
+  const chosen = prefer(matched, input.health, input.adjustScore)
+  const candidates = matched.map(candidate => candidate.target)
   if (pendingBreak !== undefined && (
     chosen === undefined
     || chosen.target.provider !== pendingBreak.provider
@@ -256,18 +292,20 @@ export function decide(input: DecisionInput): RoutingDecision {
       args: [pendingBreak.provider, pendingBreak.model, stickyBreakText(pendingBreak.reason, pendingBreak.detail)],
     })
   }
-  if (chosen === undefined) return { kind: 'unchanged', logs, sticky: input.stickinessEnabled ? undefined : input.sticky }
+  if (chosen === undefined) {
+    return { kind: 'unchanged', logs, sticky: input.stickinessEnabled ? undefined : input.sticky, candidates }
+  }
   if (input.health.availability(chosen.target.provider).kind === 'probe') input.health.admit(chosen.target.provider)
   const sticky = input.stickinessEnabled
     ? stickyFromTarget(chosen.target, input.signals.tier, chosen.acceptsImage, chosen.ruleName)
     : undefined
-  if (sameSelection(input.current, chosen.target)) return { kind: 'unchanged', logs, sticky }
+  if (sameSelection(input.current, chosen.target)) return { kind: 'unchanged', logs, sticky, candidates }
   logs.push({
     level: 'info',
     message: 'model-router: rule "%s" routes this task to %s/%s',
     args: [chosen.ruleName, chosen.target.provider, chosen.target.model],
   })
-  return { kind: 'select', target: chosen.target, sticky, logs }
+  return { kind: 'select', target: chosen.target, sticky, logs, candidates }
 }
 
 export type { StickyBreakReason }

@@ -85,6 +85,9 @@ function config(rules: readonly RuleConfig[]): Config {
     stickiness: { get: () => ({ enabled: false, upgradeSteps: 1 }) },
     health: { get: health },
     tierRoutes: { get: () => ({ simple: [], standard: [], hard: [] }) },
+    cost: { get: () => ({ enabled: false, remainingThreshold: 0.2 }) },
+    pricing: { get: () => [] },
+    fallback: { get: () => ({ enabled: false, maxHops: 1 }) },
   }
 }
 

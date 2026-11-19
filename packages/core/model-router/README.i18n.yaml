@@ -15,17 +15,26 @@
   en: b563e4ec4727d0de
   zh: 53bc178a9c9491e8
 /deepseek-ai-dsh-model-router/use-this-package:
-  en: 809a7220d21dc99e
-  zh: da83b220417fe0e0
+  en: d74de56066a4abb1
+  zh: 9605516c7d5a4829
 /deepseek-ai-dsh-model-router/use-this-package/difficulty-tiers:
   en: 0689f078f435af41
   zh: 23ff967fb5c570e0
 /deepseek-ai-dsh-model-router/use-this-package/session-stickiness:
-  en: 6fc17f4507a7482d
-  zh: 0cc9202e15859f9f
+  en: b99fc91c38ff49e5
+  zh: 25631da498a92f01
 /deepseek-ai-dsh-model-router/use-this-package/route-health:
-  en: 8d407f4dba59bbbf
-  zh: 32a55c8b9b72d1a2
+  en: c5e293e17ae2a50c
+  zh: 8b5f92e6970eadec
+/deepseek-ai-dsh-model-router/use-this-package/quota-and-cost:
+  en: 4255131278e2fe89
+  zh: 10e48ce379ecb06a
+/deepseek-ai-dsh-model-router/use-this-package/fallback-chain:
+  en: eb0fa0489cceda1f
+  zh: 89280af2422a415d
+/deepseek-ai-dsh-model-router/use-this-package/observability:
+  en: c4a3611084e68561
+  zh: 9d1147b1463dfdc7
 /deepseek-ai-dsh-model-router/use-this-package/routing-mode:
   en: 4195884760157174
   zh: f11b31b0b287e672
@@ -54,8 +63,8 @@
   en: 52910ad6fadecff4
   zh: b4b3ace97db7160c
 /deepseek-ai-dsh-model-router/known-limitations-and-deferred-work:
-  en: 604cf496b92b1cc3
-  zh: 0b786f52d96eca8c
+  en: c824da047556c491
+  zh: 38c1ef362c7a3823
 /deepseek-ai-dsh-model-router/known-limitations-and-deferred-work/dev-note:
   en: 2d18456d6b2814e8
   zh: 618fa3fa95c58b4c

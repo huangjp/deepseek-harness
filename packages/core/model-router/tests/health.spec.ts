@@ -55,15 +55,28 @@ describe('model-router route health', () => {
     expect(health.isSkipped('p1')).toBe(true)
   })
 
-  it('does not let a later cooldown shorten a quota hold', () => {
+  it('holds a route until an absolute instant without shortening that hold', () => {
     let now = 1_000
     const health = new ProviderHealth(policy(1, 500), () => now)
-    health.hold('p1', 10_000)
+    health.hold('p1', 20_000)
+    expect(health.isSkipped('p1')).toBe(true)
     expect(health.recordFailure('p1')).toBe(true)
     now = 2_000
     expect(health.isSkipped('p1')).toBe(true)
     expect(health.availability('p1')).toEqual({ kind: 'skip', cause: 'held' })
-    now = 10_000
+    now = 20_000
+    expect(health.isSkipped('p1')).toBe(false)
+  })
+
+  it('extends a hold and leaves an earlier hold in place', () => {
+    let now = 1_000
+    const health = new ProviderHealth(policy(1), () => now)
+    health.hold('p1', 10_000)
+    health.hold('p1', 20_000)
+    now = 15_000
+    expect(health.isSkipped('p1')).toBe(true)
+    health.hold('p1', 16_000)
+    now = 20_000
     expect(health.isSkipped('p1')).toBe(false)
   })
 

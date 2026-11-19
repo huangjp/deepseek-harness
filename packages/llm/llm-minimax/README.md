@@ -51,6 +51,8 @@ Each model declares `reasoningEfforts` as the exact wire spelling of every level
 
 The key is resolved per request through `ctx.credentials`, falling back to the launching environment only when no credentials service is mounted. Thinking blocks and tool calls replay through the adapter's durable metadata, so a tool turn that carried reasoning continues with its signature unchanged, which MiniMax requires.
 
+A plan-window HTTP 429 is classified as `QUOTA_WINDOW` before the shared pi-ai error map, so it does not take the short `RATE_LIMIT` retry. MiniMax's documented 429 example (`触发 RPM/TPM/连接数 等限流`) and codes 1002 and 2062 stay `RATE_LIMIT`. Codes 2056 and 2067, and the plan wording `用量上限` / `资源限制` / `套餐额度已用完`, are the window. The body does not carry `Retry-After` or a reset time, and pi-ai keeps only `error.message`, so the reset is read from `GET /v1/token_plan/remains` (then `/v1/coding_plan/remains`) on the API host and, when the host starts with `api.`, on the `www` host. `end_time` is the 5-hour window and `weekly_end_time` is the weekly window. Text models need both; when both are exhausted the weekly end is the one the task waits for. The listener returns that plan on `llm/quota-window`. `@deepseek-ai/dsh-llm-quota-wait` performs the wait.
+
 <a id="further-exploration"></a>
 ## Further Exploration
 
@@ -84,6 +86,7 @@ MiniMax caches request prefixes on its side and reports reuse as `cache_read_inp
 - `temperature`, `top_p`, `top_k`, `stop_sequences`, and `cache_control` are ignored by MiniMax on this endpoint; the profile sets `supportsTemperature: false` so no temperature is sent, and no other ignored field is emitted.
 - **The chat route cannot ask for the priority admission tier.** MiniMax offers `service_tier: priority` for `MiniMax-M3`, at 1.5× the price, but the Anthropic-compatible request body pi-ai builds carries no such field and offers no way to add one. The sibling packages that own their request body — the MiniMax search provider and the token-counting tool — do send it. A deployment that needs priority admission on chat would need a pi-ai change.
 - The catalog is declared, not probed: no model-listing call runs at boot, so a model MiniMax retires stays advertised until this package changes.
+- **The 429 body does not name the reset.** The usage clock above is the source of `end_time` and `weekly_end_time`. Windows start at first use, so a missing clock probes instead of guessing the next wall-clock 5-hour boundary. A 5-hour reset does not restore a weekly window that is also exhausted.
 
 ### Dev Note
 

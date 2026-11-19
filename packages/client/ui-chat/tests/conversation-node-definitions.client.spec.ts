@@ -887,6 +887,13 @@ describe('built-in conversation node Definitions', () => {
       turn: 2, step: 3, message: toolResult('evidence-call', 'done'),
     }, { surfaceOp: 'append' }))).toEqual({ id: '2:3', role: 'start' })
     expect(matchOf(at(4, 'llm/retry', { turn: 2, step: 4 }))).toEqual({ id: '2:4', role: 'start' })
+    expect(matchOf(at(8, 'llm/quota-wait', {
+      waitId: 'w', turn: 2, step: 6, provider: 'p', window: 'weekly', resumeAtMs: 1, delayMs: 1,
+      failure: { message: 'quota', code: 'QUOTA_WINDOW' },
+    }))).toEqual({ id: '2:6', role: 'start' })
+    expect(matchOf(at(9, 'model-router/notice', {
+      turn: 2, step: 7, reason: 'fallback', detail: 'fell back', provider: 'p2', model: 'm2',
+    }))).toEqual({ id: '2:7', role: 'start' })
 
     expect(matchOf(at(5, 'assistant/live-chunk', {
       turn: 2, step: 5, chunk: { type: 'text-delta', index: 0, text: 'streaming' },

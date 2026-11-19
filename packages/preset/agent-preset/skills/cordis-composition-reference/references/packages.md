@@ -319,6 +319,7 @@ Every package below exports a Cordis plugin that a bundle patch can name in a Lo
 | `@deepseek-ai/dsh-llm-local-bridge` | no | Built-in local-bridge LLM providers (WorkBuddy relay 127.0.0.1:8787, Copilot relay 127.0.0.1:8899, Huawei Celia relay 127.0.0.1:8123) registered as fixed, non-deletable routes on the LLM seam. |
 | `@deepseek-ai/dsh-llm-minimax` | yes | MiniMax as a first-party provider route: the Anthropic-compatible Messages endpoint with MiniMax's thinking depths, registered from code rather than as a user-declared custom model. |
 | `@deepseek-ai/dsh-llm-pi-ai` | yes | pi-ai-backed DeepSeek adapter for the DeepSeek Harness LLM seam (design-verification twin of dsh-llm-deepseek) |
+| `@deepseek-ai/dsh-llm-quota-wait` | yes | Holds an agent step until a replenishing provider quota window opens, then resumes the same task. |
 | `@deepseek-ai/dsh-llm-retry` | yes | Provider-routed LLM request retry policy for the DeepSeek Harness |
 | `@deepseek-ai/dsh-plugin-package-inventory-deepseek` | yes | Active Loader-backed plugin package inventory for official DeepSeek LLM API requests |
 | `@deepseek-ai/dsh-token-meter` | yes | Replay-aware token measurement service (ctx.tokenMeter) for the DeepSeek Harness |

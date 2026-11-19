@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Espera de cota",
+    "description": "Mantém a tarefa pausada até uma janela de cota renovável abrir e depois a retoma."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Quota window wait",
+    "description": "Holds the current task until a replenishing provider quota window opens, then resumes it."
+  }
+}

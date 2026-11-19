@@ -61,6 +61,31 @@ export interface ManualCompactionChatData {
   readonly compaction: CompactionSummaryNode | null
 }
 
+/** One auto-routing switch, fallback, hold, or budget note. */
+export interface RouteNoticeChatData {
+  readonly detail: string
+  readonly provider: string
+  readonly model: string
+  readonly reason: string
+  readonly seq: number
+  readonly time: number
+}
+
+/** One step paused until a replenishing quota window opens. */
+export interface QuotaWaitChatData {
+  readonly waitId: string
+  readonly turn: number
+  readonly step: number
+  readonly provider: string
+  readonly window: 'interval' | 'weekly' | 'unknown'
+  readonly resumeAtMs: number
+  readonly delayMs: number
+  readonly failure: { readonly message: string; readonly code: string }
+  readonly waitState: 'scheduled' | 'started' | 'cancelled'
+  readonly seq: number
+  readonly time: number
+}
+
 /** One durable retry chain rendered as a single row. */
 export interface RetryChatData {
   readonly attempts: readonly ModelRetryNode[]

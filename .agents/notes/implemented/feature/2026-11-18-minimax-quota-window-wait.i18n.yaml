@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-11-18-minimax-quota-window-wait.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-11-18-minimax-quota-window-wait.md
+/agent-note-minimax-quota-window-wait:
+  en: 5a97c3e2e640ab16
+  zh: 2a028f2aa731bfa9
+/agent-note-minimax-quota-window-wait/problem:
+  en: 4fdd017ab6a7dbbf
+  zh: 0b83343eba53ae1b
+/agent-note-minimax-quota-window-wait/decision:
+  en: 8d090a6e77c9055e
+  zh: d8f7514c5fdea557
+/agent-note-minimax-quota-window-wait/alternatives-considered:
+  en: d0835527f0db06f3
+  zh: b5d654b47816ab09
+/agent-note-minimax-quota-window-wait/consequences:
+  en: 8345fab05fc2c7ad
+  zh: 7c464aef9e14d304

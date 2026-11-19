@@ -2260,6 +2260,20 @@ export type PiAiThinkingTokenBudgetField = NonNullable<OpenAICompletionsCompat['
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-llm-pi-ai -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-llm-quota-wait -->
+<a id="deepseek-aidsh-llm-quota-wait"></a>
+
+## `@deepseek-ai/dsh-llm-quota-wait`
+
+- `inject`: `agents`
+- `source`: [`packages/llm/llm-quota-wait/src/index.ts:53`](../packages/llm/llm-quota-wait/src/index.ts)
+
+```ts config-catalog
+/** Accepted plugin configuration: no fields. */
+export type Config = Readonly<Record<string, unknown>>
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-llm-quota-wait -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-llm-replay -->
 <a id="deepseek-aidsh-llm-replay"></a>
 
@@ -2500,7 +2514,7 @@ export interface Config {
 
 - `inject`: `llm`
 - `refs`: `Volatile` (`@deepseek-ai/cordis`)
-- `source`: [`packages/core/model-router/src/index.ts:214`](../packages/core/model-router/src/index.ts)
+- `source`: [`packages/core/model-router/src/index.ts:289`](../packages/core/model-router/src/index.ts)
 
 ```ts config-catalog
 /** Deployment configuration for the routing table. */
@@ -2527,6 +2541,12 @@ export interface Config {
   health: Volatile<HealthConfig>
   /** Per-tier route lists used when no earlier candidate was selected from the rules alone. */
   tierRoutes: Volatile<TierRoutesConfig>
+  /** Prices and budgets. Off is a no-op. */
+  cost: Volatile<CostConfig>
+  /** Price rows. An empty list bills nothing. */
+  pricing: Volatile<readonly PriceConfig[]>
+  /** Same-step fallback. Off does not change the route of an in-flight step. */
+  fallback: Volatile<FallbackConfig>
 }
 
 /** One rule as the deployment declares it. */
@@ -2636,6 +2656,43 @@ export interface TierRoutesConfig {
   standard: readonly EndpointConfig[]
   /** Routes for a hard task, in tie-break order. */
   hard: readonly EndpointConfig[]
+}
+
+/** Quota and cost knobs. Off leaves prices and remaining quota unread. */
+export interface CostConfig {
+  /** Whether prices, budgets, and remaining-quota readings affect routing. */
+  enabled: boolean
+  /**
+   * Remaining fraction at which a route's health score starts to fall.
+   * 0 disables the penalty. A reading of 0 still skips the route.
+   */
+  remainingThreshold: number
+}
+
+/** Price and optional spend cap for one route. Absent prices do not bill. */
+export interface PriceConfig {
+  /** Provider route. */
+  provider: string
+  /** Model id on that route. */
+  model: string
+  /** Price for one million input tokens. */
+  inputPerMillion: number
+  /** Price for one million output tokens. */
+  outputPerMillion: number
+  /** Currency label. Absent means USD. */
+  currency?: string
+  /** Trailing-24-hour spend cap. Absent means no daily cap. */
+  dailyBudget?: number
+  /** Trailing-30-day spend cap. Absent means no monthly cap. */
+  monthlyBudget?: number
+}
+
+/** Same-step fallback after a failed attempt. Off leaves the loop's retry policy in charge. */
+export interface FallbackConfig {
+  /** Whether a failed attempt may move to the next candidate in the same step. */
+  enabled: boolean
+  /** How many candidate changes one step may make. */
+  maxHops: number
 }
 
 /** One difficulty tier. */

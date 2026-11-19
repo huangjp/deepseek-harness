@@ -24,6 +24,8 @@ export type StickyBreakReason =
   | 'route-held'
   | 'route-unavailable'
   | 'needs-vision'
+  | 'budget'
+  | 'quota'
 
 /** The route one session is holding, and the tier it was chosen for. */
 export interface StickyRecord {
@@ -45,7 +47,7 @@ export interface StickyRecord {
 export type StickyAvailability =
   | { readonly kind: 'open' }
   | { readonly kind: 'probe' }
-  | { readonly kind: 'skip'; readonly cause: 'held' | 'unavailable' | 'cooldown' }
+  | { readonly kind: 'skip'; readonly cause: 'held' | 'unavailable' | 'cooldown' | 'budget' | 'quota' }
 
 /** What stickiness decided for one claim. */
 export type StickyVerdict =
@@ -71,6 +73,10 @@ export function stickyBreakText(reason: StickyBreakReason, detail: string): stri
       return `the route is unusable until its configuration changes (${detail})`
     case 'needs-vision':
       return `the task carries an image and ${detail} does not accept images`
+    case 'budget':
+      return `the route is over its budget (${detail})`
+    case 'quota':
+      return `the route's remaining quota is exhausted (${detail})`
   }
 }
 
@@ -99,7 +105,11 @@ export function evaluateSticky(
       ? 'route-held'
       : availability.cause === 'unavailable'
         ? 'route-unavailable'
-        : 'route-unhealthy'
+        : availability.cause === 'budget'
+          ? 'budget'
+          : availability.cause === 'quota'
+            ? 'quota'
+            : 'route-unhealthy'
     return { action: 'break', reason, detail: `${sticky.provider}/${sticky.model}` }
   }
   if (needsImage && !sticky.acceptsImage) {

@@ -57,6 +57,7 @@ describe('dsh-sdk-minimal bundle', () => {
       ['mcp-resources', '@deepseek-ai/dsh-mcp-resources'],
       ['agent', '@deepseek-ai/dsh-agent'],
       ['llm-retry', '@deepseek-ai/dsh-llm-retry'],
+      ['llm-quota-wait', '@deepseek-ai/dsh-llm-quota-wait'],
       ['jobs', '@deepseek-ai/dsh-jobs-local'],
       ['agent-loop', '@deepseek-ai/dsh-agent-loop'],
       ['persistent-bash', '@deepseek-ai/dsh-tool-bash-persistent'],

@@ -24,9 +24,11 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { assertUsableApiKey, LlmError, resolveImageAttachmentAccess } from '@deepseek-ai/dsh-llm'
+import type { QuotaRemaining, QuotaWindowPlan } from '@deepseek-ai/dsh-llm'
 import { credentialRef, type CredentialRef } from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-fs'
+import { classifyMiniMaxProviderError, resolveMiniMaxQuotaRemaining, resolveMiniMaxQuotaWindow } from './quota.ts'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import {
   authContextFrom,
@@ -190,6 +192,7 @@ export function registerMiniMaxProvider(ctx: Context, options: MiniMaxRouteOptio
       hostPath => ctx.get('fs')?.processPathFromHostPath(hostPath),
       ref,
     ),
+    classifyProviderError: classifyMiniMaxProviderError,
     onReplayDegrade: ({ provider, model, reason }) => {
       const key = `${provider}/${model}\u0000${reason}`
       if (degraded.has(key)) return
@@ -201,4 +204,41 @@ export function registerMiniMaxProvider(ctx: Context, options: MiniMaxRouteOptio
     },
   })
   ctx.llm.registerAdapter([MINIMAX_PROVIDER], adapter)
+  ctx.on('llm/quota-window', async (request, next): Promise<QuotaWindowPlan | undefined> => {
+    if (request.provider !== MINIMAX_PROVIDER) return next()
+    if (request.signal.aborted) return { window: 'unknown' }
+    try {
+      const apiKey = await resolveApiKey(ctx, credentialRef(options.apiKeyEnv))
+      return await resolveMiniMaxQuotaWindow({
+        baseURL: options.baseURL,
+        apiKey,
+        signal: request.signal,
+      })
+    } catch (error: unknown) {
+      ctx.logger.warn(
+        'llm-minimax: could not read the quota clock: %s',
+        error instanceof Error ? error.message : 'unknown error',
+      )
+      return { window: 'unknown' }
+    }
+  })
+  ctx.on('llm/quota-remaining', async (request, next): Promise<QuotaRemaining | undefined> => {
+    if (request.provider !== MINIMAX_PROVIDER) return next()
+    if (request.signal.aborted) return undefined
+    try {
+      const apiKey = await resolveApiKey(ctx, credentialRef(options.apiKeyEnv))
+      const remainingRatio = await resolveMiniMaxQuotaRemaining({
+        baseURL: options.baseURL,
+        apiKey,
+        signal: request.signal,
+      })
+      return remainingRatio === undefined ? undefined : { remainingRatio }
+    } catch (error: unknown) {
+      ctx.logger.warn(
+        'llm-minimax: could not read remaining quota: %s',
+        error instanceof Error ? error.message : 'unknown error',
+      )
+      return undefined
+    }
+  })
 }

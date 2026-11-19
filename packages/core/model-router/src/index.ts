@@ -34,13 +34,51 @@ import { ModelCatalog } from './catalog.ts'
 import type { ClassifierOptions, DifficultyTier, TaskClassifier } from './classify.ts'
 import { isTaskClassifier, KeywordTaskClassifier, resolveClassifierOptions } from './classify.ts'
 import { decide } from './decide.ts'
+import type { RouteTarget } from './catalog.ts'
 import type { HealthPolicy, RouteFailureFacts } from './health.ts'
 import { ProviderHealth } from './health.ts'
 import type { ObservedEvent } from './observe.ts'
 import { observeTask } from './observe.ts'
 import type { RouteEndpoint, RouteRule } from './rules.ts'
 import { signalsOf } from './signals.ts'
+import { applyRemainingPenalty, RouteSpend } from './spend.ts'
+import { errorText, ModelRouterStats, noticeReason, type RouteNoticeReason } from './stats.ts'
 import type { StickyRecord } from './sticky.ts'
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /**
+     * Process-local routing totals.
+     * Present after the model-router plugin applies. A restart clears it.
+     */
+    modelRouter?: ModelRouterStats
+  }
+}
+
+export type { RouteNoticeReason } from './stats.ts'
+
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    /**
+     * Log-only note that auto routing left a route or fell back.
+     * It never enters model history.
+     */
+    'model-router/notice': {
+      /** Turn that produced the note. 0 when the claim did not carry one. */
+      turn: number
+      /** Step that produced the note. 0 when the claim did not carry one. */
+      step: number
+      /** Stable reason code. */
+      reason: RouteNoticeReason
+      /** Human-readable detail, in English. */
+      detail: string
+      /** Route the note is about. */
+      provider: string
+      /** Model id. */
+      model: string
+    }
+  }
+}
 
 export { ModelCatalog } from './catalog.ts'
 export type { RouteTarget } from './catalog.ts'
@@ -200,6 +238,43 @@ export interface HealthConfig {
   weights: HealthWeightConfig
 }
 
+/** Price and optional spend cap for one route. Absent prices do not bill. */
+export interface PriceConfig {
+  /** Provider route. */
+  provider: string
+  /** Model id on that route. */
+  model: string
+  /** Price for one million input tokens. */
+  inputPerMillion: number
+  /** Price for one million output tokens. */
+  outputPerMillion: number
+  /** Currency label. Absent means USD. */
+  currency?: string
+  /** Trailing-24-hour spend cap. Absent means no daily cap. */
+  dailyBudget?: number
+  /** Trailing-30-day spend cap. Absent means no monthly cap. */
+  monthlyBudget?: number
+}
+
+/** Quota and cost knobs. Off leaves prices and remaining quota unread. */
+export interface CostConfig {
+  /** Whether prices, budgets, and remaining-quota readings affect routing. */
+  enabled: boolean
+  /**
+   * Remaining fraction at which a route's health score starts to fall.
+   * 0 disables the penalty. A reading of 0 still skips the route.
+   */
+  remainingThreshold: number
+}
+
+/** Same-step fallback after a failed attempt. Off leaves the loop's retry policy in charge. */
+export interface FallbackConfig {
+  /** Whether a failed attempt may move to the next candidate in the same step. */
+  enabled: boolean
+  /** How many candidate changes one step may make. */
+  maxHops: number
+}
+
 /** Route lists consulted after the rule table, one per difficulty tier. */
 export interface TierRoutesConfig {
   /** Routes for a simple task, in tie-break order. */
@@ -234,6 +309,12 @@ export interface Config {
   health: Volatile<HealthConfig>
   /** Per-tier route lists used when no earlier candidate was selected from the rules alone. */
   tierRoutes: Volatile<TierRoutesConfig>
+  /** Prices and budgets. Off is a no-op. */
+  cost: Volatile<CostConfig>
+  /** Price rows. An empty list bills nothing. */
+  pricing: Volatile<readonly PriceConfig[]>
+  /** Same-step fallback. Off does not change the route of an in-flight step. */
+  fallback: Volatile<FallbackConfig>
 }
 
 const endpointSchema = z.object({
@@ -311,6 +392,23 @@ export const Config = z.object({
   stickiness: stickinessSchema.default({}).volatile(),
   health: healthSchema.default({}).volatile(),
   tierRoutes: tierRoutesSchema.default({}).volatile(),
+  cost: z.object({
+    enabled: z.boolean().default(false),
+    remainingThreshold: z.number().min(0).max(1).default(0.2),
+  }).default({}).volatile(),
+  pricing: z.array(z.object({
+    provider: z.string().required(),
+    model: z.string().required(),
+    inputPerMillion: z.number().min(0).required(),
+    outputPerMillion: z.number().min(0).required(),
+    currency: z.string(),
+    dailyBudget: z.number().min(0),
+    monthlyBudget: z.number().min(0),
+  })).default([]).volatile(),
+  fallback: z.object({
+    enabled: z.boolean().default(false),
+    maxHops: z.number().step(1).min(0).default(1),
+  }).default({}).volatile(),
 }) as unknown as z<Config>
 
 /**
@@ -457,6 +555,42 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
+ * Append a log-only notice when the session can store one.
+ * @param agent - the agent whose log receives the note.
+ * @param turn - turn number, or 0 when the claim did not carry one.
+ * @param step - step number.
+ * @param reason - stable code.
+ * @param detail - English detail.
+ * @param provider - route.
+ * @param model - model id.
+ */
+function writeNotice(
+  agent: { session?: { append?: (type: 'model-router/notice', data: {
+    turn: number
+    step: number
+    reason: RouteNoticeReason
+    detail: string
+    provider: string
+    model: string
+  }) => unknown } },
+  turn: number,
+  step: number,
+  reason: RouteNoticeReason,
+  detail: string,
+  provider: string,
+  model: string,
+): void {
+  const append = agent.session?.append
+  if (typeof append !== 'function') return
+  try {
+    append.call(agent.session, 'model-router/notice', { turn, step, reason, detail, provider, model })
+  } catch (error: unknown) {
+    // A session that is closing refuses the note. The info log still records the reason.
+    void error
+  }
+}
+
+/**
  * Install the routing table and the listener that applies it.
  *
  * The plugin's own startup waits for the routes its rules name: a decision
@@ -472,16 +606,19 @@ function delay(ms: number): Promise<void> {
  * attempt rather than only the ones the retry policy passes on.
  *
  * `QUOTA_WINDOW` does not move the breaker. A listener for `llm/quota-hold`
- * should call {@link ProviderHealth.hold} with the notice's `resumeAtMs`;
- * that is the hook a quota-window plugin uses, and this package does not
- * wait out the window itself.
+ * calls {@link ProviderHealth.hold} with the notice's `resumeAtMs`. Fixed mode
+ * leaves the in-flight step on that route. Auto mode skips it until the hold ends.
  * @param ctx - the plugin context.
  * @param config - the deployment configuration.
  */
 export async function apply(ctx: Context, config: Config): Promise<void> {
   const catalog = new ModelCatalog(ctx)
   const health = new ProviderHealth(() => healthPolicy(config))
+  const spend = new RouteSpend(() => config.pricing.get())
+  const stats = new ModelRouterStats()
+  ctx.modelRouter = stats
   const sticky = new WeakMap<object, StickyRecord>()
+  const chains = new WeakMap<object, { targets: readonly RouteTarget[]; hops: number }>()
   const attempts = new Map<string, { provider: string; startedAt: number; ttftMs?: number }>()
   let configEpoch = 0
   let refreshing = false
@@ -528,6 +665,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // ends the chain when it owns a recovery. Listening ahead of it therefore
   // sees every failed attempt, including the ones the retry policy answers.
   ctx.on('agent/request-error', (payload, next: () => Promise<RequestErrorAction>) => {
+    // QUOTA_WINDOW is classified as quota-window and does not open the breaker.
+    // The in-flight step waits on the same route. llm/quota-hold skips later auto claims.
     const facts = failureFacts(payload.failure)
     if (health.recordFailure(payload.provider, facts)) {
       ctx.logger.warn(
@@ -535,11 +674,42 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         payload.provider,
       )
     }
-    return next()
+    const agent = payload.agent
+    // A direct emit in a unit test can omit the agent the loop always injects.
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- payload.agent is absent on those emits
+    if (agent === undefined || facts?.code === 'QUOTA_WINDOW' || agent.model.routingMode() === 'fixed') return next()
+    const policy = config.fallback.get()
+    const chain = chains.get(agent)
+    if (!policy.enabled || chain === undefined || chain.hops >= policy.maxHops) return next()
+    const nextTarget = chain.targets.find(target => (
+      target.provider !== payload.provider
+      && !health.isSkipped(target.provider)
+      && !spend.budgetExceeded(target.provider, target.model)
+      && spend.remainingRatio(target.provider) !== 0
+    ))
+    if (nextTarget === undefined) return next()
+    chain.hops += 1
+    agent.model.select(nextTarget)
+    const detail = `fell back to ${nextTarget.provider}/${nextTarget.model} after ${payload.provider} failed`
+      + '; a partial attempt is not replayed onto the next route'
+    ctx.logger.info('model-router: %s', detail)
+    stats.noteFallback(nextTarget.provider, nextTarget.model)
+    writeNotice(agent, payload.turn, payload.step, 'fallback', detail, nextTarget.provider, nextTarget.model)
+    return Promise.resolve({ kind: 'retry', selection: nextTarget })
   }, { prepend: true })
+  ctx.on('llm/quota-hold', (notice) => {
+    health.hold(notice.provider, notice.resumeAtMs)
+  })
   ctx.on('session/event', (_session, event) => {
     if (event.type !== 'assistant/message') return
-    health.recordSuccess(event.data.message.source.provider)
+    const source = event.data.message.source
+    health.recordSuccess(source.provider)
+    const usage = event.data.usage
+    if (usage !== undefined && config.cost.get().enabled) {
+      const input = usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
+      const cost = spend.record(source.provider, source.model, input, usage.outputTokens)
+      stats.noteUsage(source.provider, source.model, input, usage.outputTokens, cost)
+    }
   })
   ctx.on('agent/assistant-stream', ({ agent, frame }) => {
     const provider = agent.model.current()?.provider
@@ -562,8 +732,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       latencyMs: Date.now() - pending.startedAt,
       ...(pending.ttftMs === undefined ? {} : { ttftMs: pending.ttftMs }),
     })
+    stats.noteTiming(pending.provider, Date.now() - pending.startedAt, pending.ttftMs)
   })
-  ctx.on('agent/inbox/claimed', ({ agent, message }) => {
+  ctx.on('agent/inbox/claimed', ({ agent, message, turn }) => {
     if (!config.enabled.get()) return
     // A Session that pinned a model asked for that model: routing around it
     // would answer with a route the user did not choose.
@@ -586,6 +757,25 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     }
     const stickiness = config.stickiness.get()
     const tierRoutes = config.tierRoutes.get()
+    const cost = config.cost.get()
+    if (cost.enabled) {
+      const provider = agent.model.current()?.provider
+      if (provider !== undefined && typeof ctx.waterfall === 'function') {
+        void ctx.waterfall(
+          'llm/quota-remaining',
+          { provider, signal: AbortSignal.timeout(8_000) },
+          () => Promise.resolve(undefined),
+        ).then((reading) => {
+          if (reading !== undefined) spend.noteRemaining(provider, reading.remainingRatio)
+        }).catch((error: unknown) => {
+          ctx.logger.debug(
+            'model-router: remaining quota for "%s" was not read: %s',
+            provider,
+            errorText(error),
+          )
+        })
+      }
+    }
     const decision = decide({
       rules: declaredRules(),
       signals: { ...base, ...(classification === undefined ? {} : { tier: classification.tier }) },
@@ -601,13 +791,51 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
       health,
       catalog,
       current: agent.model.current(),
+      ...(cost.enabled ? {
+        blocked: (provider: string, model: string) => {
+          if (spend.budgetExceeded(provider, model)) return 'budget' as const
+          if (spend.remainingRatio(provider) === 0) return 'quota' as const
+          return undefined
+        },
+        adjustScore: (provider: string, score: number) => (
+          applyRemainingPenalty(score, spend.remainingRatio(provider), cost.remainingThreshold)
+        ),
+      } : {}),
     })
     for (const line of decision.logs) {
       if (line.level === 'info') ctx.logger.info(line.message, ...line.args)
       else ctx.logger.debug(line.message, ...line.args)
     }
+    chains.set(agent, { targets: decision.candidates, hops: 0 })
+    const chosen = decision.kind === 'select' ? decision.target : undefined
+    const estimate = chosen === undefined ? undefined : spend.estimate(chosen.provider, chosen.model)
+    stats.noteDecision({
+      at: Date.now(),
+      logs: decision.logs,
+      kind: decision.kind,
+      ...(chosen === undefined ? {} : { target: chosen }),
+      candidates: decision.candidates,
+      classification,
+      score: provider => health.score(provider),
+      estimatedCost: estimate?.cost ?? 0,
+    })
     if (decision.sticky === undefined) sticky.delete(agent)
     else sticky.set(agent, decision.sticky)
+    const leaving = decision.logs.find(line => line.message.includes('leaving'))
+    if (leaving !== undefined && decision.kind === 'select') {
+      const text = String(leaving.args[2])
+      writeNotice(
+        agent,
+        // A claim fixture may omit the turn the loop always sends.
+        // oxlint-disable-next-line typescript/no-unnecessary-condition -- turn is absent on those emits
+        turn ?? 0,
+        0,
+        noticeReason(text),
+        text,
+        decision.target.provider,
+        decision.target.model,
+      )
+    }
     if (decision.kind !== 'select') return
     agent.model.select(decision.target)
   })

@@ -7,6 +7,7 @@ import { JsonBlock, StateDot, TextShimmer } from '@deepseek-ai/dsh-client-ui-pri
 import type {
   ChatNodeOwnerProps, ChatNodeViewProps, ChatViewSlotProps, UserContentAttachment, UserContentData, UserContentInput,
 } from '../contract/slots.ts'
+import type { QuotaWaitChatData } from '../contract/chat-nodes.ts'
 import type { ModelRetryNode, TurnErrorNode, UserMessageNode } from '../contract/snapshot.ts'
 import { CompactionItem } from './CompactionItem.tsx'
 import { ContextInjectionRow } from './ContextInjectionRow.tsx'
@@ -341,6 +342,65 @@ export const ContextMessageNodeView = memo(function ContextMessageNodeView({ nod
 /** Automatic compaction keyed Chat renderer. */
 export const CompactionNodeView = memo(function CompactionNodeView({ node, t }: ChatNodeViewProps<'compaction'>) {
   return <CompactionItem node={node.data} t={t} />
+})
+
+function quotaWindowLabel(
+  window: QuotaWaitChatData['window'],
+  t: ChatNodeViewProps['t'],
+): string {
+  switch (window) {
+    case 'interval': return t('message.quotaWait.window.interval')
+    case 'weekly': return t('message.quotaWait.window.weekly')
+    case 'unknown': return t('message.quotaWait.window.unknown')
+  }
+}
+
+function formatResumeAt(resumeAtMs: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(resumeAtMs)
+}
+
+/** Auto-routing switch, fallback, hold, or budget note. */
+export const RouteNoticeNodeView = memo(function RouteNoticeNodeView({ node, t }: ChatNodeViewProps<'route-notice'>) {
+  const data = node.data
+  return (
+    <div className={css.retryRow} role="status">
+      <span className={css.retryText}>{t('message.routeNotice', { detail: data.detail })}</span>
+    </div>
+  )
+})
+
+/** Paused step waiting for a replenishing quota window. */
+export const QuotaWaitNodeView = memo(function QuotaWaitNodeView({ node, t }: ChatNodeViewProps<'quota-wait'>) {
+  const data = node.data
+  const when = formatResumeAt(data.resumeAtMs)
+  const label = data.waitState === 'scheduled'
+    ? t('message.quotaWait.active', { when })
+    : data.waitState === 'cancelled'
+      ? t('message.quotaWait.cancelled')
+      : t('message.quotaWait.started')
+  return (
+    <details className={css.retryRow} open={data.waitState === 'scheduled' || undefined}>
+      <summary className={css.retrySummary}>
+        <span className={css.retryText} role="status" data-resume-at={data.resumeAtMs}>
+          <TextShimmer active={data.waitState === 'scheduled'}>
+            {label}
+          </TextShimmer>
+        </span>
+      </summary>
+      <div className={css.retryDetails}>
+        <div>
+          <span className={css.retryDetailLabel}>{t('message.quotaWait.windowLabel')}</span>
+          {quotaWindowLabel(data.window, t)}
+        </div>
+      </div>
+    </details>
+  )
 })
 
 /** Correlated retry-chain keyed Chat renderer. */
