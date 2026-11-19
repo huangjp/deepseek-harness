@@ -86,16 +86,14 @@ describe('4SAPI remote reads', () => {
       fetch: longBody.fetch,
     })).resolves.toEqual({ kind: 'failed' })
 
-    const broken: typeof fetch = () => Promise.resolve({
-      status: 200,
-      ok: true,
-      headers: { get: () => null },
-      text: () => Promise.reject(new Error('read failed')),
-    } as Response)
+    const broken = new Response(new ReadableStream({
+      start(controller) { controller.error(new Error('read failed')) },
+    }), { status: 200 })
+    const failing: typeof fetch = () => Promise.resolve(broken)
     await expect(fetchFoursapiModels({
       baseURL: 'https://4sapi.com/v1',
       apiKey: 'sk-test',
-      fetch: broken,
+      fetch: failing,
     })).resolves.toEqual({ kind: 'failed' })
 
     await expect(fetchFoursapiModels({

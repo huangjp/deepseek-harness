@@ -114,7 +114,7 @@ it('uses a manual model list and does not call the listing endpoint', async () =
     expect(models.map(model => model.id)).toEqual(['kept'])
     const info = await ctx.llm.resolveModelInfo(FOURSAPI_PROVIDER, 'kept')
     expect(info.inputModalities).toEqual(['text'])
-    expect(info.context.contextWindow).toBe(32_000)
+    expect(info.context?.contextWindow).toBe(32_000)
     expect(fetchImpl).not.toHaveBeenCalled()
   } finally {
     await ctx.fiber.dispose()
@@ -180,7 +180,7 @@ it('sends claude ids to Messages when that protocol is selected', () => {
   if (provider === undefined || claude === undefined || demo === undefined) {
     throw new Error('dispatch profile')
   }
-  const context = { messages: [] }
+  const context = { messages: [] } as never
   void provider.stream(claude, context, { apiKey: 'k' })
   void provider.stream(demo, context, { apiKey: 'k' })
   void provider.streamSimple(claude, context, { apiKey: 'k' })

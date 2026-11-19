@@ -1,5 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import { agentEvents } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
 import { apply, type Config, type RuleConfig } from '@deepseek-ai/dsh-model-router'
@@ -58,17 +60,17 @@ const rule: RuleConfig = {
 
 function claim(ctx: Context): string[] {
   const selected: string[] = []
-  ctx.emit('agent/inbox/claimed', {
-    agent: {
-      model: {
-        current: () => ({ provider: 'deepseek-official', model: 'deepseek-flash' }),
-        select: (target: { provider: string; model: string }) => {
-          selected.push(`${target.provider}/${target.model}`)
-        },
-        routingMode: () => 'auto' as const,
+  const agent = {
+    model: {
+      current: () => ({ provider: 'deepseek-official', model: 'deepseek-flash' }),
+      select: (target: { provider: string; model: string }) => {
+        selected.push(`${target.provider}/${target.model}`)
       },
-      session: { snapshotEvents: () => [], append: () => undefined },
+      routingMode: () => 'auto' as const,
     },
+    session: { snapshotEvents: () => [], append: () => undefined },
+  } as Agent
+  agentEvents(ctx, agent).emit('agent/inbox/claimed', {
     message: createUserMessage({
       content: [{ type: 'text', text: 'please relay this' }],
       source: { kind: 'user' },

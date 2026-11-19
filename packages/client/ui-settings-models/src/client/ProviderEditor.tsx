@@ -332,7 +332,7 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
       }
     }
     /* v8 ignore next -- apply is only reachable from the rendered card, which required a resolved node */
-    if (!credentialOnly && layout !== 'relay' && node !== undefined && settingsPath.length === 0) {
+    if (!credentialOnly && node !== undefined && settingsPath.length === 0) {
       const sectionError = schema.validate(node, next)
       if (sectionError !== undefined) return sectionError
     }
