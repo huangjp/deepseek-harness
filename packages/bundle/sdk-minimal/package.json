@@ -44,6 +44,7 @@
     "@deepseek-ai/dsh-jobs-local": "workspace:*",
     "@deepseek-ai/dsh-llm": "workspace:*",
     "@deepseek-ai/dsh-llm-deepseek-api-key": "workspace:*",
+    "@deepseek-ai/dsh-llm-quota-wait": "workspace:*",
     "@deepseek-ai/dsh-llm-retry": "workspace:*",
     "@deepseek-ai/dsh-mcp-resources": "workspace:*",
     "@deepseek-ai/dsh-plugin-package-inventory-deepseek": "workspace:*",

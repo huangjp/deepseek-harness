@@ -52,6 +52,9 @@
       "path": "../../llm/llm-retry"
     },
     {
+      "path": "../../llm/llm-quota-wait"
+    },
+    {
       "path": "../../llm/token-meter"
     },
     {

@@ -51,6 +51,8 @@ kind: "package-reference"
 
 key 逐请求通过 `ctx.credentials` 解析；只有在没有挂载凭据服务时才退回启动环境。思考块与工具调用按适配器的持久元数据回放，因此带推理的工具轮次会原样带回签名——这是 MiniMax 的要求。
 
+套餐窗口的 HTTP 429 会在共享的 pi-ai 错误映射之前被分类为 `QUOTA_WINDOW`，因此不会走短时的 `RATE_LIMIT` 重试。MiniMax 文档里的 429 示例（`触发 RPM/TPM/连接数 等限流`）以及错误码 1002 和 2062 仍是 `RATE_LIMIT`。错误码 2056 和 2067，以及套餐用语 `用量上限`、`资源限制`、`套餐额度已用完`，属于窗口。响应体不带 `Retry-After`，也没有恢复时刻，而 pi-ai 只保留 `error.message`，所以恢复时刻从 API 主机上的 `GET /v1/token_plan/remains`（然后是 `/v1/coding_plan/remains`）读取；主机名以 `api.` 开头时，再试 `www` 主机。`end_time` 是 5 小时窗口，`weekly_end_time` 是周窗口。文本模型两个窗口都要有余量；两个都用尽时，任务等待的是周窗口的结束时刻。监听器在 `llm/quota-window` 上返回这份计划。等待由 `@deepseek-ai/dsh-llm-quota-wait` 执行。
+
 <a id="further-exploration"></a>
 ## 进一步探索
 
@@ -84,6 +86,7 @@ MiniMax 在自己的服务端缓存请求前缀，并以 `cache_read_input_token
 - `temperature`、`top_p`、`top_k`、`stop_sequences` 与 `cache_control` 在该接口上会被 MiniMax 忽略；profile 设置 `supportsTemperature: false` 因此不发送 temperature，其余被忽略的字段也不发送。
 - **聊天路由无法申请优先调度档位。** MiniMax 为 `MiniMax-M3` 提供 `service_tier: priority`，价格是标准档的 1.5 倍，但 pi-ai 构造的 Anthropic 兼容请求体里没有这个字段，也没有添加它的扩展点。自行构造请求体的同族包——MiniMax 搜索提供方与 token 计数工具——会发送它。需要聊天走优先调度的话，得改 pi-ai。
 - 目录是声明的，不是探测来的：启动时不调用模型列表接口，所以 MiniMax 下线的模型在本包变更前仍会被列出。
+- **429 响应体不给出恢复时刻。** 上面的用量时钟才是 `end_time` 和 `weekly_end_time` 的来源。窗口从第一次使用起算，所以时钟读不到时改为探测，而不是去猜下一个墙上时钟的 5 小时边界。5 小时窗口的恢复不会补回已经用尽的周窗口。
 
 ### 开发备注
 

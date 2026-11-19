@@ -113,6 +113,13 @@ export interface PiAiAdapterOptions {
    * conversion because its stored replay state is unusable by this build.
    */
   onReplayDegrade?: (detail: { provider: string; model: string; reason: string }) => void
+  /**
+   * Classify one provider error message before the shared pi-ai wording map.
+   * A non-empty code replaces that map for this adapter's routes; undefined
+   * keeps the shared map. MiniMax uses it to separate a replenishing quota
+   * window from a short HTTP 429.
+   */
+  classifyProviderError?: (message: string) => string | undefined
 }
 
 /** The two auth injectables a pi-ai collection is built with. */
@@ -423,7 +430,13 @@ export class PiAiAdapter extends LlmAdapter {
         // Harness-owned and therefore win collisions.
         headers: requestHeaders(profile.headers),
       })
-      const iterator = toStreamChunks(events, model.contextWindow, options.signal, model.id)[Symbol.asyncIterator]()
+      const iterator = toStreamChunks(
+        events,
+        model.contextWindow,
+        options.signal,
+        model.id,
+        this.config.classifyProviderError,
+      )[Symbol.asyncIterator]()
       let exhausted = false
       try {
         while (true) {

@@ -27,6 +27,15 @@ export const CONTEXT_WINDOW_EXCEEDED_CODE = 'CONTEXT_WINDOW_EXCEEDED'
 /** Canonical provider-neutral code for an exhausted account quota or balance. */
 export const QUOTA_EXCEEDED_CODE = 'QUOTA'
 
+/**
+ * Canonical provider-neutral code for a replenishing quota window.
+ *
+ * Distinct from {@link QUOTA_EXCEEDED_CODE}: the route can serve again when
+ * the provider's window opens, and an opted-in wait may hold the same step
+ * until then. A short request-rate limit stays `RATE_LIMIT`.
+ */
+export const QUOTA_WINDOW_CODE = 'QUOTA_WINDOW'
+
 /** Account-token quota that can be replenished through the first-party billing page. */
 export const ACCOUNT_QUOTA_EXCEEDED_CODE = 'ACCOUNT_QUOTA'
 

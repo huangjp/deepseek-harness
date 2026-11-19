@@ -2459,6 +2459,9 @@ importers:
       '@deepseek-ai/dsh-llm-pi-ai':
         specifier: workspace:*
         version: link:../../llm/llm-pi-ai
+      '@deepseek-ai/dsh-llm-quota-wait':
+        specifier: workspace:*
+        version: link:../../llm/llm-quota-wait
       '@deepseek-ai/dsh-llm-retry':
         specifier: workspace:*
         version: link:../../llm/llm-retry
@@ -2825,6 +2828,9 @@ importers:
       '@deepseek-ai/dsh-llm-deepseek-api-key':
         specifier: workspace:*
         version: link:../../llm/llm-deepseek-api-key
+      '@deepseek-ai/dsh-llm-quota-wait':
+        specifier: workspace:*
+        version: link:../../llm/llm-quota-wait
       '@deepseek-ai/dsh-llm-retry':
         specifier: workspace:*
         version: link:../../llm/llm-retry
@@ -3920,6 +3926,9 @@ importers:
       '@deepseek-ai/dsh-llm':
         specifier: workspace:*
         version: link:../../llm/llm
+      '@deepseek-ai/dsh-llm-quota-wait':
+        specifier: workspace:*
+        version: link:../../llm/llm-quota-wait
       '@deepseek-ai/dsh-llm-retry':
         specifier: workspace:*
         version: link:../../llm/llm-retry
@@ -12688,6 +12697,58 @@ importers:
       '@deepseek-ai/dsh-timeout':
         specifier: workspace:*
         version: link:../../util/timeout
+      '@deepseek-ai/dsh-tool-testkit':
+        specifier: workspace:*
+        version: link:../../test-support/tool-testkit
+      '@deepseek-ai/dsh-tools':
+        specifier: workspace:*
+        version: link:../../core/tools
+
+  packages/llm/llm-quota-wait:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-agent':
+        specifier: workspace:*
+        version: link:../../core/agent
+      '@deepseek-ai/dsh-agent-loop':
+        specifier: workspace:*
+        version: link:../../core/agent-loop
+      '@deepseek-ai/dsh-brand':
+        specifier: workspace:*
+        version: link:../../util/brand
+      '@deepseek-ai/dsh-llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@deepseek-ai/dsh-llm-minimax':
+        specifier: workspace:*
+        version: link:../llm-minimax
+      '@deepseek-ai/dsh-llm-retry':
+        specifier: workspace:*
+        version: link:../llm-retry
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:*
+        version: link:../../core/session
+      '@deepseek-ai/dsh-session-persistence-jsonl':
+        specifier: workspace:*
+        version: link:../../session/session-persistence-jsonl
+      '@deepseek-ai/dsh-session-projection':
+        specifier: workspace:*
+        version: link:../../session/session-projection
+      '@deepseek-ai/dsh-system-prompt':
+        specifier: workspace:*
+        version: link:../../core/system-prompt
+      '@deepseek-ai/dsh-timeout':
+        specifier: workspace:*
+        version: link:../../util/timeout
+      '@deepseek-ai/dsh-tool-executor-native':
+        specifier: workspace:*
+        version: link:../../core/tool-executor-native
       '@deepseek-ai/dsh-tool-testkit':
         specifier: workspace:*
         version: link:../../test-support/tool-testkit

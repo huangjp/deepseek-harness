@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Kontingentfenster",
+    "description": "Hält die aktuelle Aufgabe an, bis ein auffüllbares Kontingentfenster öffnet, und setzt sie dann fort."
+  }
+}

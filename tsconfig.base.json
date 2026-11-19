@@ -460,6 +460,7 @@
       "@deepseek-ai/dsh-llm-minimax": ["./packages/llm/llm-minimax/src"],
       "@deepseek-ai/dsh-llm-mock-server": ["./packages/test-support/llm-mock-server/src"],
       "@deepseek-ai/dsh-llm-pi-ai": ["./packages/llm/llm-pi-ai/src"],
+      "@deepseek-ai/dsh-llm-quota-wait": ["./packages/llm/llm-quota-wait/src"],
       "@deepseek-ai/dsh-llm-replay": ["./packages/test-support/llm-replay/src"],
       "@deepseek-ai/dsh-llm-retry": ["./packages/llm/llm-retry/src"],
       "@deepseek-ai/dsh-loader-smoke": ["./packages/test-support/loader-smoke/src"],

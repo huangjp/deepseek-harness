@@ -34,6 +34,7 @@ import type { ProviderRequestId } from './brand.ts'
 import { callConfigEquals } from './call-config.ts'
 import type { ConfigureCall, LlmCallConfig, LlmCallConfigAdapterDefaults } from './call-config.ts'
 import { HarnessError, INVALID_CREDENTIAL_CODE } from './error.ts'
+import type { QuotaHoldNotice, QuotaWindowPlan, QuotaWindowRequest } from './quota-window.ts'
 import { normalizeLlmFailure } from './adapter-failure.ts'
 import { normalizeApiKey } from './api-key.ts'
 import {
@@ -44,6 +45,7 @@ import type { FileAttachmentRef, ImageAttachmentRef, ImageRequestTarget } from '
 export * from './attribution.ts'
 export * from './brand.ts'
 export * from './error.ts'
+export type { QuotaHoldNotice, QuotaWindowKind, QuotaWindowPlan, QuotaWindowRequest } from './quota-window.ts'
 export * from './api-key.ts'
 export * from './types.ts'
 export * from './content.ts'
@@ -74,6 +76,24 @@ declare module '@deepseek-ai/cordis' {
      */
     'llm/stream'(this: LlmRuntime, options: GenerateOptions, next: () => AsyncIterable<StreamChunk>): AsyncIterable<StreamChunk>
 
+    /**
+     * Ask a provider to name when a `QUOTA_WINDOW` failure can be
+     * retried. A listener that does not own `request.provider` calls `next()`.
+     * Returning a plan without `next()` owns the clock. The default is no plan,
+     * and the wait then probes.
+     * @param request - the failed route, its failure facts, and the turn abort signal.
+     * @returns the provider's window plan, or undefined when no listener owns the route.
+     * @mode waterfall
+     */
+    'llm/quota-window'(request: QuotaWindowRequest, next: () => Promise<QuotaWindowPlan | undefined>): Promise<QuotaWindowPlan | undefined>
+
+    /**
+     * A replenishing quota window is holding one route until `resumeAtMs`.
+     * Auto-routing skips that route until then. The in-flight step is unaffected.
+     * @param notice - the route and the instant it should be tried again.
+     * @mode emit
+     */
+    'llm/quota-hold'(notice: QuotaHoldNotice): void
   }
 }
 

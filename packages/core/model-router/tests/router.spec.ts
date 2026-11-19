@@ -279,8 +279,11 @@ describe('model-router route health', () => {
   }
 
   /** Report one failed request against a provider route. */
-  function fail(emit: (event: string, ...args: unknown[]) => void, provider: string): void {
-    emit('agent/request-error', { provider }, () => Promise.resolve(undefined))
+  function fail(emit: (event: string, ...args: unknown[]) => void, provider: string, code = 'TRANSPORT'): void {
+    emit('agent/request-error', {
+      provider,
+      failure: { message: 'failed', code },
+    }, () => Promise.resolve(undefined))
   }
 
   /** Report one answered request from a provider route. */
@@ -349,6 +352,25 @@ describe('model-router route health', () => {
     const { agent, select } = fakeAgent()
     emit('agent/inbox/claimed', { agent, message: claimed('写一部小说') })
     expect(select).toHaveBeenCalledWith({ provider: 'p1', model: 'm1', reasoningEffort: 'max' })
+  })
+
+  it('does not count a replenishing quota window toward the breaker', async () => {
+    const { ctx, emit } = fakeContext()
+    await apply(ctx, fakeConfig([LONG_FORM, FALLBACK]))
+    fail(emit, 'p1', 'QUOTA_WINDOW')
+    fail(emit, 'p1', 'QUOTA_WINDOW')
+    const { agent, select } = fakeAgent()
+    emit('agent/inbox/claimed', { agent, message: claimed('写一部小说') })
+    expect(select).toHaveBeenCalledWith({ provider: 'p1', model: 'm1', reasoningEffort: 'max' })
+  })
+
+  it('skips a route until the quota hold ends', async () => {
+    const { ctx, emit } = fakeContext()
+    await apply(ctx, fakeConfig([LONG_FORM, FALLBACK]))
+    emit('llm/quota-hold', { provider: 'p1', resumeAtMs: Date.now() + 60_000 })
+    const held = fakeAgent()
+    emit('agent/inbox/claimed', { agent: held.agent, message: claimed('写一部小说') })
+    expect(held.select).toHaveBeenCalledWith({ provider: 'p2', model: 'm2' })
   })
 
   it('listens ahead of the retry policy so it sees every failed attempt', async () => {

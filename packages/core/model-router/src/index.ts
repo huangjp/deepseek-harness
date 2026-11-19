@@ -25,6 +25,7 @@ import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type { Context, Volatile } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { RequestErrorAction } from '@deepseek-ai/dsh-agent'
+import { QUOTA_WINDOW_CODE } from '@deepseek-ai/dsh-llm'
 import { ModelCatalog } from './catalog.ts'
 import { ProviderHealth } from './health.ts'
 import { matchesRule, type RouteRule } from './rules.ts'
@@ -176,7 +177,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // ends the chain when it owns a recovery. Listening ahead of it therefore
   // sees every failed attempt, including the ones the retry policy answers.
   ctx.on('agent/request-error', (payload, next: () => Promise<RequestErrorAction>) => {
-    if (health.recordFailure(payload.provider)) {
+    // A replenishing quota window is not a broken route. Counting it would
+    // open the short cooldown while the in-flight step is waiting out the
+    // real window. The hold below skips later auto-routed claims instead.
+    if (payload.failure.code !== QUOTA_WINDOW_CODE && health.recordFailure(payload.provider)) {
       ctx.logger.warn(
         'model-router: provider "%s" keeps failing; routing around it',
         payload.provider,
@@ -184,6 +188,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     }
     return next()
   }, { prepend: true })
+  ctx.on('llm/quota-hold', (notice) => {
+    health.hold(notice.provider, notice.resumeAtMs)
+  })
   ctx.on('session/event', (_session, event) => {
     if (event.type !== 'assistant/message') return
     health.recordSuccess(event.data.message.source.provider)

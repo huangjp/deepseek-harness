@@ -55,6 +55,36 @@ describe('model-router route health', () => {
     expect(health.isSkipped('p1')).toBe(true)
   })
 
+  it('holds a route until an absolute instant without shortening that hold', () => {
+    let now = 1_000
+    const health = new ProviderHealth(policy(1, 500), () => now)
+    health.hold('p1', 20_000)
+    expect(health.isSkipped('p1')).toBe(true)
+    expect(health.recordFailure('p1')).toBe(true)
+    now = 2_000
+    expect(health.isSkipped('p1')).toBe(true)
+    now = 20_000
+    expect(health.isSkipped('p1')).toBe(false)
+  })
+
+  it('extends a hold and leaves an earlier hold in place', () => {
+    let now = 1_000
+    const health = new ProviderHealth(policy(1), () => now)
+    health.hold('p1', 10_000)
+    health.hold('p1', 20_000)
+    now = 15_000
+    expect(health.isSkipped('p1')).toBe(true)
+    health.hold('p1', 16_000)
+    now = 20_000
+    expect(health.isSkipped('p1')).toBe(false)
+  })
+
+  it('ignores a non-finite hold', () => {
+    const health = new ProviderHealth(policy(1))
+    health.hold('p1', Number.NaN)
+    expect(health.isSkipped('p1')).toBe(false)
+  })
+
   it('reads the policy again so a live configuration change takes effect', () => {
     let threshold = 2
     const health = new ProviderHealth(() => ({ failureThreshold: threshold, cooldownMs: 60_000 }))

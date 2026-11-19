@@ -62,8 +62,24 @@ export class ProviderHealth {
     const count = Math.min((this.failures.get(provider) ?? 0) + 1, failureThreshold)
     this.failures.set(provider, count)
     if (count < failureThreshold) return false
-    this.skippedUntil.set(provider, this.now() + cooldownMs)
+    const until = this.now() + cooldownMs
+    const held = this.skippedUntil.get(provider)
+    this.skippedUntil.set(provider, held === undefined ? until : Math.max(held, until))
     return true
+  }
+
+  /**
+   * Skip a provider route until an absolute instant.
+   *
+   * A replenishing quota window uses this instead of the failure cooldown.
+   * A later failure cooldown does not shorten a hold that ends later.
+   * @param provider - the provider route to skip.
+   * @param untilMs - epoch milliseconds when the route becomes eligible again.
+   */
+  hold(provider: string, untilMs: number): void {
+    if (!Number.isFinite(untilMs)) return
+    const current = this.skippedUntil.get(provider)
+    if (current === undefined || untilMs > current) this.skippedUntil.set(provider, untilMs)
   }
 
   /**

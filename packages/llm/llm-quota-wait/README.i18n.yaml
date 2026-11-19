@@ -1,0 +1,46 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/llm/llm-quota-wait/README.md
+/:
+  en: 295eb9e3e9bbabd8
+  zh: 67db562953f5c385
+/deepseek-ai-dsh-llm-quota-wait:
+  en: 2899502b98c37b3d
+  zh: 05b2be8b5e2cc6ca
+/deepseek-ai-dsh-llm-quota-wait/summary:
+  en: eb27297ce36838ed
+  zh: f2733fc9e1164cd8
+/deepseek-ai-dsh-llm-quota-wait/table-of-contents:
+  en: b563e4ec4727d0de
+  zh: af6306104c97c56f
+/deepseek-ai-dsh-llm-quota-wait/use-this-package:
+  en: d1d8037da4f9c7a1
+  zh: 708ac6795ffe6b27
+/deepseek-ai-dsh-llm-quota-wait/understand-the-implementation:
+  en: f15e3e7dc01f95b5
+  zh: c36c89d4896e6c2d
+/deepseek-ai-dsh-llm-quota-wait/further-exploration:
+  en: d568f58e49dd8494
+  zh: bbf58dbd41538c3c
+/deepseek-ai-dsh-llm-quota-wait/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-llm-quota-wait/model-experience/quota-window-resume:
+  en: f870900f812e3bd8
+  zh: d7490582834c1c27
+/deepseek-ai-dsh-llm-quota-wait/model-experience/quota-window-resume/what-the-model-sees:
+  en: 8e6d2c3f16e566ef
+  zh: 72f1e5be8028c1b2
+/deepseek-ai-dsh-llm-quota-wait/model-experience/quota-window-resume/token-effect:
+  en: bd27373f813a3476
+  zh: 54b3011c80a6b692
+/deepseek-ai-dsh-llm-quota-wait/model-experience/quota-window-resume/kv-cache-effect:
+  en: 5b4fc596a1eb8317
+  zh: b3c80e770920d8aa
+/deepseek-ai-dsh-llm-quota-wait/known-limitations-and-deferred-work:
+  en: 3f701af2128b66df
+  zh: 024cfc5444142671
+/deepseek-ai-dsh-llm-quota-wait/known-limitations-and-deferred-work/dev-note:
+  en: 94603b7ff42b105a
+  zh: ac0eacaa811a6a99

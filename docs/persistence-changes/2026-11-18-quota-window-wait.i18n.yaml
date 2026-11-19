@@ -1,0 +1,28 @@
+# Bilingual-pair consistency record for 2026-11-18-quota-window-wait.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/persistence-changes/2026-11-18-quota-window-wait.md
+/:
+  en: 3d5a424ae7d7e46b
+  zh: c22a8e4a62d8cc1a
+/2026-11-18-quota-window-wait:
+  en: 32a0bc70d6b74c16
+  zh: 6fcff97e50b1bbcc
+/2026-11-18-quota-window-wait/summary:
+  en: c246c10139250925
+  zh: 4b673414156e9c86
+/2026-11-18-quota-window-wait/table-of-contents:
+  en: 6cf314a069ceb451
+  zh: 9adff678e9ecab3b
+/2026-11-18-quota-window-wait/declaration:
+  en: 6907136f28e48c90
+  zh: 02f8298485f3d8e7
+/2026-11-18-quota-window-wait/compatibility:
+  en: 0d3005a27e5f78d8
+  zh: 7caa5ff9429f53b8
+/2026-11-18-quota-window-wait/verification:
+  en: 80a130d64e11f3a4
+  zh: 36360a31183e77a0
+/2026-11-18-quota-window-wait/dev-note:
+  en: b75c8458928b72b9
+  zh: 003ba4e17b4b5269
