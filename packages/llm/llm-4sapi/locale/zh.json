@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "4SAPI",
+    "description": "把 4SAPI 中转作为一等 provider 路由接入：OpenAI 兼容的 Chat Completions、可配置的接入域名，一把 API key 通吃所有模型。"
+  }
+}

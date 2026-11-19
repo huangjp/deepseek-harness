@@ -65,6 +65,7 @@
     "@deepseek-ai/dsh-llm-deepseek-account": "workspace:*",
     "@deepseek-ai/dsh-llm-minimax": "workspace:*",
     "@deepseek-ai/dsh-llm-xai": "workspace:*",
+    "@deepseek-ai/dsh-llm-4sapi": "workspace:*",
     "@deepseek-ai/dsh-llm-pi-ai": "workspace:*",
     "@deepseek-ai/dsh-llm-quota-wait": "workspace:*",
     "@deepseek-ai/dsh-llm-retry": "workspace:*",
