@@ -30,14 +30,9 @@ import type {} from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-fs'
 import { classifyMiniMaxProviderError, resolveMiniMaxQuotaRemaining, resolveMiniMaxQuotaWindow } from './quota.ts'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
-import {
-  authContextFrom,
-  credentialStoreFrom,
-  PiAiAdapter,
-  resolveProfiles,
-  type PiAiModelProfile,
-  type PiAiProviderProfile,
-} from '@deepseek-ai/dsh-llm-pi-ai'
+import { PiAiAdapter, type PiAiModelProfile, type PiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
+import { authContextFrom, credentialStoreFrom } from '@deepseek-ai/dsh-llm-pi-ai/src/auth.ts'
+import { resolveProfiles } from '@deepseek-ai/dsh-llm-pi-ai/src/config.ts'
 
 /**
  * Provider route this plugin owns; a saved selection names exactly this id.

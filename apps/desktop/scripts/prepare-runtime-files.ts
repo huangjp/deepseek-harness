@@ -57,6 +57,7 @@ export function clearTreeBestEffort(dir: string): number {
 export async function extractElectron(archive: string, destination: string): Promise<void> {
   const staging = `${destination}-staging`
   rmSync(staging, { recursive: true, force: true })
+  mkdirSync(staging, { recursive: true })
   try {
     await extractZip(archive, { dir: staging })
     const stagedDefaultApp = join(staging, 'resources', 'default_app.asar')

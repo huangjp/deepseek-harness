@@ -217,8 +217,10 @@
   transform: rotate(45deg) translate(-1px, -1px);
 }
 
-.logSummary:hover {
-  color: var(--dsw-alias-label-primary);
+@media (hover: hover) {
+  .logSummary:hover {
+    color: var(--dsw-alias-label-primary);
+  }
 }
 
 .logBody {

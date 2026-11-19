@@ -80,7 +80,7 @@ import type { PiAiRequestHeaderContext } from './types.ts'
 export { PiAiAdapter } from './adapter.ts'
 export type { PiAiAdapterOptions } from './adapter.ts'
 export type { PiAiRequestHeaderContext } from './types.ts'
-export { Config, resolveProfiles } from './config.ts'
+export { Config } from './config.ts'
 export type {
   Options,
   PiAiCompatProfile,
@@ -92,7 +92,6 @@ export type {
   PiAiThinkingFormat,
   ResolvedPiAiProviderProfile,
 } from './config.ts'
-export { authContextFrom, credentialStoreFrom, recordKeyFor } from './auth.ts'
 export { supportedProtocols } from './provider.ts'
 
 export const name = 'llm-pi-ai'

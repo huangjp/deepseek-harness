@@ -82,7 +82,7 @@ export function createElectronBuilderConfig(
     // 这些进程不认识 ASAR，打进包内就只能拿到一个打不开的伪路径，
     // 于是自动刷新看起来启动成功（spawn 返回值）却永远产不出 token.json。
     // 整棵 bridge/ 都解包，好让 bridgeDir 与 refreshScript 指向同一份真实文件。
-    '**/node_modules/@deepseek-ai/dsh-host-local-bridge/bridge/**/*',
+    '**/node_modules/@deepseek-ai/dsh-host-local-bridge/bridge/**',
     // LaunchServices opens the Computer Use helper as an application, so every file of its bundles stays on disk.
     // Both architectures ship: they form one notarized payload whose manifest staging verifies as a whole.
     '**/node_modules/@deepseek-ai/dsh-cua-macos/native/bin/**/*']

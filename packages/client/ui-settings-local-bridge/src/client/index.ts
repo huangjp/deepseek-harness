@@ -17,7 +17,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { LocalBridgeController } from './controller.ts'
 import { LocalBridgeSection, type LocalBridgeSectionInjected } from './LocalBridgeSection.tsx'
-import { en, zh, type LocalBridgeLocaleKey } from './locales.ts'
+import { de, en, es, fr, ja, pt, ru, zh, type LocalBridgeLocaleKey } from './locales.ts'
 
 export type { LocalBridgeLogState, LocalBridgePageState } from './controller.ts'
 export type { LocalBridgeSectionInjected, LocalBridgeSectionProps } from './LocalBridgeSection.tsx'
@@ -41,7 +41,9 @@ export const inject = ['slots', 'locale']
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-settings-local-bridge: copy dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, {
+    zh, en, ja, es, fr, de, ru, pt,
+  }), 'ui-settings-local-bridge: copy dictionaries')
   const controller = new LocalBridgeController()
   ctx.effect(() => () => { controller.dispose() }, 'ui-settings-local-bridge: status polling')
   // Registration-time text (the nav label thunk) and the inject face share one
