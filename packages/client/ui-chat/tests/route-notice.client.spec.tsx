@@ -4,8 +4,6 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render } from '@testing-library/react'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
-import type { ConversationStartMatch } from '@deepseek-ai/dsh-client-ui-conversation/client'
-import type { SessionEvent } from '@deepseek-ai/dsh-session/types'
 import type { ChatNodeViewProps } from '../src/client/contract/slots.ts'
 import { zh } from '../src/client/locale.ts'
 import { RouteNoticeNodeView } from '../src/client/chat/MessageItem.tsx'
@@ -15,7 +13,7 @@ afterEach(cleanup)
 
 const t = makeTranslate(zh, commonZh)
 
-function notice(data: Record<string, unknown> = {}): SessionEvent {
+function notice(data: Record<string, unknown> = {}) {
   return {
     type: 'model-router/notice',
     seq: 8,
@@ -29,18 +27,22 @@ function notice(data: Record<string, unknown> = {}): SessionEvent {
       model: 'm2',
       ...data,
     },
-  } as SessionEvent
+  }
+}
+
+function matchNotice(event: { readonly type: string; readonly seq: number; readonly time: number; readonly data: unknown }) {
+  return routeNoticeDefinition.match(event as never)
 }
 
 describe('route notice conversation node', () => {
   it('matches a routing notice and ignores anything else', () => {
-    expect(routeNoticeDefinition.match({ type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } } as SessionEvent)).toBeNull()
-    expect(routeNoticeDefinition.match(notice({ detail: '' }))).toBeNull()
-    expect(routeNoticeDefinition.match(notice({ provider: 1 }))).toBeNull()
-    expect(routeNoticeDefinition.match(notice({ model: 1 }))).toBeNull()
-    expect(routeNoticeDefinition.match({ ...notice(), data: null } as SessionEvent)).toBeNull()
-    expect(routeNoticeDefinition.match(notice({ reason: 1 }))).toEqual({ id: '8', role: 'start' })
-    expect(routeNoticeDefinition.match(notice())).toEqual({ id: '8', role: 'start' })
+    expect(matchNotice({ type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } })).toBeNull()
+    expect(matchNotice(notice({ detail: '' }))).toBeNull()
+    expect(matchNotice(notice({ provider: 1 }))).toBeNull()
+    expect(matchNotice(notice({ model: 1 }))).toBeNull()
+    expect(matchNotice({ ...notice(), data: null })).toBeNull()
+    expect(matchNotice(notice({ reason: 1 }))).toEqual({ id: '8', role: 'start' })
+    expect(matchNotice(notice())).toEqual({ id: '8', role: 'start' })
     expect(routeNoticeCoordinates(notice())).toEqual({ turn: 1, step: 2 })
     expect(routeNoticeCoordinates({ type: 'turn/start', data: {} })).toBeUndefined()
     expect(routeNoticeCoordinates(notice({ turn: '1' }))).toBeUndefined()
@@ -52,17 +54,21 @@ describe('route notice conversation node', () => {
 
   it('builds a process row and refuses a start that is not a notice', () => {
     const event = notice()
-    const start = { event, role: 'start', location: { kind: 'unresolved' } } as ConversationStartMatch
-    const state = routeNoticeDefinition.start({} as never, start, {} as never)
-    expect(routeNoticeDefinition.update({ state } as never, start)).toBe(state)
+    const start = { event, role: 'start' as const, location: { kind: 'unresolved' as const } }
+    const state = routeNoticeDefinition.start({} as never, start as never, {} as never)
+    expect(routeNoticeDefinition.update({ state } as never, start as never)).toBe(state)
     const node = routeNoticeDefinition.buildViewNode?.({
       key: 'k', kind: 'route-notice', id: '8', matches: [start], start, state, current: new Map(),
-    })
+    } as never)
     expect(node).toMatchObject({ kind: 'route-notice', data: { detail: 'fell back to p2/m2', provider: 'p2' } })
     expect(routeNoticeDefinition.buildViewNode?.({
       key: 'k', kind: 'route-notice', id: '8', matches: [], start: undefined, state: undefined, current: new Map(),
     })).toBeNull()
-    expect(() => routeNoticeDefinition.start({} as never, { ...start, event: notice({ detail: '' }) }, {} as never)).toThrow(/route notice/)
+    expect(() => routeNoticeDefinition.start(
+      {} as never,
+      { ...start, event: notice({ detail: '' }) } as never,
+      {} as never,
+    )).toThrow(/route notice/)
   })
 
   it('renders the detail in the chat row', () => {

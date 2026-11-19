@@ -53,7 +53,15 @@ describe('route stats', () => {
       target: { provider: 'p2', model: 'm2' },
       candidates: [{ provider: 'p2', model: 'm2' }],
     }))
-    stats.noteDecision(observation({ kind: 'unchanged', target: undefined, logs: [{ message: 'leaving', args: [] }] }))
+    stats.noteDecision({
+      at: 3,
+      logs: [{ message: 'leaving', args: [] }],
+      kind: 'unchanged',
+      candidates: [],
+      classification: undefined,
+      score: () => 1,
+      estimatedCost: 0,
+    })
     stats.noteFallback('p2', 'm2')
     stats.noteUsage('p2', 'm2', 10, 4, 0.2)
     stats.noteTiming('p2', 80, 20)
@@ -85,7 +93,17 @@ describe('route stats', () => {
 
   it('keeps only the newest fifty decisions', () => {
     const stats = new ModelRouterStats()
-    for (let at = 0; at < 51; at += 1) stats.noteDecision(observation({ at, kind: 'unchanged', target: undefined }))
+    for (let at = 0; at < 51; at += 1) {
+      stats.noteDecision({
+        at,
+        logs: [],
+        kind: 'unchanged',
+        candidates: [],
+        classification: undefined,
+        score: () => 1,
+        estimatedCost: 0,
+      })
+    }
     expect(stats.decisions()).toHaveLength(50)
     expect(stats.decisions()[0]?.at).toBe(1)
   })

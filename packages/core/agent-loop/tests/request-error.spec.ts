@@ -139,7 +139,7 @@ describe('agent/request-error', () => {
   it('retries a failed step when recovery changes only the reasoning effort', async () => {
     const adapter = new MockAdapter(
       [fail('down', 'TRANSPORT'), textResponse('ok')],
-      { efforts: [{ id: 'high', name: 'high' }] },
+      { efforts: [{ id: ReasoningEffortId('high'), name: 'high' }] },
     )
     const ctx = await harness(adapter)
     const agent = await ctx.agentLoop.create(SessionId('request-error-effort'), { provider: 'mock', model: 'mock' })
