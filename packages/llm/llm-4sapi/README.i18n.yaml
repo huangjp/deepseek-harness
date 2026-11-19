@@ -1,0 +1,46 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/llm/llm-4sapi/README.md
+/:
+  en: 9f468b904930d66a
+  zh: 91df96933f76f82f
+/deepseek-ai-dsh-llm-4sapi:
+  en: 1b034fd4ed96a1e4
+  zh: 2d3d76f23b6b9727
+/deepseek-ai-dsh-llm-4sapi/summary:
+  en: 0ac29fe2535910f9
+  zh: 2fef3424824056ab
+/deepseek-ai-dsh-llm-4sapi/table-of-contents:
+  en: b563e4ec4727d0de
+  zh: 53bc178a9c9491e8
+/deepseek-ai-dsh-llm-4sapi/use-this-package:
+  en: e80852cdea8a71ae
+  zh: a95467fb919be969
+/deepseek-ai-dsh-llm-4sapi/understand-the-implementation:
+  en: 5a3cf5034b56d94b
+  zh: c103bbfc25606a83
+/deepseek-ai-dsh-llm-4sapi/further-exploration:
+  en: 0a1d26a1279cbc9d
+  zh: da669ba7bc779693
+/deepseek-ai-dsh-llm-4sapi/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-llm-4sapi/model-experience/chat-turn-through-the-built-in-route:
+  en: 6451e4882cbb0275
+  zh: 70d5db6b5988a46c
+/deepseek-ai-dsh-llm-4sapi/model-experience/chat-turn-through-the-built-in-route/what-the-model-sees:
+  en: e6af7d6f7bd47a2c
+  zh: c7d7d0917ca9a214
+/deepseek-ai-dsh-llm-4sapi/model-experience/chat-turn-through-the-built-in-route/token-effect:
+  en: 770bcdaf607cbca3
+  zh: 88f1592a07e0c36b
+/deepseek-ai-dsh-llm-4sapi/model-experience/chat-turn-through-the-built-in-route/kv-cache-effect:
+  en: db70cf5b7ee3b691
+  zh: b64d5846faeb6a02
+/deepseek-ai-dsh-llm-4sapi/known-limitations-and-deferred-work:
+  en: 7a2fbbdbc2549725
+  zh: c7b9ab52daf0d011
+/deepseek-ai-dsh-llm-4sapi/known-limitations-and-deferred-work/dev-note:
+  en: 38bd8844b7edc2b4
+  zh: 1838cb51d2e8210c

@@ -161,6 +161,14 @@
     - id: llm-xai
       name: '@deepseek-ai/dsh-llm-xai'
 
+    # 4SAPI is a new-api relay, registered as its own route `4sapi-relay`.
+    # One key stored as `FOURSAPI_API_KEY` (the Models page, or the launching
+    # environment) serves every model on it. The default root is
+    # https://4sapi.com/v1; the Models page can switch to a mainland host.
+    # Without a key the route lists no models.
+    - id: llm-4sapi
+      name: '@deepseek-ai/dsh-llm-4sapi'
+
     - id: session-persistence-jsonl
       name: '@deepseek-ai/dsh-session-persistence-jsonl'
       config:

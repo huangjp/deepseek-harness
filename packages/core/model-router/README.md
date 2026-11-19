@@ -183,6 +183,8 @@ fallback:
   maxHops: 1
 ```
 
+`4sapi-relay` can sit in that same ordered list. The route ships no prices; copy the rows you intend to bill into `pricing`. `AUTH` marks the route unusable until configuration changes. `QUOTA` is a terminal balance failure, and a remaining-fraction reading of 0 skips the route with reason quota. `RATE_LIMIT` and `SERVER`, including a body that says no channel is available, are ordinary failures the breaker and the retry policy already count. Without `FOURSAPI_API_KEY` the route lists no models, so the catalog cannot honor the candidate and the claim stays on the route it already had. A same-step fallback that lands on or leaves this route appends `model-router/notice` with reason `fallback`.
+
 ### Observability
 
 Every claim is recorded on the in-process `ctx.modelRouter`: the matched rule, the tier and scores, the candidates and their health scores, the chosen route, the reason for leaving, cumulative tokens, the estimated cost, and, once the answer finishes, latency and time to first token. `snapshot()` aggregates by route, and `decisions()` keeps the latest 50 claims. The Plugins page has no stats remote, so the desktop settings page cannot read this memory.
