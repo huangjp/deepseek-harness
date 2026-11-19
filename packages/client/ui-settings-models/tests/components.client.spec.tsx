@@ -818,6 +818,56 @@ describe('ModelsSection', () => {
     expect(providerTargetLabel(OPENAI_TARGET)).toBe('openai')
   })
 
+  it('offers the xAI route only a masked API key field', async () => {
+    const { set, face } = scriptedFace()
+    const namespace: SettingsNamespaceView = {
+      ns: 'llm-xai',
+      schema: JSON.parse(JSON.stringify(Schema.object({
+        apiKeyEnv: Schema.string().role('credential-ref').default('XAI_API_KEY'),
+        baseURL: Schema.string().default('https://api.x.ai/v1'),
+      }).toJSON())) as JsonValue,
+      value: { apiKeyEnv: 'XAI_API_KEY', baseURL: 'https://api.x.ai/v1' },
+      base: { apiKeyEnv: 'XAI_API_KEY', baseURL: 'https://api.x.ai/v1' },
+      user: {},
+      autoGenerate: true,
+      applies: 'live',
+      secrets: [],
+      revision: 0,
+    }
+    render(<ProviderEditor
+      provider="xai-official"
+      displayName="xAI"
+      namespace={namespace}
+      settingsPath={[]}
+      schema={settingsSchema}
+      operations={operationsWith(face)}
+      t={t}
+      readOnly={false}
+      onClose={vi.fn()}
+    />)
+    const key = screen.getByLabelText<HTMLInputElement>(en.keyInput)
+    expect(key.type).toBe('password')
+    expect(screen.queryByLabelText(en.baseUrl)).toBeNull()
+    expect(screen.queryByText(en.customized)).toBeNull()
+    fireEvent.change(key, { target: { value: '  xai-test-key  ' } })
+    fireEvent.click(screen.getByRole('button', { name: en.apply }))
+    await waitFor(() => { expect(set).toHaveBeenCalledWith('XAI_API_KEY', 'xai-test-key') })
+    cleanup()
+    render(<ProviderEditor
+      provider="minimax-official"
+      displayName="MiniMax"
+      namespace={{ ...namespace, ns: 'llm-minimax', value: { apiKeyEnv: 'MINIMAX_API_KEY' }, base: { apiKeyEnv: 'MINIMAX_API_KEY' } }}
+      settingsPath={[]}
+      schema={settingsSchema}
+      operations={operationsWith(face)}
+      t={t}
+      readOnly={false}
+      onClose={vi.fn()}
+    />)
+    expect(screen.getByLabelText<HTMLInputElement>(en.keyInput).type).toBe('password')
+    expect(screen.queryByLabelText(en.baseUrl)).toBeNull()
+  })
+
   it('names only changed fields instead of rebuilding the section', () => {
     expect(pathOps(['providers', 'openai'], { baseURL: 'https://old', reasoning: 'high' }, { reasoning: 'high' }))
       .toEqual([{ op: 'unset', path: ['providers', 'openai', 'baseURL'] }])

@@ -11,7 +11,7 @@ import { agentEvents } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import LlmRuntime, { LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, LlmResolvedModelInfo, StreamChunk, UserMessage } from '@deepseek-ai/dsh-llm'
-import { apply, type Config, type RuleConfig } from '../src/index.ts'
+import { apply, type Config, type HealthConfig, type RuleConfig } from '../src/index.ts'
 
 /** An adapter that serves every route the rule table names. */
 class StubAdapter extends LlmAdapter {
@@ -48,6 +48,22 @@ const FALLBACK: RuleConfig = {
   model: 'm2',
 }
 
+/** Scored-health section left on the historical breaker. */
+function health(): HealthConfig {
+  return {
+    mode: 'consecutive',
+    windowSize: 20,
+    ewmaAlpha: 0.3,
+    maxCooldownMs: 1_800_000,
+    backoffFactor: 2,
+    jitterRatio: 0,
+    probeLimit: 1,
+    latencyBudgetMs: 20_000,
+    ttftBudgetMs: 4_000,
+    weights: { timeout: 1, server: 1, network: 1, rateLimit: 0.5, unknown: 1 },
+  }
+}
+
 /** A configuration the plugin reads through volatile references. */
 function config(rules: readonly RuleConfig[]): Config {
   return {
@@ -55,6 +71,23 @@ function config(rules: readonly RuleConfig[]): Config {
     rules: { get: () => rules },
     failureThreshold: { get: () => 2 },
     cooldownMs: { get: () => 300_000 },
+    classifier: { get: () => ({
+      enabled: true,
+      promptCharsStandard: 1_200,
+      promptCharsHard: 4_000,
+      contextTokensStandard: 8_000,
+      contextTokensHard: 32_000,
+      toolUseStandard: 1,
+      toolUseHard: 6,
+      hardMark: 4,
+      simpleMark: 3,
+    }) },
+    stickiness: { get: () => ({ enabled: false, upgradeSteps: 1 }) },
+    health: { get: health },
+    tierRoutes: { get: () => ({ simple: [], standard: [], hard: [] }) },
+    cost: { get: () => ({ enabled: false, remainingThreshold: 0.2 }) },
+    pricing: { get: () => [] },
+    fallback: { get: () => ({ enabled: false, maxHops: 1 }) },
   }
 }
 

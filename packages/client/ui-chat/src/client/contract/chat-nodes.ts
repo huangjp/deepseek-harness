@@ -61,6 +61,16 @@ export interface ManualCompactionChatData {
   readonly compaction: CompactionSummaryNode | null
 }
 
+/** One auto-routing switch, fallback, hold, or budget note. */
+export interface RouteNoticeChatData {
+  readonly detail: string
+  readonly provider: string
+  readonly model: string
+  readonly reason: string
+  readonly seq: number
+  readonly time: number
+}
+
 /** One step paused until a replenishing quota window opens. */
 export interface QuotaWaitChatData {
   readonly waitId: string

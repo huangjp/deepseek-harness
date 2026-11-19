@@ -50,6 +50,7 @@ The [format references](persistence-changes/historical-formats/README.md) cover 
 | `event:llm/quota-wait-started` | event | `069031af248de8436f70f667089884ad1c02559577b853f619a2d28ca36a3589` | [`{ type: "llm/quota-wait-started" }`](#persistence-type-sha256-069031af248de8436f70f667089884ad1c02559577b853f619a2d28ca36a3589) |
 | `event:llm/retry` | event | `525254db03b1d1e6b74cf55aced52817568331ac1f96c0818728910b6692e336` | [`{ type: "llm/retry" }`](#persistence-type-sha256-525254db03b1d1e6b74cf55aced52817568331ac1f96c0818728910b6692e336) |
 | `event:llm/retry-started` | event | `48e5c9861f16ac07e78cb7b5ae9dabdf7bb85c58baed5a51b4ad275050ea58e3` | [`{ type: "llm/retry-started" }`](#persistence-type-sha256-48e5c9861f16ac07e78cb7b5ae9dabdf7bb85c58baed5a51b4ad275050ea58e3) |
+| `event:model-router/notice` | event | `bddf77c494ffe4fd64629fd16d8c96f8259d7347c20c33345e54f6490c253175` | [`{ type: "model-router/notice" }`](#persistence-type-sha256-bddf77c494ffe4fd64629fd16d8c96f8259d7347c20c33345e54f6490c253175) |
 | `event:model/routing-mode` | event | `f10b1ad5cdba9dfb73ed6cf0e9ba63c774e4523b8337958b9b51c22ef598acd5` | [`{ type: "model/routing-mode" }`](#persistence-type-sha256-f10b1ad5cdba9dfb73ed6cf0e9ba63c774e4523b8337958b9b51c22ef598acd5) |
 | `event:model/selection` | event | `35203ba7ad5ef6f97d556b85df20ae98f04f09c65748cecdf8eefdb8b6405ffc` | [`{ type: "model/selection" }`](#persistence-type-sha256-35203ba7ad5ef6f97d556b85df20ae98f04f09c65748cecdf8eefdb8b6405ffc) |
 | `event:permission/preset` | event | `5c45bf4c544a7211dcd8ba6ba7e5f1bc39b49e7a9df9d5cbdc8e87c22771b37b` | [`{ type: "permission/preset" }`](#persistence-type-sha256-5c45bf4c544a7211dcd8ba6ba7e5f1bc39b49e7a9df9d5cbdc8e87c22771b37b) |
@@ -747,6 +748,35 @@ Source: [`packages/core/agent/src/types.ts:137`](../packages/core/agent/src/type
 ```
 
 Source: [`packages/core/agent/src/types.ts:132`](../packages/core/agent/src/types.ts)
+
+### `model-router/*`
+
+<a id="model-routernotice--log-only"></a>
+
+#### `model-router/notice` — log-only
+
+```ts persistence-catalog
+/**
+ * Log-only note that auto routing left a route or fell back.
+ * It never enters model history.
+ */
+'model-router/notice': {
+  /** Turn that produced the note. 0 when the claim did not carry one. */
+  turn: number
+  /** Step that produced the note. 0 when the claim did not carry one. */
+  step: number
+  /** Stable reason code. */
+  reason: RouteNoticeReason
+  /** Human-readable detail, in English. */
+  detail: string
+  /** Route the note is about. */
+  provider: string
+  /** Model id. */
+  model: string
+}
+```
+
+Source: [`packages/core/model-router/src/index.ts:66`](../packages/core/model-router/src/index.ts)
 
 ### `permission/*`
 
@@ -1587,6 +1617,14 @@ SHA-256: `254dce209e735f9cb6f6b7aec0354712b1611759ec02af4d35a96f2081e666f6`
 
 `"blocked"`
 
+<a id="persistence-type-sha256-81fe32fd66b1fc598661232624ef22a83a466bb2ec1972ccab166f22bf65e86e"></a>
+
+### `"budget"`
+
+SHA-256: `81fe32fd66b1fc598661232624ef22a83a466bb2ec1972ccab166f22bf65e86e`
+
+`"budget"`
+
 <a id="persistence-type-sha256-d4e4d575abeb4b72d616dc65c17ac0eaa943cc135609395044c38d5afcb10e31"></a>
 
 ### `"canceled"`
@@ -1971,6 +2009,14 @@ SHA-256: `237c004c73b6b288246816e0d7fde16e09c63a47aa3b1227383d7afe58666163`
 
 `"goal/change"`
 
+<a id="persistence-type-sha256-d1b1eb6b80c0cd836cc7f6cac2ea2490c3c592a2057b2f18ff4002686f1e59f1"></a>
+
+### `"held"`
+
+SHA-256: `d1b1eb6b80c0cd836cc7f6cac2ea2490c3c592a2057b2f18ff4002686f1e59f1`
+
+`"held"`
+
 <a id="persistence-type-sha256-dbdafceb9a900183cccc80596498d386f3bf7bddead2b8cfde68453aa4739edc"></a>
 
 ### `"hook"`
@@ -2209,6 +2255,14 @@ SHA-256: `2765e9119edf5816ac1ab4c95c5ee32c90403f3742962eff11544f7752d59d2e`
 
 `"model"`
 
+<a id="persistence-type-sha256-d647aa1b42a7892c49cfe54b5a93b541656f41335c16593c42d2ea54ae6536ed"></a>
+
+### `"model-router/notice"`
+
+SHA-256: `d647aa1b42a7892c49cfe54b5a93b541656f41335c16593c42d2ea54ae6536ed`
+
+`"model-router/notice"`
+
 <a id="persistence-type-sha256-9ac52f0f84fec2eb9f71c2937e497d759db5ca0da4836d93a679d113684141f2"></a>
 
 ### `"model-selection"`
@@ -2408,6 +2462,14 @@ SHA-256: `871bfd6f7bb91061246768d3377f3fd58d6b8ea7c31f44c714ae7ab215650d62`
 SHA-256: `4edec1b770e8ec4ce1220bf42edc5ac46713a1b48d4caa778dcfc98bad1f28a3`
 
 `"ptc-mode"`
+
+<a id="persistence-type-sha256-d66ef48eda694ca7fba03b76f6e6ab87f6cc3d62e5b7be9bea54e05e85ec48e6"></a>
+
+### `"quota"`
+
+SHA-256: `d66ef48eda694ca7fba03b76f6e6ab87f6cc3d62e5b7be9bea54e05e85ec48e6`
+
+`"quota"`
 
 <a id="persistence-type-sha256-12a0cfa619ac4a5fc6c3e8e359c8dae15769edc61497a575935c78d5842f8e42"></a>
 
@@ -2833,6 +2895,14 @@ SHA-256: `5abab3a27fd2736660ecddd94b28d6bbf114986dd894880153bd1be3ccacb563`
 
 `"text-delta"`
 
+<a id="persistence-type-sha256-50a81503d337f64bbddae7cae86b57c360a350228fbd3f4640b6577fa553562a"></a>
+
+### `"tier-upgrade"`
+
+SHA-256: `50a81503d337f64bbddae7cae86b57c360a350228fbd3f4640b6577fa553562a`
+
+`"tier-upgrade"`
+
 <a id="persistence-type-sha256-8067b0d232c350f189738e60ee3c9939d46ca3b32b45db5525237b077893f649"></a>
 
 ### `"time-context"`
@@ -3025,6 +3095,14 @@ SHA-256: `2c4c21f19f426a58f2dac914e34313aa43f8408972de857a486d1f086d5adb6c`
 
 `"unavailable"`
 
+<a id="persistence-type-sha256-4a4da5388e94111d8efd77298c996202d8c21e56b9f0f28481083656896b16c9"></a>
+
+### `"unhealthy"`
+
+SHA-256: `4a4da5388e94111d8efd77298c996202d8c21e56b9f0f28481083656896b16c9`
+
+`"unhealthy"`
+
 <a id="persistence-type-sha256-05a2796621b1ee6c03ef7abe560b25116bb4da4d592312117242a78415a32b04"></a>
 
 ### `"unknown"`
@@ -3072,6 +3150,14 @@ SHA-256: `9645cf93769a6dfb227bd400bd6cb9fa7bab9140f4a851e4ae92514ade6e3114`
 SHA-256: `de25352d2dc4196309bd84b5bac6319f6d5c898ea0e82bb5ae66c5738d0d426f`
 
 `"user/message"`
+
+<a id="persistence-type-sha256-3d1acee4beaece4720c724e9cb1e0930752aba92cb4c770992598d2ba1080051"></a>
+
+### `"vision"`
+
+SHA-256: `3d1acee4beaece4720c724e9cb1e0930752aba92cb4c770992598d2ba1080051`
+
+`"vision"`
 
 <a id="persistence-type-sha256-6f611bed14b2106542480c4a230b4a83baf76dc0d8ac0cd13319a7cb8dae7675"></a>
 
@@ -4734,6 +4820,29 @@ One of:
 - `"resume"`
 - `"series"`
 
+<a id="persistence-type-sha256-c52401745d904fb39d83b92ac3df94b66f2ef628c90445f32f97aa0580d7ffee"></a>
+
+<a id="persistence-type-packagescoremodel-routersrcstatstsroutenoticereason"></a>
+
+<a id="persistence-type-routenoticereason"></a>
+
+### `RouteNoticeReason`
+
+SHA-256: `c52401745d904fb39d83b92ac3df94b66f2ef628c90445f32f97aa0580d7ffee`
+
+Sources: [`packages/core/model-router/src/stats.ts:12`](../packages/core/model-router/src/stats.ts)
+
+One of:
+
+- `"budget"`
+- `"fallback"`
+- `"held"`
+- `"quota"`
+- `"tier-upgrade"`
+- `"unavailable"`
+- `"unhealthy"`
+- `"vision"`
+
 <a id="persistence-type-sha256-2ae969dcc7cbc0a9e89124b1c19bf78792a17035d3e838e2bb173de22b361cf5"></a>
 
 <a id="persistence-type-packagescoreagentsrctypestsroutingmode"></a>
@@ -6362,6 +6471,23 @@ Sources: [`packages/skill/tool-skill/src/index.ts:41`](../packages/skill/tool-sk
 SHA-256: `aba175fb20ffc71112c55efe70458ff5d7dbfb83501892b4ba8d077f0ea5d7ba`
 
 Array of [`{ description, name }`](#persistence-type-sha256-83079c8a3f733ac3fa603eefa0fbb4737ca4d8b69e7e2e7298b60f9ac4098693).
+
+<a id="persistence-type-sha256-a66399a44fd0004602284de78b841ecbf15bceb8299983ab7188bbb64489dba6"></a>
+
+### `{ detail, model, provider, reason, … }`
+
+SHA-256: `a66399a44fd0004602284de78b841ecbf15bceb8299983ab7188bbb64489dba6`
+
+Sources: [`packages/core/model-router/src/index.ts:66`](../packages/core/model-router/src/index.ts)
+
+| Property | Presence | Type |
+|---|---|---|
+| `detail` | required | `string` |
+| `model` | required | `string` |
+| `provider` | required | `string` |
+| `reason` | required | [`RouteNoticeReason`](#persistence-type-sha256-c52401745d904fb39d83b92ac3df94b66f2ef628c90445f32f97aa0580d7ffee) |
+| `step` | required | `number` |
+| `turn` | required | `number` |
 
 <a id="persistence-type-sha256-119abe2b9c0b2f46ecb31d82b9acba4d4b30e049f655e2475e8b4ae12d5a9e25"></a>
 
@@ -8741,6 +8867,22 @@ SHA-256: `48e5c9861f16ac07e78cb7b5ae9dabdf7bb85c58baed5a51b4ad275050ea58e3`
 | `seq` | required | `number` |
 | `time` | required | `number` |
 | `type` | required | `"llm/retry-started"` |
+
+<a id="persistence-type-sha256-bddf77c494ffe4fd64629fd16d8c96f8259d7347c20c33345e54f6490c253175"></a>
+
+<a id="persistence-type-eventmodel-routernotice"></a>
+
+### `{ type: "model-router/notice" }`
+
+SHA-256: `bddf77c494ffe4fd64629fd16d8c96f8259d7347c20c33345e54f6490c253175`
+
+| Property | Presence | Type |
+|---|---|---|
+| `data` | required | [`{ detail, model, provider, reason, … }`](#persistence-type-sha256-a66399a44fd0004602284de78b841ecbf15bceb8299983ab7188bbb64489dba6) |
+| `ignorable` | optional | `true` |
+| `seq` | required | `number` |
+| `time` | required | `number` |
+| `type` | required | `"model-router/notice"` |
 
 <a id="persistence-type-sha256-f10b1ad5cdba9dfb73ed6cf0e9ba63c774e4523b8337958b9b51c22ef598acd5"></a>
 

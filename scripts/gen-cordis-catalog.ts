@@ -175,6 +175,7 @@ export const SERVICE_PAGE: Record<string, string> = {
  */
 export const SERVICE_WALK_EXEMPTIONS: Record<string, string> = {
   invocation: 'not a service: per-call accessor (RemoteInvocation | undefined) the Gateway derives for each Remote call — packages/api/gateway/README.md owns the contract',
+  modelRouter: 'process-local routing totals, not a rendered service — packages/core/model-router/README.md owns snapshot() and decisions()',
   webTerminals: 'client-side terminal view models — packages/api/terminal-controller/README.md owns the API',
   appReady: 'not a service: launcher-provided successful-startup signal — packages/boot/cmdline/README.md owns the launcher contract',
   appExit: 'not a service: launcher-provided bounded process-exit callback — packages/boot/cmdline/README.md owns the launcher contract',
@@ -911,6 +912,8 @@ export const TYPE_LINK_EXEMPTIONS: Readonly<Record<string, string>> = {
   QuotaHoldNotice: 'quota hold notices are owned by packages/llm/llm/README.md and packages/llm/llm-quota-wait/README.md',
   QuotaWindowPlan: 'quota window plans are owned by packages/llm/llm/README.md and packages/llm/llm/src/quota-window.ts',
   QuotaWindowRequest: 'quota window clock requests are owned by packages/llm/llm/README.md and packages/llm/llm/src/quota-window.ts',
+  QuotaRemaining: 'remaining quota readings are owned by packages/llm/llm/README.md and packages/llm/llm/src/quota-window.ts',
+  QuotaRemainingRequest: 'remaining quota requests are owned by packages/llm/llm/README.md and packages/llm/llm/src/quota-window.ts',
   ActionCardDecision: 'packages/experimental/action-cards/README.md',
   ActionCardKind: 'packages/experimental/action-cards/README.md',
   ActionCardResult: 'packages/experimental/action-cards/README.md',

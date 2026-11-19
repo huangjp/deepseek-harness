@@ -162,7 +162,16 @@ export type PreStepDecision =
   }
 
 /** Action returned by a listener that owns model-request recovery. */
-export type RequestErrorAction = { kind: 'retry' } | undefined
+export type RequestErrorAction =
+  | {
+    kind: 'retry'
+    /**
+     * Route for this step's retry. Absent keeps the selection the step already
+     * captured. `model.select` during recovery still applies only to a later step.
+     */
+    selection?: Readonly<ModelSelection>
+  }
+  | undefined
 
 /** Why a session lifecycle began; seeded creates are `startup`, while persisted loads are `resume`. */
 export type SessionStartSource = 'startup' | 'resume' | 'clear' | 'compact'

@@ -202,6 +202,30 @@ describe('ModelRouterCardController', () => {
     expect(face.hooks.modelRouterCard.getSnapshot().invalid).toBe(false)
   })
 
+  it('keeps a tier and its route list when the table is saved', async () => {
+    const routes = [{ provider: 'beta', model: 'beta-one', reasoningEffort: 'high' }]
+    const { host, face } = controller({
+      rules: [storedRule({ keywords: [], tier: 'hard', routes })],
+    })
+
+    expect(face.hooks.modelRouterCard.getSnapshot().invalid).toBe(false)
+    face.updateRule(0, { name: 'hard-tasks' })
+    face.save()
+
+    await vi.waitFor(() => { expect(host.mutate).toHaveBeenCalled() })
+    expect(host.mutate).toHaveBeenCalledWith(expect.arrayContaining([
+      {
+        op: 'set',
+        path: ['rules'],
+        value: [expect.objectContaining({
+          name: 'hard-tasks',
+          tier: 'hard',
+          routes,
+        })],
+      },
+    ]), 7)
+  })
+
   it('blocks the save while a health knob is not a whole number', () => {
     const { host, face } = controller()
 

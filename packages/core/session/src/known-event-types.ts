@@ -48,6 +48,7 @@ export const KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([
   'llm/quota-wait-started',
   'llm/retry',
   'llm/retry-started',
+  'model-router/notice',
   'model/routing-mode',
   'model/selection',
   'permission/preset',

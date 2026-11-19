@@ -365,6 +365,16 @@ function formatResumeAt(resumeAtMs: number): string {
   }).format(resumeAtMs)
 }
 
+/** Auto-routing switch, fallback, hold, or budget note. */
+export const RouteNoticeNodeView = memo(function RouteNoticeNodeView({ node, t }: ChatNodeViewProps<'route-notice'>) {
+  const data = node.data
+  return (
+    <div className={css.retryRow} role="status">
+      <span className={css.retryText}>{t('message.routeNotice', { detail: data.detail })}</span>
+    </div>
+  )
+})
+
 /** Paused step waiting for a replenishing quota window. */
 export const QuotaWaitNodeView = memo(function QuotaWaitNodeView({ node, t }: ChatNodeViewProps<'quota-wait'>) {
   const data = node.data

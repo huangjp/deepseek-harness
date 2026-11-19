@@ -1,0 +1,28 @@
+# Bilingual-pair consistency record for 2026-11-19-model-router-notice.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/persistence-changes/2026-11-19-model-router-notice.md
+/:
+  en: 3d5a424ae7d7e46b
+  zh: c22a8e4a62d8cc1a
+/2026-11-19-model-router-notice:
+  en: cdba6c7d982ab520
+  zh: 86f8ab0a25da41d0
+/2026-11-19-model-router-notice/summary:
+  en: b4b5e13679d05481
+  zh: 9f406d3db4c7b751
+/2026-11-19-model-router-notice/table-of-contents:
+  en: 6cf314a069ceb451
+  zh: 9adff678e9ecab3b
+/2026-11-19-model-router-notice/declaration:
+  en: 6907136f28e48c90
+  zh: 02f8298485f3d8e7
+/2026-11-19-model-router-notice/compatibility:
+  en: ddeb0bb26f105877
+  zh: 5f084b071f05975d
+/2026-11-19-model-router-notice/verification:
+  en: 450a32f7ee567365
+  zh: d37751b47675fbef
+/2026-11-19-model-router-notice/dev-note:
+  en: b75c8458928b72b9
+  zh: 003ba4e17b4b5269

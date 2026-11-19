@@ -2367,6 +2367,52 @@ export type Config = Readonly<Record<string, never>>
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-llm-retry -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-llm-xai -->
+<a id="deepseek-aidsh-llm-xai"></a>
+
+## `@deepseek-ai/dsh-llm-xai`
+
+- `inject`: `llm`
+- `refs`: `Volatile` (`@deepseek-ai/cordis`)
+- `source`: [`packages/llm/llm-xai/src/index.ts:52`](../packages/llm/llm-xai/src/index.ts)
+
+```ts config-catalog
+/** Plugin configuration: where the route points, how it authenticates, and which models it serves. */
+export interface Config {
+  /** Credential reference holding the xAI API key. */
+  apiKeyEnv: Volatile<string>
+  /** Responses API root, including `/v1`. */
+  baseURL: Volatile<string>
+  /** Effort a request that names none materializes. xAI defaults to `high`. */
+  reasoningEffort: Volatile<XaiEffort>
+  /**
+   * Models that replace the shipped `grok-4.7` entry. An empty list keeps
+   * that flagship, including its image input.
+   */
+  models: Volatile<readonly XaiModelConfig[]>
+}
+
+/** One xAI reasoning effort. */
+export type XaiEffort = typeof XAI_EFFORTS[number]
+
+/** One model a deployment lists in place of the shipped default. */
+export interface XaiModelConfig {
+  /** Model id sent on the wire. */
+  id: string
+  /** Name shown in the model selector. Absent uses the id. */
+  name?: string
+  /**
+   * Whether the model accepts images. Absent is vision only for
+   * {@link XAI_DEFAULT_MODEL_ID}; every other id stays text-only until this
+   * is set.
+   */
+  vision?: boolean
+  /** Context window in tokens. Absent uses {@link XAI_DEFAULT_CONTEXT_WINDOW}. */
+  contextWindow?: number
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-llm-xai -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-lsp-stdio -->
 <a id="deepseek-aidsh-lsp-stdio"></a>
 
@@ -2512,7 +2558,7 @@ export interface Config {
 
 - `inject`: `llm`
 - `refs`: `Volatile` (`@deepseek-ai/cordis`)
-- `source`: [`packages/core/model-router/src/index.ts:68`](../packages/core/model-router/src/index.ts)
+- `source`: [`packages/core/model-router/src/index.ts:289`](../packages/core/model-router/src/index.ts)
 
 ```ts config-catalog
 /** Deployment configuration for the routing table. */
@@ -2524,12 +2570,27 @@ export interface Config {
   /**
    * Consecutive failures after which a provider route is skipped.
    *
-   * Zero keeps every route eligible: the router then never routes around a
-   * failing route, and the harness's own retry policy stays in charge.
+   * Zero keeps every route eligible except an auth failure and a quota hold:
+   * the router then never opens a cooldown, and the harness's own retry
+   * policy stays in charge of ordinary failures.
    */
   failureThreshold: Volatile<number>
   /** How long a skipped provider route stays skipped, in milliseconds. */
   cooldownMs: Volatile<number>
+  /** Difficulty classifier. Classification does not by itself change a rule that ignores tier. */
+  classifier: Volatile<ClassifierConfig>
+  /** Session stickiness. Off re-evaluates the table on every claim. */
+  stickiness: Volatile<StickinessConfig>
+  /** Health clock. `consecutive` is the historical breaker. */
+  health: Volatile<HealthConfig>
+  /** Per-tier route lists used when no earlier candidate was selected from the rules alone. */
+  tierRoutes: Volatile<TierRoutesConfig>
+  /** Prices and budgets. Off is a no-op. */
+  cost: Volatile<CostConfig>
+  /** Price rows. An empty list bills nothing. */
+  pricing: Volatile<readonly PriceConfig[]>
+  /** Same-step fallback. Off does not change the route of an in-flight step. */
+  fallback: Volatile<FallbackConfig>
 }
 
 /** One rule as the deployment declares it. */
@@ -2540,12 +2601,169 @@ export interface RuleConfig {
   keywords: readonly string[]
   /** Required image condition; absent ignores attachments. */
   hasImage?: boolean
+  /** Required difficulty tier; absent ignores tier. */
+  tier?: DifficultyTier
+  /**
+   * Candidate routes for this rule. A non-empty list replaces `provider`
+   * and `model` as the candidates; those two fields stay required so an
+   * older rule still validates.
+   */
+  routes?: readonly EndpointConfig[]
   /** Target provider route. */
   provider: string
   /** Target model id on that provider. */
   model: string
   /** Reasoning effort to request; absent leaves the provider default. */
   reasoningEffort?: string
+}
+
+/**
+ * Keyword-classifier knobs. Omitted keyword lists keep the built-in sets.
+ * The decision does not call a model.
+ */
+export interface ClassifierConfig {
+  /** Whether claims are classified. Off leaves every tier condition unmatched. */
+  enabled: boolean
+  /** Substrings that add hard points. Omitted keeps the built-in list. */
+  hardKeywords?: readonly string[]
+  /** Substrings that add simple points. Omitted keeps the built-in list. */
+  simpleKeywords?: readonly string[]
+  /** Phrases that ask for a harder answer. Omitted keeps the built-in list. */
+  hardHints?: readonly string[]
+  /** Phrases that ask for a shorter answer. Omitted keeps the built-in list. */
+  simpleHints?: readonly string[]
+  /** Prompt length, in characters, that adds a standard point. */
+  promptCharsStandard: number
+  /** Prompt length, in characters, that selects a hard prompt. */
+  promptCharsHard: number
+  /** Context size, in tokens, that adds a standard point. */
+  contextTokensStandard: number
+  /** Context size, in tokens, that selects a hard context. */
+  contextTokensHard: number
+  /** Tool-call count that adds a standard point. */
+  toolUseStandard: number
+  /** Tool-call count that selects a hard task. */
+  toolUseHard: number
+  /** Points a strong signal adds, and the hard score required to select `hard`. */
+  hardMark: number
+  /** Simple score required to select `simple` when hard did not win. */
+  simpleMark: number
+}
+
+/** Whether a session keeps the route auto mode already chose. */
+export interface StickinessConfig {
+  /**
+   * Whether later turns of an agent keep the route the router chose.
+   * Off re-evaluates the rule table on every claim.
+   */
+  enabled: boolean
+  /**
+   * How many tier ranks a task must rise before stickiness lets go.
+   * 1 switches on simple to standard and on standard to hard. 2 switches
+   * only on simple to hard. A drop never switches.
+   */
+  upgradeSteps: number
+}
+
+/**
+ * Scored-health knobs. `mode: consecutive` ignores them and uses
+ * `failureThreshold` with `cooldownMs` exactly as before.
+ */
+export interface HealthConfig {
+  /** `consecutive` is the fixed breaker. `scored` ranks routes and backs off. */
+  mode: 'consecutive' | 'scored'
+  /** Samples kept per route. */
+  windowSize: number
+  /** Weight of the newest success, latency, and time-to-first-token sample. */
+  ewmaAlpha: number
+  /** Cap on the exponential cooldown, in milliseconds. */
+  maxCooldownMs: number
+  /** Multiplier applied after each failed probe. */
+  backoffFactor: number
+  /** Fraction of the cooldown added or removed at random. */
+  jitterRatio: number
+  /** Probes admitted once a scored cooldown elapses. */
+  probeLimit: number
+  /** Latency, in milliseconds, that spends the whole latency penalty. */
+  latencyBudgetMs: number
+  /** Time to first token, in milliseconds, that spends the whole latency penalty. */
+  ttftBudgetMs: number
+  /** Penalties for ordinary failure classes. */
+  weights: HealthWeightConfig
+}
+
+/** Route lists consulted after the rule table, one per difficulty tier. */
+export interface TierRoutesConfig {
+  /** Routes for a simple task, in tie-break order. */
+  simple: readonly EndpointConfig[]
+  /** Routes for a standard task, in tie-break order. */
+  standard: readonly EndpointConfig[]
+  /** Routes for a hard task, in tie-break order. */
+  hard: readonly EndpointConfig[]
+}
+
+/** Quota and cost knobs. Off leaves prices and remaining quota unread. */
+export interface CostConfig {
+  /** Whether prices, budgets, and remaining-quota readings affect routing. */
+  enabled: boolean
+  /**
+   * Remaining fraction at which a route's health score starts to fall.
+   * 0 disables the penalty. A reading of 0 still skips the route.
+   */
+  remainingThreshold: number
+}
+
+/** Price and optional spend cap for one route. Absent prices do not bill. */
+export interface PriceConfig {
+  /** Provider route. */
+  provider: string
+  /** Model id on that route. */
+  model: string
+  /** Price for one million input tokens. */
+  inputPerMillion: number
+  /** Price for one million output tokens. */
+  outputPerMillion: number
+  /** Currency label. Absent means USD. */
+  currency?: string
+  /** Trailing-24-hour spend cap. Absent means no daily cap. */
+  dailyBudget?: number
+  /** Trailing-30-day spend cap. Absent means no monthly cap. */
+  monthlyBudget?: number
+}
+
+/** Same-step fallback after a failed attempt. Off leaves the loop's retry policy in charge. */
+export interface FallbackConfig {
+  /** Whether a failed attempt may move to the next candidate in the same step. */
+  enabled: boolean
+  /** How many candidate changes one step may make. */
+  maxHops: number
+}
+
+/** One difficulty tier. */
+export type DifficultyTier = (typeof DIFFICULTY_TIERS)[number]
+
+/** One route inside a rule's `routes` list or a tier route list. */
+export interface EndpointConfig {
+  /** Target provider route. */
+  provider: string
+  /** Target model id on that provider. */
+  model: string
+  /** Reasoning effort to request; absent leaves the provider default. */
+  reasoningEffort?: string
+}
+
+/** Weights for ordinary scored failures. Auth and quota windows are not weights. */
+export interface HealthWeightConfig {
+  /** Timeout penalty. */
+  timeout: number
+  /** HTTP 5xx penalty. */
+  server: number
+  /** Transport penalty. */
+  network: number
+  /** Short HTTP 429 penalty. */
+  rateLimit: number
+  /** Unclassified failure penalty. */
+  unknown: number
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-model-router -->

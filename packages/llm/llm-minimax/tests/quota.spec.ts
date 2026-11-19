@@ -19,6 +19,7 @@ import {
   classifyMiniMaxProviderError,
   minimaxQuotaClockUrls,
   readMiniMaxQuotaWindow,
+  readMiniMaxRemainingRatio,
   resolveMiniMaxQuotaWindow,
 } from '../src/quota.ts'
 
@@ -536,6 +537,79 @@ describe('MiniMax route', () => {
     await ctx.fiber.dispose()
   })
 
+  it('answers the quota-remaining waterfall from the usage clock', async () => {
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify(clockBody({
+      model_name: 'general',
+      current_interval_remaining_percent: 40,
+      current_weekly_remaining_percent: 12,
+    })), { status: 200 }))
+    process.env['MINIMAX_QUOTA_TEST_KEY'] = 'test-key'
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    registerMiniMaxProvider(ctx, {
+      baseURL: 'https://api.minimax.cn/anthropic',
+      apiKeyEnv: 'MINIMAX_QUOTA_TEST_KEY',
+    })
+    await expect(ctx.waterfall('llm/quota-remaining', {
+      provider: MINIMAX_PROVIDER,
+      signal: new AbortController().signal,
+    }, async () => undefined)).resolves.toEqual({ remainingRatio: 0.12 })
+    await expect(ctx.waterfall('llm/quota-remaining', {
+      provider: 'other',
+      signal: new AbortController().signal,
+    }, async () => undefined)).resolves.toBeUndefined()
+    const aborted = new AbortController()
+    aborted.abort()
+    await expect(ctx.waterfall('llm/quota-remaining', {
+      provider: MINIMAX_PROVIDER,
+      signal: aborted.signal,
+    }, async () => undefined)).resolves.toBeUndefined()
+    vi.stubGlobal('fetch', async () => new Response('null', { status: 200 }))
+    await expect(ctx.waterfall('llm/quota-remaining', {
+      provider: MINIMAX_PROVIDER,
+      signal: new AbortController().signal,
+    }, async () => undefined)).resolves.toBeUndefined()
+    vi.stubGlobal('fetch', async () => { throw new Error('clock down') })
+    await expect(ctx.waterfall('llm/quota-remaining', {
+      provider: MINIMAX_PROVIDER,
+      signal: new AbortController().signal,
+    }, async () => undefined)).resolves.toBeUndefined()
+    class BrokenRemaining extends Service {
+      constructor(ctx: Context) { super(ctx, 'credentials') }
+      resolve = (): never => { throw new Error('remaining down') }
+    }
+    const broken = new Context()
+    await broken.plugin(LlmRuntime)
+    await broken.plugin(BrokenRemaining)
+    registerMiniMaxProvider(broken, {
+      baseURL: 'https://api.minimax.cn/anthropic',
+      apiKeyEnv: 'MINIMAX_QUOTA_TEST_KEY',
+    })
+    await expect(broken.waterfall('llm/quota-remaining', {
+      provider: MINIMAX_PROVIDER,
+      signal: new AbortController().signal,
+    }, async () => undefined)).resolves.toBeUndefined()
+    await broken.fiber.dispose()
+    class TextRemaining extends Service {
+      constructor(ctx: Context) { super(ctx, 'credentials') }
+      resolve = (): never => { throw 'remaining' }
+    }
+    const text = new Context()
+    await text.plugin(LlmRuntime)
+    await text.plugin(TextRemaining)
+    registerMiniMaxProvider(text, {
+      baseURL: 'https://api.minimax.cn/anthropic',
+      apiKeyEnv: 'MINIMAX_QUOTA_TEST_KEY',
+    })
+    await expect(text.waterfall('llm/quota-remaining', {
+      provider: MINIMAX_PROVIDER,
+      signal: new AbortController().signal,
+    }, async () => undefined)).resolves.toBeUndefined()
+    await text.fiber.dispose()
+    delete process.env['MINIMAX_QUOTA_TEST_KEY']
+    await ctx.fiber.dispose()
+  })
+
   it('forwards an image attachment through the route filesystem mapping', async () => {
     const server = createServer((request, response) => {
       request.resume()
@@ -607,5 +681,26 @@ describe('MiniMax route', () => {
     await ctx.fiber.dispose()
     const finish = chunks.find(chunk => chunk.type === 'finish')
     expect(finish).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: 'RATE_LIMIT' } } })
+  })
+})
+
+describe('MiniMax remaining ratio', () => {
+  it('uses the tighter of the two windows', () => {
+    expect(readMiniMaxRemainingRatio({
+      base_resp: { status_code: 0 },
+      model_remains: [{
+        model_name: 'general',
+        current_interval_remaining_percent: 40,
+        current_weekly_remaining_percent: 12,
+      }],
+    })).toBe(0.12)
+    expect(readMiniMaxRemainingRatio({ base_resp: { status_code: 1 } })).toBeUndefined()
+    expect(readMiniMaxRemainingRatio(null)).toBeUndefined()
+    expect(readMiniMaxRemainingRatio({ base_resp: { status_code: 0 }, model_remains: 'nope' })).toBeUndefined()
+    expect(readMiniMaxRemainingRatio({ base_resp: { status_code: 0 }, model_remains: [] })).toBeUndefined()
+    expect(readMiniMaxRemainingRatio({
+      base_resp: { status_code: 0 },
+      model_remains: [{ model_name: 'general', current_interval_remaining_percent: 'soon' }],
+    })).toBeUndefined()
   })
 })

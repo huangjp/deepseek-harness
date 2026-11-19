@@ -39,6 +39,24 @@ export interface QuotaWindowRequest {
   readonly signal: AbortSignal
 }
 
+/**
+ * Remaining share of a replenishing quota, as a fraction from 0 to 1.
+ * 0 means the tighter window is exhausted. Absent fields mean the provider
+ * did not report that window.
+ */
+export interface QuotaRemaining {
+  /** Tighter remaining fraction across the windows the provider reported. */
+  readonly remainingRatio: number
+}
+
+/** One route a quota-remaining listener may answer. */
+export interface QuotaRemainingRequest {
+  /** Provider route being asked. */
+  readonly provider: string
+  /** Caller cancellation. A listener's own requests must honor it. */
+  readonly signal: AbortSignal
+}
+
 /** Notice that later auto-routed claims should skip a route until a window opens. */
 export interface QuotaHoldNotice {
   /** Provider route that is paused. */

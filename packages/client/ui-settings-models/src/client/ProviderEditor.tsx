@@ -158,7 +158,8 @@ function layoutOf(ns: string): EditorLayout {
   // A first-party family whose route is fully described by code: the endpoint,
   // the model catalog, and every compatibility switch are composition values,
   // so the one thing a user supplies here is the key.
-  if (ns === 'llm-minimax') return 'minimax'
+  // MiniMax and xAI are code-registered routes: the user only supplies the key.
+  if (ns === 'llm-minimax' || ns === 'llm-xai') return 'minimax'
   return 'unknown'
 }
 

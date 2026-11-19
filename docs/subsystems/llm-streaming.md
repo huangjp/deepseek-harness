@@ -1188,6 +1188,27 @@ A replenishing quota window is holding one route until `resumeAtMs`. Auto-routin
 
 Source: [`packages/llm/llm/src/index.ts`](../../packages/llm/llm/src/index.ts)
 
+<a id="llmquota-remaining--waterfall"></a>
+
+#### `llm/quota-remaining` — waterfall
+
+Ask a provider how much replenishing quota remains on a route. A listener that does not own `request.provider` calls `next()`. The default is no reading. Routing uses a cached reading and does not wait on this waterfall while it claims a message.
+
+```ts cordis-catalog
+/**
+ * Ask a provider how much replenishing quota remains on a route.
+ * A listener that does not own `request.provider` calls `next()`.
+ * The default is no reading. Routing uses a cached reading and does not
+ * wait on this waterfall while it claims a message.
+ * @param request - the route and a cancellation signal.
+ * @returns the tighter remaining fraction, or undefined when no listener owns the route.
+ * @mode waterfall
+ */
+'llm/quota-remaining'(request: QuotaRemainingRequest, next: () => Promise<QuotaRemaining | undefined>): Promise<QuotaRemaining | undefined>
+```
+
+Source: [`packages/llm/llm/src/index.ts`](../../packages/llm/llm/src/index.ts)
+
 <a id="llmquota-window--waterfall"></a>
 
 #### `llm/quota-window` — waterfall

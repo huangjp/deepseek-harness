@@ -12,6 +12,7 @@ import {
   isSubagentDelegationTool, sameTurnProcessSpec, type TurnProcessSpec,
 } from '../contract/turn-process.ts'
 import { CHAT_SYNTHETIC_SEQ_OFFSETS, chatNode } from './common.ts'
+import { routeNoticeCoordinates } from './route-notice.ts'
 import { toAssistantBlocks } from './event-projection.ts'
 
 declare module '../contract/chat-nodes.ts' {
@@ -86,7 +87,8 @@ function processEvidence(event: ConversationEvent): ProcessEvidence | undefined 
   if (event.type === 'tool/call'
     || (event.type === 'tool/result' && event.surfaceOp === 'append')
     || event.type === 'llm/retry'
-    || event.type === 'llm/quota-wait') return { kind: 'other', seq: event.seq }
+    || event.type === 'llm/quota-wait'
+    || routeNoticeCoordinates(event) !== undefined) return { kind: 'other', seq: event.seq }
   return undefined
 }
 
@@ -96,6 +98,8 @@ export interface ProcessEvidenceState {
 }
 
 function durableEvidenceStep(event: ConversationEvent): { readonly turn: number; readonly step: number } | undefined {
+  const notice = routeNoticeCoordinates(event)
+  if (notice !== undefined) return notice
   if (processEvidence(event) === undefined) return undefined
   switch (event.type) {
     case 'assistant/message':

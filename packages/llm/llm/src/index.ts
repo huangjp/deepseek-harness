@@ -34,7 +34,7 @@ import type { ProviderRequestId } from './brand.ts'
 import { callConfigEquals } from './call-config.ts'
 import type { ConfigureCall, LlmCallConfig, LlmCallConfigAdapterDefaults } from './call-config.ts'
 import { HarnessError, INVALID_CREDENTIAL_CODE } from './error.ts'
-import type { QuotaHoldNotice, QuotaWindowPlan, QuotaWindowRequest } from './quota-window.ts'
+import type { QuotaHoldNotice, QuotaRemaining, QuotaRemainingRequest, QuotaWindowPlan, QuotaWindowRequest } from './quota-window.ts'
 import { normalizeLlmFailure } from './adapter-failure.ts'
 import { normalizeApiKey } from './api-key.ts'
 import {
@@ -45,7 +45,7 @@ import type { FileAttachmentRef, ImageAttachmentRef, ImageRequestTarget } from '
 export * from './attribution.ts'
 export * from './brand.ts'
 export * from './error.ts'
-export type { QuotaHoldNotice, QuotaWindowKind, QuotaWindowPlan, QuotaWindowRequest } from './quota-window.ts'
+export type { QuotaHoldNotice, QuotaRemaining, QuotaRemainingRequest, QuotaWindowKind, QuotaWindowPlan, QuotaWindowRequest } from './quota-window.ts'
 export * from './api-key.ts'
 export * from './types.ts'
 export * from './content.ts'
@@ -86,6 +86,17 @@ declare module '@deepseek-ai/cordis' {
      * @mode waterfall
      */
     'llm/quota-window'(request: QuotaWindowRequest, next: () => Promise<QuotaWindowPlan | undefined>): Promise<QuotaWindowPlan | undefined>
+
+    /**
+     * Ask a provider how much replenishing quota remains on a route.
+     * A listener that does not own `request.provider` calls `next()`.
+     * The default is no reading. Routing uses a cached reading and does not
+     * wait on this waterfall while it claims a message.
+     * @param request - the route and a cancellation signal.
+     * @returns the tighter remaining fraction, or undefined when no listener owns the route.
+     * @mode waterfall
+     */
+    'llm/quota-remaining'(request: QuotaRemainingRequest, next: () => Promise<QuotaRemaining | undefined>): Promise<QuotaRemaining | undefined>
 
     /**
      * A replenishing quota window is holding one route until `resumeAtMs`.

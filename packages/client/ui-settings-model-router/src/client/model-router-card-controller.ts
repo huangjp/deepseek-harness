@@ -47,6 +47,10 @@ export interface RouteRule {
   model: string
   /** Reasoning effort to request; absent leaves the provider default. */
   reasoningEffort?: string
+  /** Required difficulty tier; absent ignores tier. The card preserves it and does not edit it. */
+  tier?: 'simple' | 'standard' | 'hard'
+  /** Extra candidate routes. The card preserves them and does not edit them. */
+  routes?: { provider: string; model: string; reasoningEffort?: string }[]
 }
 
 /** One edit to a rule. An optional field set to undefined is removed. */
@@ -118,14 +122,22 @@ function emptyRule(): RouteRule {
   return { name: '', keywords: [], provider: '', model: '' }
 }
 
-/** Whether one rule names a route the router could act on. */
+/**
+ * Whether one rule names a route the router could act on.
+ * @param rule - the staged rule.
+ * @returns true when name, provider, and model are non-empty.
+ */
 export function ruleComplete(rule: RouteRule): boolean {
   return rule.name.trim() !== '' && rule.provider.trim() !== '' && rule.model.trim() !== ''
 }
 
-/** Whether one rule states a condition the matcher can use. */
+/**
+ * Whether one rule states a condition the matcher can use.
+ * @param rule - the staged rule.
+ * @returns true when it has a keyword, an image condition, or a tier.
+ */
 export function ruleHasCondition(rule: RouteRule): boolean {
-  return rule.keywords.length > 0 || rule.hasImage !== undefined
+  return rule.keywords.length > 0 || rule.hasImage !== undefined || rule.tier !== undefined
 }
 
 /** Read the rules the Host stores, tolerating a section that carries none yet. */
@@ -139,6 +151,8 @@ function storedRules(value: ModelRouterSettings | undefined): RouteRule[] {
     provider: typeof rule.provider === 'string' ? rule.provider : '',
     model: typeof rule.model === 'string' ? rule.model : '',
     ...(rule.reasoningEffort === undefined ? {} : { reasoningEffort: rule.reasoningEffort }),
+    ...(rule.tier === undefined ? {} : { tier: rule.tier }),
+    ...(rule.routes === undefined ? {} : { routes: rule.routes.map(route => ({ ...route })) }),
   }))
 }
 
@@ -150,6 +164,8 @@ function ruleKey(rule: RouteRule): string {
     rule.model,
     rule.reasoningEffort ?? null,
     rule.hasImage ?? null,
+    rule.tier ?? null,
+    rule.routes ?? null,
     rule.keywords,
   ])
 }

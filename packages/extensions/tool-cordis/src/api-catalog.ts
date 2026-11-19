@@ -4605,6 +4605,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'notice', description: 'the route and the instant it should be tried again.' }],
   },
   {
+    name: 'llm/quota-remaining',
+    mode: 'waterfall',
+    signature: '\'llm/quota-remaining\'(request: QuotaRemainingRequest, next: () => Promise<QuotaRemaining | undefined>): Promise<QuotaRemaining | undefined>',
+    summary: 'Ask a provider how much replenishing quota remains on a route.',
+    description: 'Ask a provider how much replenishing quota remains on a route. A listener that does not own `request.provider` calls `next()`. The default is no reading. Routing uses a cached reading and does not wait on this waterfall while it claims a message.',
+    parameters: [{ name: 'request', description: 'the route and a cancellation signal.' }],
+  },
+  {
     name: 'llm/quota-window',
     mode: 'waterfall',
     signature: '\'llm/quota-window\'(request: QuotaWindowRequest, next: () => Promise<QuotaWindowPlan | undefined>): Promise<QuotaWindowPlan | undefined>',
@@ -7005,6 +7013,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface QuotaHoldNotice {\n    readonly provider: string;\n    readonly resumeAtMs: number;\n}',
   },
   {
+    name: 'QuotaRemaining',
+    declaration: 'export interface QuotaRemaining {\n    readonly remainingRatio: number;\n}',
+  },
+  {
+    name: 'QuotaRemainingRequest',
+    declaration: 'export interface QuotaRemainingRequest {\n    readonly provider: string;\n    readonly signal: AbortSignal;\n}',
+  },
+  {
     name: 'QuotaWindowKind',
     declaration: 'export type QuotaWindowKind = \'interval\' | \'weekly\' | \'unknown\';',
   },
@@ -7154,7 +7170,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RequestErrorAction',
-    declaration: 'export type RequestErrorAction = {\n    kind: \'retry\';\n} | undefined;',
+    declaration: 'export type RequestErrorAction = {\n    kind: \'retry\';\n    selection?: Readonly<ModelSelection>;\n} | undefined;',
   },
   {
     name: 'RequestHeaderReason',

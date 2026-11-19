@@ -68,7 +68,126 @@ kind: "package-reference"
 
 正因为不声明任何条件的规则什么都不匹配，部署要用上面那两条 `hasImage` 规则表达「其余所有任务」：一条管不带图的任务，一条管带图的任务。也正是这两条兜底规则让熔断能真的挪走任务——某条规则的通道被绕开后，接手的是下一条**匹配得上**的规则；表里若没有一条能匹配上的规则，Agent 就会留在它原本那条（也就是刚失败的）通道上。
 
-答不了话的通道比没有通道更糟：额度耗尽、凭证失效、反代不通，都会让请求直接失败。插件因此会盯住每条通道自己的成败，并绕开一直失败的通道。连续失败达到 `failureThreshold` 次（默认 2 次）后，这条通道被绕开 `cooldownMs` 毫秒（默认 5 分钟），任务改由下一条合适的规则接手。通道一旦答话立刻恢复资格；阈值设为 0 则永不绕开。冷却是**墙上的钟**而不是重试预算：冷却一过，这条通道重新有资格，下一条匹配任务会再给它一次机会，而它若再次失败会立刻被重新绕开——失败计数是留着的，不会因为冷却到期而清零。code 为 `QUOTA_WINDOW` 的失败不计入这些连续失败：进行中的步骤留在这条通道上等待，`llm/quota-hold` 通知则让之后的自动路由认领跳过这条通道，直到报告的恢复时刻。固定模式不看这个跳过。
+答不了话的通道比没有通道更糟：额度耗尽、凭证失效、反代不通，都会让请求直接失败。插件因此会盯住每条通道自己的成败，并绕开一直失败的通道。连续失败达到 `failureThreshold` 次（默认 2 次）后，这条通道被绕开 `cooldownMs` 毫秒（默认 5 分钟），任务改由下一条合适的规则接手。通道一旦答话立刻恢复资格；阈值设为 0 则永不绕开普通失败。冷却是**墙上的钟**而不是重试预算：冷却一过，这条通道重新有资格，下一条匹配任务会再给它一次机会，而它若再次失败会立刻被重新绕开——失败计数是留着的，不会因为冷却到期而清零。
+
+不写下面的新段落时，旧规则表的行为与以前相同：分类只写调试日志，粘性、费用和回退默认关闭，健康度仍是上面的连续失败熔断。
+
+### 难度分层
+
+分类器在认领消息时算出 `simple`、`standard` 或 `hard`，默认不额外调用模型。它看这些信号：正文长度、会话里最近一次用量合计、图片或文件、`tool/call` 次数、`todo_write` / `plan` 是否出现过、代码围栏、三条以上的步骤列表、推理档位，以及中英关键词和明示（例如「深度思考」「think hard」「简短」）。空的关键词数组表示用内置词表；写上非空数组则整表替换。
+
+规则可以多一个 `tier` 条件，和关键词、`hasImage` 一起成立才命中。`routes` 非空时，它替换这条规则自己的 `provider` / `model`，成为这条规则的候选列表。`tierRoutes` 写在规则表之后：没有更早的规则接住时，按当前档位的列表再选一次。另一插件可以 `provide` 名为 `modelRouterClassifier` 的服务来替换分类器；决策不能等待，所以这个服务必须同步返回。
+
+```yaml
+classifier:
+  enabled: true
+stickiness:
+  enabled: false
+health:
+  mode: consecutive
+tierRoutes:
+  hard:
+    - provider: minimax-official
+      model: MiniMax-M3.1-Flash
+      reasoningEffort: high
+rules:
+  - name: hard-writing
+    tier: hard
+    keywords: ['小说']
+    routes:
+      - provider: slefminimax
+        model: MiniMax-M3.1-Flash
+        reasoningEffort: max
+      - provider: dpv41f
+        model: deepseek-v4.1-flash
+    provider: slefminimax
+    model: MiniMax-M3.1-Flash
+```
+
+每次认领都会打一条 debug 日志，带上档位和三档分数，例如 `tier hard (simple=0 standard=1 hard=8; hint-hard)`。
+
+### 会话粘性
+
+`stickiness.enabled` 默认 `false`。打开之后，自动模式里某个 Agent 一旦被路由，后续轮次就留在同一条通道上，免得换道丢掉提示缓存和文风。下列情况才会离开：通道正在冷却、被额度窗口 `hold` 按住、预算用尽、剩余额度为 0，或因鉴权 / 4xx 配置错误被标成不可用；难度档位上升达到 `upgradeSteps`（默认 1，即 simple 到 standard 也换；设为 2 则只有 simple 到 hard 才换）；任务带图而这条通道不收图。难度下降不换道。粘性记在进程里的 Agent 对象上，进程重启后的下一轮会重新按规则表选。
+
+离开时的原因和选路用同一条 info 日志，例如 `leaving p1/m1 because the task rose from simple to hard`。
+
+### 线路健康分
+
+`health.mode` 默认 `consecutive`，也就是上面的「连续 `failureThreshold` 次、冷却 `cooldownMs`」。写成 `scored` 之后，自动路由在所有命中且能兑现的候选里挑更健康的一条；分数相同则仍按规则表顺序，因此全都健康时行为和以前一样。
+
+分数用成功与否、延迟和首 token 时间的指数滑动平均。失败按类加权：超时、5xx、网络和未分类各记 1，短 429（`RATE_LIMIT`）默认记 0.5，所以更不容易熔断；`QUOTA` 一次就记满阈值。鉴权码和其余 4xx 不进冷却，而是把通道标成不可用，直到 `llm/adapters-updated` 或 `loader/volatile-update`（配置或线路注册变了）才清除。加权失败达到阈值后进入开路，冷却从 `cooldownMs` 起按 `backoffFactor`（默认 2）加倍，带 `jitterRatio` 抖动，上限 `maxCooldownMs`。冷却结束后放进 `probeLimit` 个探测请求（默认 1）；探测成功则恢复，失败则加长冷却。
+
+`failureThreshold: 0` 仍不为普通失败开冷却。鉴权不可用和 `hold` 不受这个 0 影响。
+
+失败码 `QUOTA_WINDOW` 不记熔断。本插件监听 `llm/quota-hold`，用通知里的 `resumeAtMs` 调用 `hold`。自动模式的后续认领会跳过这条通道，直到该时刻；粘性打开时，离开原因写明额度窗口。`fixed` 模式不看这个跳过：进行中的这一步仍由额度等待插件停在原通道上，到点后续跑。
+
+### 额度与费用
+
+`cost.enabled` 默认 `false`。不写 `pricing` 时，打开它也不会改路由。每条价格写明每百万输入 token 和输出 token 的价格、可选币种，以及可选的 24 小时和 30 天预算。用量和估算费用只留在进程内存里，重启后清零。预算用尽的通道在自动模式里被跳过，原因是 budget。
+
+有剩余额度接口的供应商走 `llm/quota-remaining`。MiniMax 复用已有的用量时钟，不另开端点。认领时异步读取，下一次认领才用上读数。剩余比例降到 `cost.remainingThreshold`（默认 0.2）以下时，这条通道的健康分按比例下降，不必等到 429。读数为 0 则跳过，原因是 quota。
+
+```yaml
+cost:
+  enabled: true
+  remainingThreshold: 0.2
+pricing:
+  - provider: minimax-official
+    model: MiniMax-M3.1-Flash
+    inputPerMillion: 1.2
+    outputPerMillion: 4
+    currency: USD
+    dailyBudget: 20
+    monthlyBudget: 400
+```
+
+### 回退链
+
+`fallback.enabled` 默认 `false`。打开后，规则上非空的 `routes` 就是有序候选。选中的通道在写出任何正文之前失败时，恢复动作带上下一条仍然健康、没被 hold、也没超出预算或剩余额度的候选，同一步最多改 `maxHops` 次（默认 1）。`model.select` 在恢复期间仍然只作用于下一步。`fixed` 模式和 `QUOTA_WINDOW` 不改道。
+
+已经写进流里的半段不会交给下一条通道。失败的尝试记成 `assistant/attempt`，不进入下一次请求的模型历史。下一条通道看到的是这次失败之前的对话，加上 harness 原有的换模型通知。
+
+```yaml
+fallback:
+  enabled: true
+  maxHops: 2
+```
+
+`xai-official` 可以排进同一条有序候选。提示不足 20 万 token 时，`grok-4.7` 是每百万输入 / 输出 2 / 6 美元，`grok-build-0.1` 是 1 / 2 美元；达到 20 万 token 后 xAI 对两者都按两倍计费。写进 `pricing` 就能改掉。没有 `XAI_API_KEY` 时这条路由不列出模型，路由器会跳过它。随包的网页规则表不默认改走 Grok。
+
+```yaml
+rules:
+  - name: grok-fallback
+    keywords: ['小说']
+    provider: minimax-official
+    model: MiniMax-M3.1-Flash
+    routes:
+      - provider: minimax-official
+        model: MiniMax-M3.1-Flash
+      - provider: xai-official
+        model: grok-4.7
+pricing:
+  - provider: xai-official
+    model: grok-4.7
+    inputPerMillion: 2
+    outputPerMillion: 6
+    currency: USD
+  - provider: xai-official
+    model: grok-build-0.1
+    inputPerMillion: 1
+    outputPerMillion: 2
+    currency: USD
+fallback:
+  enabled: true
+  maxHops: 1
+```
+
+### 可观测性
+
+每次认领都记在进程内的 `ctx.modelRouter` 上：命中的规则、档位和分数、候选及当时的健康分、选中的通道、离开原因、累计 token、估算费用，以及这次回答结束后的延迟和首 token 时间。`snapshot()` 按通道汇总，`decisions()` 保留最近 50 次认领。插件页没有单独的统计远程接口，桌面设置页读不到这份内存。
+
+自动模式离开一条通道，或同一步发生回退时，会话追加 `model-router/notice`。聊天区用和额度等待相同的一行显示原因。这条事件不进入模型历史。
 
 ### 路由模式
 
@@ -87,12 +206,12 @@ kind: "package-reference"
 
 目录按规则点名的确切 model 逐个解析，而不是去列举某条通道的模型列表。通道自己的模型列表会在该通道的凭证尚未就绪时把它报成空的，而一条暂时答不了话的通道，仍然是规则点名的那个通道。插件自身的启动会（有界地）等规则点名的通道注册完成，这样会话的第一个 turn 就走路由，而不是退回 Agent 自己的通道。
 
-失败信息来自 `agent/request-error` waterfall——每次请求尝试失败都会经过它；答话信息来自 `assistant/message` 会话事件，它写明了是哪个 provider 应答的。插件在这个 waterfall 上抢在重试策略之前监听，因此看到的是每一次失败尝试，而不只是重试策略放行的那几次。这份状态按插件保存，而不是按会话保存：一条通道在某个会话里答不了话，在另一个会话里同样答不了，于是下一个会话的决策不必再付一次上一轮已经付过的失败代价。
+失败信息来自 `agent/request-error` waterfall——每次请求尝试失败都会经过它；答话信息来自 `assistant/message` 会话事件，它写明了是哪个 provider 应答的。插件在这个 waterfall 上抢在重试策略之前监听，因此看到的是每一次失败尝试，而不只是重试策略放行的那几次。流式帧提供延迟和首 token 时间，只进入健康分，不进入连续失败计数。这份状态按插件保存，而不是按会话保存：一条通道在某个会话里答不了话，在另一个会话里同样答不了，于是下一个会话的决策不必再付一次上一轮已经付过的失败代价。分类、粘性和选路都在同一次认领里完成，决策仍然是同步的。
 
 <a id="further-exploration"></a>
 ## 延伸探索
 
-- 规则本身是数据：`packages/core/model-router/src/rules.ts` 是匹配器，`packages/core/model-router/src/catalog.ts` 是缓存的注册表视图。
+- 规则本身是数据：`packages/core/model-router/src/rules.ts` 是匹配器，`packages/core/model-router/src/classify.ts` 是默认分类器，`packages/core/model-router/src/health.ts` 是熔断，`packages/core/model-router/src/catalog.ts` 是缓存的注册表视图。
 - `packages/client/ui-settings-model-router` 是浏览器半侧，在插件页上编辑这张表。
 - 插件写入的接口是 `packages/core/agent/src/runtime-types.ts` 里的 `agent.model.select()`；循环捕获选择的位置在 `packages/core/agent-loop/src/agent.ts`。
 - `packages/llm/llm-local-bridge` 注册了本插件通常在其间切换的随包本地反代通道。
@@ -118,7 +237,7 @@ kind: "package-reference"
 
 #### KV Cache 影响
 
-被路由到的通道替换了请求的 provider 与 model，因此上一个 provider 为这段对话缓存的前缀不会被复用：换道之后的请求是一次独立的模型请求，而不是接在之前那次之后追加。当决策保持 Agent 原有通道时，请求内容没有任何变化，因而已经可复用的前缀保持完整。
+被路由到的通道替换了请求的 provider 与 model，因此上一个 provider 为这段对话缓存的前缀不会被复用：换道之后的请求是一次独立的模型请求，而不是接在之前那次之后追加。当决策保持 Agent 原有通道时，请求内容没有任何变化，因而已经可复用的前缀保持完整。打开粘性之后，后续轮次继续用同一条通道，这段前缀就可以接着复用；档位上升、通道不健康或任务开始带图时才会换道，换道仍走 harness 原有的换模型通知。
 
 ## 已知限制与后续工作
 
@@ -127,7 +246,12 @@ kind: "package-reference"
 - **规则只读消息。** 一条规则看到的是被认领消息的正文，以及它是否带图。它看不到 Agent 的预设、工具集、任务的历史长度，也看不到部署自己认为这是什么性质的工作，因此同一件事用不同措辞说出来，可能落到不同通道。
 - **换道会丢掉上一个 provider 的 replay state。** harness 只让拥有该数据的 adapter 回放助手历史，因此换通道后发送的历史不含那份状态。早期轮次里带过 provider 专属 replay 数据的任务，可能在对话中途丢掉它。
 - **effort 不对部署的凭证做校验。** 插件只检查目标通道是否提供所请求的档位，不提供就放弃，但目标通道凭证缺失时，仍会在请求阶段以该 provider 自己的错误失败，而不是在路由阶段失败。
-- **进行中的步骤没有跨通道回退。** 决策之后通道失败时不会换另一条通道重试，harness 自己的重试策略仍留在它选中的那条通道上。下一个决策会绕开一直失败的通道，于是后续任务落到别处——但撞上这次失败的任务本身仍然失败。例外是 `QUOTA_WINDOW`：它在同一条通道上等待，并恢复该步骤。之后的自动路由认领会跳过这条通道，直到暂停结束。
+- **回退不重放半段正文。** `fallback.enabled` 默认关闭。打开后，只在通道写出正文之前失败时，同一步才改选下一条候选。已经流式写出的文字留在 `assistant/attempt` 里，不会交给下一条通道。`fixed` 模式和 `QUOTA_WINDOW` 仍停在原通道上。
+- **分类器不调用模型。** 它只看长度、用量、附件、工具历史和关键词。同一件事换一种说法，档位可能不同。`modelRouterClassifier` 可以换成别的同步实现，但认领当下不能等待另一次模型调用。
+- **粘性不跨进程。** 记录挂在当前 Agent 对象上。重启之后的下一轮按规则表重选。
+- **插件页不编辑档位和候选列表。** 保存时会原样写回 `tier` 和 `routes`，页面上没有这两项的控件。只在 YAML 里改它们。
+- **健康分默认关闭。** 不写 `health.mode: scored` 时仍是连续失败熔断。`QUOTA_WINDOW` 不记次数。`llm/quota-hold` 按恢复时刻跳过自动路由；`fixed` 模式仍在原通道上等待。
+- **费用和统计不跨进程。** 没有价格元数据时费用逻辑是空操作。用量、预算和 `ctx.modelRouter` 都在内存里。剩余额度是异步读数，当前这一次认领还用不上。插件页不展示这份汇总。
 
 <a id="dev-note"></a>
 ### 开发备注

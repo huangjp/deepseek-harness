@@ -463,6 +463,7 @@
       "@deepseek-ai/dsh-llm-quota-wait": ["./packages/llm/llm-quota-wait/src"],
       "@deepseek-ai/dsh-llm-replay": ["./packages/test-support/llm-replay/src"],
       "@deepseek-ai/dsh-llm-retry": ["./packages/llm/llm-retry/src"],
+      "@deepseek-ai/dsh-llm-xai": ["./packages/llm/llm-xai/src"],
       "@deepseek-ai/dsh-loader-smoke": ["./packages/test-support/loader-smoke/src"],
       "@deepseek-ai/dsh-lsp": ["./packages/lsp/lsp/src"],
       "@deepseek-ai/dsh-lsp-stdio": ["./packages/lsp/lsp-stdio/src"],

@@ -144,9 +144,54 @@ export interface MiniMaxQuotaClockInput {
  */
 export async function resolveMiniMaxQuotaWindow(input: MiniMaxQuotaClockInput): Promise<QuotaWindowPlan> {
   const now = input.now ?? Date.now
+  const plan = await readFirstClock(input, body => readMiniMaxQuotaWindow(body, now()))
+  return plan ?? { window: 'unknown' }
+}
+
+/**
+ * Tighter remaining fraction from one usage-clock body, from 0 to 1.
+ *
+ * Both the 5-hour window and the weekly window are considered. The smaller
+ * percent is the one that runs out first. A rejected `base_resp` yields nothing.
+ * @param body - parsed JSON from the usage clock.
+ * @returns the remaining fraction, or undefined when the body has no percent.
+ */
+export function readMiniMaxRemainingRatio(body: unknown): number | undefined {
+  if (!isRecord(body)) return undefined
+  const base = body['base_resp']
+  if (isRecord(base) && base['status_code'] !== 0) return undefined
+  const rows = body['model_remains']
+  if (!Array.isArray(rows)) return undefined
+  const row = pickRow(rows)
+  if (row === undefined) return undefined
+  const values = [row['current_interval_remaining_percent'], row['current_weekly_remaining_percent']]
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+  if (values.length === 0) return undefined
+  return Math.min(1, Math.max(0, Math.min(...values) / 100))
+}
+
+/**
+ * Read the tighter remaining fraction from the first usable usage clock.
+ * @param input - endpoint, key, and abort signal.
+ * @returns the fraction, or undefined when no clock reports one.
+ */
+export async function resolveMiniMaxQuotaRemaining(input: MiniMaxQuotaClockInput): Promise<number | undefined> {
+  return readFirstClock(input, readMiniMaxRemainingRatio)
+}
+
+/**
+ * Walk the usage-clock URLs and return the first body a reader accepts.
+ * @param input - endpoint, key, and abort signal.
+ * @param read - turns one parsed body into a result, or undefined to try the next URL.
+ * @returns the first accepted result.
+ */
+async function readFirstClock<T>(
+  input: MiniMaxQuotaClockInput,
+  read: (body: unknown) => T | undefined,
+): Promise<T | undefined> {
   const fetchImpl = input.fetch ?? globalThis.fetch
   for (const url of minimaxQuotaClockUrls(input.baseURL)) {
-    if (input.signal.aborted) return { window: 'unknown' }
+    if (input.signal.aborted) return undefined
     let response: Response
     try {
       response = await fetchImpl(url, {
@@ -171,10 +216,10 @@ export async function resolveMiniMaxQuotaWindow(input: MiniMaxQuotaClockInput): 
     } catch {
       continue
     }
-    const plan = readMiniMaxQuotaWindow(parsed, now())
-    if (plan !== undefined) return plan
+    const result = read(parsed)
+    if (result !== undefined) return result
   }
-  return { window: 'unknown' }
+  return undefined
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
