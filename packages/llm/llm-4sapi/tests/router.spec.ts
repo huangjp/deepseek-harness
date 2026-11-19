@@ -1,104 +1,87 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import { agentEvents } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
-import { apply, type Config, type RuleConfig } from '@deepseek-ai/dsh-model-router'
+import { decide, ModelCatalog, ProviderHealth, signalsOf } from '@deepseek-ai/dsh-model-router'
+import type { RouteRule } from '@deepseek-ai/dsh-model-router'
 import { FOURSAPI_PROVIDER } from '../src/catalog.ts'
 import * as Foursapi from '../src/index.ts'
 
 afterEach(() => { vi.unstubAllEnvs() })
 
-function volatile<T>(value: T): { get: () => T } {
-  return { get: () => value }
-}
-
-function routerConfig(rules: readonly RuleConfig[]): Config {
-  return {
-    enabled: volatile(true),
-    rules: volatile(rules),
-    failureThreshold: volatile(2),
-    cooldownMs: volatile(300_000),
-    classifier: volatile({
-      enabled: false,
-      promptCharsStandard: 1_200,
-      promptCharsHard: 4_000,
-      contextTokensStandard: 8_000,
-      contextTokensHard: 32_000,
-      toolUseStandard: 1,
-      toolUseHard: 6,
-      hardMark: 4,
-      simpleMark: 3,
-    }),
-    stickiness: volatile({ enabled: false, upgradeSteps: 1 }),
-    health: volatile({
-      mode: 'consecutive',
-      windowSize: 20,
-      ewmaAlpha: 0.3,
-      maxCooldownMs: 1_800_000,
-      backoffFactor: 2,
-      jitterRatio: 0,
-      probeLimit: 1,
-      latencyBudgetMs: 20_000,
-      ttftBudgetMs: 4_000,
-      weights: { timeout: 1, server: 1, network: 1, rateLimit: 0.5, unknown: 1 },
-    }),
-    tierRoutes: volatile({ simple: [], standard: [], hard: [] }),
-    cost: volatile({ enabled: false, remainingThreshold: 0.2 }),
-    pricing: volatile([]),
-    fallback: volatile({ enabled: true, maxHops: 1 }),
-  }
-}
-
-const rule: RuleConfig = {
+const rule: RouteRule = {
   name: 'relay',
   keywords: ['relay'],
+  hasImage: undefined,
   provider: FOURSAPI_PROVIDER,
   model: 'demo-model',
+  reasoningEffort: undefined,
 }
 
-function claim(ctx: Context): string[] {
-  const selected: string[] = []
-  const agent = {
-    model: {
-      current: () => ({ provider: 'deepseek-official', model: 'deepseek-flash' }),
-      select: (target: { provider: string; model: string }) => {
-        selected.push(`${target.provider}/${target.model}`)
-      },
-      routingMode: () => 'auto' as const,
-    },
-    session: { snapshotEvents: () => [], append: () => undefined },
-  } as Agent
-  agentEvents(ctx, agent).emit('agent/inbox/claimed', {
-    message: createUserMessage({
-      content: [{ type: 'text', text: 'please relay this' }],
-      source: { kind: 'user' },
-    }),
-    turn: 1,
+function health(): ProviderHealth {
+  return new ProviderHealth(() => ({
+    failureThreshold: 2,
+    cooldownMs: 300_000,
+    mode: 'consecutive',
+    windowSize: 20,
+    ewmaAlpha: 0.3,
+    maxCooldownMs: 1_800_000,
+    backoffFactor: 2,
+    jitterRatio: 0,
+    probeLimit: 1,
+    latencyBudgetMs: 20_000,
+    ttftBudgetMs: 4_000,
+    weights: { timeout: 1, server: 1, network: 1, rateLimit: 0.5, unknown: 1 },
+  }))
+}
+
+async function mount(key: string | undefined): Promise<Context> {
+  if (key === undefined) vi.stubEnv('FOURSAPI_API_KEY', '')
+  else vi.stubEnv('FOURSAPI_API_KEY', key)
+  const ctx = new Context()
+  await ctx.plugin(LlmRuntime)
+  await ctx.plugin(Foursapi, {
+    models: [{ id: 'demo-model' }],
+    usePricingEndpoint: false,
   })
-  return selected
+  return ctx
+}
+
+function decision(catalog: ModelCatalog, routeHealth: ProviderHealth) {
+  const message = createUserMessage({
+    content: [{ type: 'text', text: 'please relay this' }],
+    source: { kind: 'user' },
+  })
+  return decide({
+    rules: [rule],
+    signals: signalsOf(message),
+    classification: undefined,
+    tierRoutes: { simple: [], standard: [], hard: [] },
+    sticky: undefined,
+    stickinessEnabled: false,
+    upgradeSteps: 1,
+    health: routeHealth,
+    catalog,
+    current: { provider: 'deepseek-official', model: 'deepseek-flash' },
+  })
 }
 
 it('skips the route until a key exists, then selects the listed model', async () => {
-  const absent = new Context()
-  await absent.plugin(LlmRuntime)
-  await absent.plugin(Foursapi, {
-    models: [{ id: 'demo-model' }],
-    usePricingEndpoint: false,
-  })
-  await apply(absent, routerConfig([rule]))
-  expect(claim(absent)).toEqual([])
+  const absent = await mount(undefined)
+  const absentCatalog = new ModelCatalog(absent)
+  await absentCatalog.refresh([rule])
+  expect(absentCatalog.has(FOURSAPI_PROVIDER, 'demo-model')).toBe(false)
+  expect(decision(absentCatalog, health()).kind).toBe('unchanged')
   await absent.fiber.dispose()
 
-  vi.stubEnv('FOURSAPI_API_KEY', 'fixture-api-key')
-  const present = new Context()
-  await present.plugin(LlmRuntime)
-  await present.plugin(Foursapi, {
-    models: [{ id: 'demo-model' }],
-    usePricingEndpoint: false,
-  })
-  await apply(present, routerConfig([rule]))
-  expect(claim(present)).toEqual([`${FOURSAPI_PROVIDER}/demo-model`])
+  const present = await mount('fixture-api-key')
+  const presentCatalog = new ModelCatalog(present)
+  await presentCatalog.refresh([rule])
+  expect(presentCatalog.has(FOURSAPI_PROVIDER, 'demo-model')).toBe(true)
+  const selected = decision(presentCatalog, health())
+  expect(selected.kind).toBe('select')
+  if (selected.kind === 'select') {
+    expect(selected.target).toMatchObject({ provider: FOURSAPI_PROVIDER, model: 'demo-model' })
+  }
   await present.fiber.dispose()
 })
