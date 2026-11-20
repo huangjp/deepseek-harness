@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-tool-minimax-video",
   "description": "MiniMax video tools: generate a video through MiniMax's task endpoint (polling and storing the finished MP4), and ask a MiniMax model what happens in a video.",
-  "version": "0.2.1-rc.3",
+  "version": "0.2.2-rc.5",
   "publishConfig": {
     "access": "public"
   },
