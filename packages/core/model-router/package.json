@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-model-router",
   "description": "Task-driven model routing: picks the registered provider route that fits the task about to run",
-  "version": "0.2.1-rc.3",
+  "version": "0.2.2-rc.5",
   "publishConfig": {
     "access": "public"
   },

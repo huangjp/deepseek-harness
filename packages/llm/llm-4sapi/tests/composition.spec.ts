@@ -18,7 +18,7 @@ async function mount(config: object = {}): Promise<Context> {
   await ctx.plugin(Loader)
   ctx.provide('profileContext', {
     name: 'desktop', dir: '/profile', patchPath: '/profile/cordis.patch.yml', installAnchor: '/profile/package.json',
-    cwd: '/workspace', home: '/home', startedBundles: [], overlays: [], telemetryDisabledEnv: undefined,
+    cwd: '/workspace', home: '/home', startedBundles: [], overlayPaths: [], telemetryDisabledEnv: undefined,
   } as never)
   await ctx.plugin(ConfigEditor)
   await ctx.plugin(SettingsForms)

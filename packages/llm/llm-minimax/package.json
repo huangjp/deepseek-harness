@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-llm-minimax",
   "description": "MiniMax as a first-party provider route: the Anthropic-compatible Messages endpoint with MiniMax's thinking depths, registered from code rather than as a user-declared custom model.",
-  "version": "0.2.1-rc.3",
+  "version": "0.2.2-rc.5",
   "publishConfig": {
     "access": "public"
   },

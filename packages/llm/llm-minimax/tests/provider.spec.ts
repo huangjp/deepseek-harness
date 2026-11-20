@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { resolveProfiles } from '@deepseek-ai/dsh-llm-pi-ai'
+import { resolveProfiles } from '@deepseek-ai/dsh-llm-pi-ai/src/config.ts'
 import type { ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
 import { getSupportedThinkingLevels } from '@deepseek-ai/dsh-llm-pi-ai/src/models.ts'
 import {

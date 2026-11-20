@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context, Service } from '@deepseek-ai/cordis'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
-import { resolveProfiles } from '@deepseek-ai/dsh-llm-pi-ai'
+import { resolveProfiles } from '@deepseek-ai/dsh-llm-pi-ai/src/config.ts'
 import { getSupportedThinkingLevels } from '@deepseek-ai/dsh-llm-pi-ai/src/models.ts'
 import {
   XAI_DEFAULT_BASE_URL,
