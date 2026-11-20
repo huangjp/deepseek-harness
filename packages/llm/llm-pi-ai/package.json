@@ -18,6 +18,10 @@
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./route-support": {
+      "types": "./lib/types/route-support.d.ts",
+      "default": "./lib/route-support.js"
+    },
     "./src/*": "./src/*",
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json"
@@ -25,6 +29,7 @@
   "files": [
     "locale/*.json",
     "lib/index.js",
+    "lib/route-support.js",
     "lib/types/**/*.d.ts",
     "lib/types/**/*.d.ts.map",
     "lib/**/*.js.map",

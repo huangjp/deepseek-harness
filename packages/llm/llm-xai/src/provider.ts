@@ -22,8 +22,7 @@ import type {} from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-fs'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { PiAiAdapter, type PiAiModelProfile, type PiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
-import { authContextFrom, credentialStoreFrom } from '@deepseek-ai/dsh-llm-pi-ai/src/auth.ts'
-import { resolveProfiles } from '@deepseek-ai/dsh-llm-pi-ai/src/config.ts'
+import { authContextFrom, credentialStoreFrom, resolveProfiles } from '@deepseek-ai/dsh-llm-pi-ai/route-support'
 import { classifyXaiProviderError } from './errors.ts'
 
 /** Provider route this plugin owns. A saved selection names exactly this id. */

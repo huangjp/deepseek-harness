@@ -14,6 +14,8 @@ import * as LlmPiAi from '@deepseek-ai/dsh-llm-pi-ai'
 import { PiAiAdapter } from '@deepseek-ai/dsh-llm-pi-ai'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { getBuiltinModels } from '@earendil-works/pi-ai/providers/all'
+import { authContextFrom, credentialStoreFrom, resolveProfiles as routeResolveProfiles } from '@deepseek-ai/dsh-llm-pi-ai/route-support'
+import { credentialStoreFrom as authStore, authContextFrom as authContext } from '../src/auth.ts'
 import { DEFAULT_IMAGE_OFFLOAD_COUNT_QUANTUM, DEFAULT_MAX_REQUEST_IMAGE_BYTES, DEFAULT_MAX_REQUEST_IMAGES, resolveProfiles } from '../src/config.ts'
 import { memoryAuth } from './auth-double.ts'
 import { assemble } from './assemble.ts'
@@ -559,6 +561,12 @@ describe('provider profile lifecycle', () => {
       'mapUsage',
       'toStreamChunks',
     ]) expect(LlmPiAi).not.toHaveProperty(helper)
+  })
+
+  it('exposes the same helpers from the compiled route-support subpath', () => {
+    expect(routeResolveProfiles).toBe(resolveProfiles)
+    expect(authContextFrom).toBe(authContext)
+    expect(credentialStoreFrom).toBe(authStore)
   })
 
   it('registers every profile atomically and unregisters on dispose', async () => {

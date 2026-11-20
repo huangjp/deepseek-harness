@@ -26,8 +26,7 @@ import type {} from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-fs'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { PiAiAdapter, type PiAiModelProfile, type ResolvedPiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
-import { authContextFrom, credentialStoreFrom } from '@deepseek-ai/dsh-llm-pi-ai/src/auth.ts'
-import { resolveProfiles } from '@deepseek-ai/dsh-llm-pi-ai/src/config.ts'
+import { authContextFrom, credentialStoreFrom, resolveProfiles } from '@deepseek-ai/dsh-llm-pi-ai/route-support'
 import {
   FOURSAPI_CATALOG_RETRY_MS,
   FOURSAPI_DEFAULT_API_KEY_ENV,

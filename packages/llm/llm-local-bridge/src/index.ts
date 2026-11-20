@@ -44,8 +44,7 @@ import {
   type PiAiProviderProfile,
   type PiAiReasoningEfforts,
 } from '@deepseek-ai/dsh-llm-pi-ai'
-import { authContextFrom, credentialStoreFrom } from '@deepseek-ai/dsh-llm-pi-ai/src/auth.ts'
-import { resolveProfiles } from '@deepseek-ai/dsh-llm-pi-ai/src/config.ts'
+import { authContextFrom, credentialStoreFrom, resolveProfiles } from '@deepseek-ai/dsh-llm-pi-ai/route-support'
 import { resolveImageAttachmentAccess } from '@deepseek-ai/dsh-llm'
 
 export const name = 'llm-local-bridge'
