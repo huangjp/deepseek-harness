@@ -239,7 +239,9 @@ async function boot(options: BootOptions): Promise<string> {
       export(message) { lines.push(message.args.map(entry => String(entry)).join(' ')) },
     })
   }
-  context.provide('connection', { requestRejection: () => undefined } as never)
+  const owner = { principal: { kind: 'owner' }, signal: { aborted: false } }
+  context.on('webserver/authorize', () => ({ kind: 'allow', peer: owner as never }))
+  context.provide('connection', {})
   await context.plugin(Loader)
   context.loader.builtins.include = Include
   const modules = new Map<string, unknown>([

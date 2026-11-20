@@ -113,7 +113,13 @@ async function boot(options: { trust?: boolean; logs?: string[] } = {}): Promise
     })
   }
   if (options.trust !== false) {
-    context.provide('connection', { requestRejection: () => trust.rejection } as never)
+    const owner = { principal: { kind: 'owner' }, signal: { aborted: false } }
+    context.on('webserver/authorize', (_request, policy) => {
+      if (policy === 'anonymous') return { kind: 'allow' }
+      if (trust.rejection !== undefined) return { kind: 'deny', status: trust.rejection }
+      return { kind: 'allow', peer: owner as never }
+    })
+    context.provide('connection', {})
   }
   await context.plugin(Loader)
   context.loader.builtins.include = Include

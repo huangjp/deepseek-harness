@@ -14372,6 +14372,18 @@ importers:
       '@deepseek-ai/cordis':
         specifier: workspace:~
         version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-client-connection':
+        specifier: workspace:*
+        version: link:../../client/connection
+      '@deepseek-ai/dsh-client-ui-settings-local-bridge':
+        specifier: workspace:*
+        version: link:../../client/ui-settings-local-bridge
+      '@deepseek-ai/dsh-credentials-local':
+        specifier: workspace:*
+        version: link:../../credentials/credentials-local
+      '@deepseek-ai/dsh-host-authentication-token':
+        specifier: workspace:*
+        version: link:../authentication-token
       '@deepseek-ai/dsh-host-webserver':
         specifier: workspace:*
         version: link:../webserver

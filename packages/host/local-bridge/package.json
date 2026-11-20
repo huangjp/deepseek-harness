@@ -60,6 +60,10 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "workspace:~",
+    "@deepseek-ai/dsh-client-connection": "workspace:*",
+    "@deepseek-ai/dsh-client-ui-settings-local-bridge": "workspace:*",
+    "@deepseek-ai/dsh-credentials-local": "workspace:*",
+    "@deepseek-ai/dsh-host-authentication-token": "workspace:*",
     "@deepseek-ai/dsh-host-webserver": "workspace:*"
   }
 }
