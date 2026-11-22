@@ -43,7 +43,7 @@ kind: "package-reference"
 | `xiaoyi.enabled` | `false` | 是否启动华为小艺反代。默认关：它需要华为「AI空间」应用开着对话页 |
 | `xiaoyi.port` | `8123` | 小艺反代端口 |
 | `xiaoyi.python` | 自动探测 | 运行 `bridge/xiaoyi-harvest.py` 的解释器；留空则在 `%LOCALAPPDATA%\Programs\Python` 与 `PATH` 里找 |
-| `xiaoyi.cacheFile` | `%LOCALAPPDATA%\xiaoyi-bridge\auth.json` | 小艺凭证缓存，上游拒绝时会自动重新收割 |
+| `xiaoyi.cacheFile` | `%LOCALAPPDATA%\xiaoyi-bridge\auth.json` | 小艺凭证缓存，上游拒绝时会自动重新收割。超过 24 小时的 cookie 由 `/health` 报为超龄 |
 | `deps.autoStart` | `true` | 已安装但未运行的配套应用是否自动拉起 |
 | `deps.autoRefreshToken` | `false` | 启动时令牌陈旧是否自动刷新。默认关：脚本会**直接改写系统代理注册表**约一分钟，绕开用户自己的代理客户端，把它"系统代理归谁管"的状态弄乱 |
 | `deps.autoRefreshWhileRunning` | `false` | 是否允许反代在**运行期间**换掉陈旧令牌。默认关：一次刷新会把整台机器的系统代理指向拦截代理约一分钟，期间任何其它出境流量（包括另一个反代）都会失败 |
@@ -111,6 +111,14 @@ kind: "package-reference"
 渠道头里的客户端版本与部署形态，取自**账号自己的产品配置**（缓存的 `acc-product-config-v3*.json` 里的 `genieVersion` 与 `deploymentType`）—— 官方客户端自己也是从这份配置里取这两个值的。整组头与客户端发的同形：`X-Product` 是部署形态（`SaaS`），`X-IDE-Name` 是 `WorkBuddy`，`X-Private-Data` 是 `true`，请求里还带上客户端发的 `x-requested-with`、`x-codebuddy-request`、`acp-connection-id` 与 B3 链路追踪头。写死的版本号或手写的产品名，在客户端自动更新后就和真正在跑的那个对不上，而云端的渠道校验读的正是这组头。`GET /health` 会报出当前用的版本与部署形态。
 
 `400` + `code: 11128` 的意思是「云端此刻不接受这次调用」。实测它与请求大小、推理强度、渠道头都无关：90 字的提示词也会撞上；它总在短时间内连续调用之后出现，停几分钟又自己好了。账号本来就有频率与额度上限——云端另一条提示写得很直白："usage exceeds frequency limit … you can switch to the other models"——只是它对不同模型报的码不一样：忙的模型给 `14003`/`no_capacity`（"模型忙，请换模型或稍后重试"），其余的给 `11128`。所以这是**账号侧的限流**，不是反代少了参数。反代把能自动做的都做了：重新收割令牌、等 1.5 秒、把**同一条请求**原样重试一次 —— 它不裁对话，因为这个码与请求内容无关，裁了只会让模型丢掉正在做的事。每次被拒还会写进 `%LOCALAPPDATA%\workbuddy-bridge\channel.log`，记下这次请求的形状（模型、消息条数、提示词字符数、工具数、输出上限、推理强度、配对修复去掉和补上的条数）以及每一次尝试的消息条数与状态码，下次再遇到时就能拿它与一次成功的请求对比。`401`/`403` 走同一条重试路径 —— 令牌被轮换时正是需要它。
+
+### 小艺的会话 cookie
+
+小艺反代自己没有登录这回事：它读的是华为「AI空间」应用放在 WebView2 渲染进程内存里的会话 cookie，而这些 cookie 只有在「小艺」对话页打开并发过一条消息之后才会由账号签发。所以收割这件事依赖一个反代控制不了的桌面应用，它有两种状态要分开报 —— 应用没在跑（`no_app`），或者在跑但还没拿到会话 cookie（`no_cookies`）。每种回答都写明要做什么才能改变这个状态，因为读者要动的正是这两者之间的差别。
+
+收割脚本是 Python 写的，而 Python 按控制台代码页输出（中文 Windows 上是 GBK），Node 读子进程输出却按 UTF-8 解。反代用 `PYTHONIOENCODING=utf-8` 与 `PYTHONUTF8=1` 跑解释器，收回来的字节先按 UTF-8 解，字节不是合法 UTF-8 时再按 GBK 解一次。没有这一层，"为什么拿不到 cookie"这句话到用户眼前就是一堆替换字符。
+
+这些 cookie 能活过一天（实测 40 多小时）。缓存文件按 24 小时算超龄，`/health` 会连同已用时长一起报出来，于是信号比失败先到。反代自己仍然会一直用这枚 cookie，直到上游拒收它，那时再重新收割。
 
 ### 纯文本上游上的工具调用
 

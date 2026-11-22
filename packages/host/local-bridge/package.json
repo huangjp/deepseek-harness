@@ -29,6 +29,7 @@
     "lib/index.js",
     "bridge/bridge.mjs",
     "bridge/backends.mjs",
+    "bridge/child-output.mjs",
     "bridge/weflow.mjs",
     "bridge/toolcalls.mjs",
     "bridge/toolprompt.mjs",
