@@ -39,6 +39,8 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statS
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { decodeChildOutput, pythonUtf8Env } from './child-output.mjs';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
@@ -665,22 +667,30 @@ export class WorkBuddyCloudBackend {
   runHarvester() {
     return new Promise((resolve, reject) => {
       const py = resolvePython(this.cfg);
-      const child = spawn(py, [this.harvestScript], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-      let out = '';
-      let err = '';
+      // Python 在中文 Windows 上默认把 stdout 写成 GBK，不指定编码的话收割器的
+      // 中文报错到 Node 侧就是乱码。
+      const child = spawn(py, [this.harvestScript], {
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: pythonUtf8Env(),
+      });
+      const outChunks = [];
+      const errChunks = [];
       const timer = setTimeout(() => {
         try { child.kill(); } catch { /* ignore */ }
         reject(Object.assign(new Error('token 收割超时（300 秒）'), { code: 'harvest_timeout' }));
       }, 300000);
       timer.unref?.();
-      child.stdout.on('data', (d) => { out += d; });
-      child.stderr.on('data', (d) => { err += d; });
+      child.stdout.on('data', (d) => { outChunks.push(d); });
+      child.stderr.on('data', (d) => { errChunks.push(d); });
       child.on('error', (e) => {
         clearTimeout(timer);
         reject(Object.assign(new Error(`启动 Python 失败（${py}）：${e.message}`), { code: 'no_python' }));
       });
       child.on('close', (code) => {
         clearTimeout(timer);
+        const out = decodeChildOutput(Buffer.concat(outChunks));
+        const err = decodeChildOutput(Buffer.concat(errChunks));
         const line = out.trim().split('\n').pop() || '';
         let parsed = null;
         try { parsed = JSON.parse(line); } catch { /* 下面统一报错 */ }

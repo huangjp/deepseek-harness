@@ -15,8 +15,8 @@
   en: b563e4ec4727d0de
   zh: 44ebe7ceeda3dff6
 /deepseek-ai-dsh-host-local-bridge/use-this-package:
-  en: 7d3f56dd925397c5
-  zh: a781b97c2e0157c4
+  en: b7efb60f125bdeb7
+  zh: f1b5ad66958061c6
 /deepseek-ai-dsh-host-local-bridge/use-this-package/refreshing-while-the-app-runs:
   en: 40ace05a78b39df0
   zh: 1da6562c62de770f
@@ -32,6 +32,9 @@
 /deepseek-ai-dsh-host-local-bridge/understand-the-implementation/reasoning-effort:
   en: 9917c8e33a16f663
   zh: 88774410be73e32d
+/deepseek-ai-dsh-host-local-bridge/understand-the-implementation/the-celia-session-cookie:
+  en: 160c86c13d48bcf9
+  zh: 44d341783629a804
 /deepseek-ai-dsh-host-local-bridge/understand-the-implementation/tool-calls-over-a-text-only-upstream:
   en: 392de49543c2c1b5
   zh: 956edc0f56f769ad

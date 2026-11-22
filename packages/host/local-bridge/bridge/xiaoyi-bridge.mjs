@@ -30,6 +30,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { parseToolCalls } from './toolcalls.mjs';
+import { decodeChildOutput, pythonUtf8Env } from './child-output.mjs';
 import {
   buildCompactToolInstruction, EXTERNAL_TOOLING_NOTICE, looksLikeToolRefusal,
   toolCallTurnText, toolResultTurnText, TOOL_CALL_REFUSAL_REMINDER,
@@ -44,6 +45,12 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
 
 /** 实测最小可用集合。少任何一个都会被 400 拒绝（WAF/csrf 那几个反而不需要）。 */
 const REQUIRED = ['xy_token', 'xy_deviceId', 'xy_appName', 'JSID', 'xyxp'];
+
+/**
+ * xy_token 是会话 cookie：实测 40 多小时后华为不再认。缓存按 24 小时算超龄 ——
+ * 早于实测寿命，好让 `/health` 在请求真的失败之前就报出这枚 cookie 该换了。
+ */
+const TOKEN_TTL_HOURS = 24;
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 
@@ -145,27 +152,56 @@ function cookieHeader(jar) {
 
 // ---------------------------------------------------------------- 收割（spawn Python）
 
+/**
+ * 收割失败时给用户的说法。
+ *
+ * `xy_token` 是**会话 cookie**：它只在华为「AI空间」的 WebView2 内存里，
+ * 磁盘上没有、应用没开就没有。所以失败原因只有两种，每种对应一个明确动作。
+ *
+ * @param {string} code 收割器给的错误码。
+ * @returns {string} 可以直接展示给用户的一句话。
+ */
+function harvestHint(code) {
+  if (code === 'no_app') {
+    return '小艺反代需要华为「AI空间」正在运行：请打开 AI空间，点开「小艺」对话页，'
+      + '随便发一条消息，然后重试（xy_token 只存在于它的内存里）。';
+  }
+  if (code === 'no_cookies') {
+    return '华为「AI空间」在跑，但还没拿到 xy_token：请在 AI空间 里打开「小艺」对话页并'
+      + '发一条消息，让它先完成登录，然后重试。';
+  }
+  return '';
+}
+
 function runHarvester() {
   return new Promise((resolve, reject) => {
     const py = resolvePython();
     const args = [harvestScript];
     if (authCfg.profileDir) args.push('--profile-dir', authCfg.profileDir);
-    const child = spawn(py, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-    let out = '';
-    let err = '';
+    // Python 在中文 Windows 上默认把 stdout 写成 GBK，不指定编码的话收割器的
+    // 中文报错到 Node 侧就是乱码。
+    const child = spawn(py, args, {
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: pythonUtf8Env(),
+    });
+    const outChunks = [];
+    const errChunks = [];
     const timer = setTimeout(() => {
       try { child.kill(); } catch { /* ignore */ }
       reject(Object.assign(new Error('收割器超时（120 秒）'), { code: 'harvest_timeout' }));
     }, 120000);
     timer.unref?.();
-    child.stdout.on('data', (d) => { out += d; });
-    child.stderr.on('data', (d) => { err += d; });
+    child.stdout.on('data', (d) => { outChunks.push(d); });
+    child.stderr.on('data', (d) => { errChunks.push(d); });
     child.on('error', (e) => {
       clearTimeout(timer);
       reject(Object.assign(new Error(`启动 Python 失败（${py}）：${e.message}`), { code: 'no_python' }));
     });
     child.on('close', (code) => {
       clearTimeout(timer);
+      const out = decodeChildOutput(Buffer.concat(outChunks));
+      const err = decodeChildOutput(Buffer.concat(errChunks));
       const line = out.trim().split('\n').pop() || '';
       let parsed = null;
       try { parsed = JSON.parse(line); } catch { /* 下面统一报错 */ }
@@ -175,7 +211,9 @@ function runHarvester() {
         return;
       }
       if (!parsed.ok) {
-        reject(Object.assign(new Error(parsed.error || '收割失败'), { code: parsed.code || 'harvest_failed' }));
+        const hint = harvestHint(parsed.code);
+        reject(Object.assign(new Error(hint ? `${parsed.error || '收割失败'} ${hint}` : (parsed.error || '收割失败')),
+          { code: parsed.code || 'harvest_failed' }));
         return;
       }
       resolve(parsed);
@@ -670,16 +708,24 @@ async function handleHealth(req, res) {
   const cached = loadCache();
   const jar = cached?.cookies || {};
   const missing = REQUIRED.filter((k) => !jar[k]);
+  const ageHours = cached?.savedAt ? (Date.now() - cached.savedAt) / 3600000 : null;
+  // xy_token 是会话 cookie，实测 40 多小时就会失效；这里按 24 小时报超龄，
+  // 让用户在上游真的拒收之前就知道这枚 cookie 该换了。
+  const stale = ageHours !== null && ageHours > TOKEN_TTL_HOURS;
   sendJson(res, 200, {
-    ok: missing.length === 0,
+    ok: missing.length === 0 && !stale,
     token: jar.xy_token ? 'cached' : 'missing',
     missing,
     savedAt: cached?.savedAt || null,
-    ageHours: cached?.savedAt ? Number(((Date.now() - cached.savedAt) / 3600000).toFixed(1)) : null,
+    ageHours: ageHours === null ? null : Number(ageHours.toFixed(1)),
+    stale,
     cacheFile,
     hint: missing.length
       ? '需要 AI空间 正在运行并打开对话页（小艺），xy_token 只能从它的 WebView2 内存里捞'
-      : undefined,
+      : stale
+        ? `缓存的 xy_token 已经 ${ageHours.toFixed(0)} 小时（有效期约 ${TOKEN_TTL_HOURS} 小时），`
+          + '下次请求可能失败：请打开 AI空间 的小艺对话页发一条消息，然后重试。'
+        : undefined,
   });
 }
 

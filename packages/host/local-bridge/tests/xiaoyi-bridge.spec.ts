@@ -1,5 +1,5 @@
 import { createServer } from 'node:net'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -40,12 +40,13 @@ function freePort(): Promise<number> {
 async function boot() {
   cacheDir = await mkdtemp(join(tmpdir(), 'xiaoyi-bridge-'))
   const port = await freePort()
+  const cacheFile = join(cacheDir, 'auth.json')
   const bridge = await startXiaoyiBridge({
     server: { host: '127.0.0.1', port, apiKey: '', cors: '*' },
-    auth: { cacheFile: join(cacheDir, 'auth.json') },
+    auth: { cacheFile },
     chat: { timeoutMs: 5000 },
   })
-  return { bridge, base: `http://127.0.0.1:${port}` }
+  return { bridge, base: `http://127.0.0.1:${port}`, cacheFile }
 }
 
 describe('xiaoyi bridge', () => {
@@ -70,6 +71,21 @@ describe('xiaoyi bridge', () => {
     // 5 个核心 cookie 少一个都会被上游 400，所以这里要求全都点出来。
     expect(body.ok).toBe(false)
     expect(body.missing).toEqual(['xy_token', 'xy_deviceId', 'xy_appName', 'JSID', 'xyxp'])
+  })
+
+  it('flags a cached token that outlived its session lifetime', async () => {
+    const { base, cacheFile } = await boot()
+    await writeFile(cacheFile, JSON.stringify({
+      cookies: { xy_token: 't', xy_deviceId: 'd', xy_appName: 'a', JSID: 'j', xyxp: 'x' },
+      // 48 小时前收的：会话 cookie 只活 40 多小时，早就失效了。
+      savedAt: Date.now() - 48 * 3600 * 1000,
+    }))
+    const res = await fetch(`${base}/health`)
+    const body = await res.json() as { ok: boolean; stale: boolean; ageHours: number; hint?: string }
+    expect(body.stale).toBe(true)
+    expect(body.ok).toBe(false)
+    expect(body.ageHours).toBeGreaterThan(24)
+    expect(body.hint).toContain('AI空间')
   })
 
   it('rejects an empty messages array instead of calling upstream', async () => {
