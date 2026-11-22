@@ -31,6 +31,10 @@ function fakeContext(options: {
       registered.set(event, listenerOptions)
       return () => {}
     },
+    provide: (name: string, value: unknown) => {
+      Reflect.set(ctx, name, value)
+      return () => {}
+    },
     ...(options.omitGet === true ? {} : {
       get: (service: string) => service === 'modelRouterClassifier' ? options.classifier : undefined,
     }),

@@ -187,7 +187,7 @@ fallback:
 
 ### Observability
 
-Every claim is recorded on the in-process `ctx.modelRouter`: the matched rule, the tier and scores, the candidates and their health scores, the chosen route, the reason for leaving, cumulative tokens, the estimated cost, and, once the answer finishes, latency and time to first token. `snapshot()` aggregates by route, and `decisions()` keeps the latest 50 claims. The Plugins page has no stats remote, so the desktop settings page cannot read this memory.
+Every claim is recorded on the in-process `modelRouter` service, which a plugin reads as `ctx.modelRouter` when it injects that service: the matched rule, the tier and scores, the candidates and their health scores, the chosen route, the reason for leaving, cumulative tokens, the estimated cost, and, once the answer finishes, latency and time to first token. `snapshot()` aggregates by route, and `decisions()` keeps the latest 50 claims. The Plugins page has no stats remote, so the desktop settings page cannot read this memory.
 
 When auto mode leaves a route, or the same step falls back, the session appends `model-router/notice`. The chat shows that reason on one row, the same way it shows a quota wait. The event does not enter model history.
 
