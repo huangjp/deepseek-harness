@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-llm-xai",
   "description": "xAI Grok as a first-party provider route: the Responses API with configurable reasoning effort, registered from code rather than as a user-declared custom model.",
-  "version": "0.2.1-rc.3",
+  "version": "0.2.2-rc.5",
   "publishConfig": {
     "access": "public"
   },

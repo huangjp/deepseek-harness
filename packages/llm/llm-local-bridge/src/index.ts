@@ -39,14 +39,12 @@ import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-llm'
 import z from '@deepseek-ai/schemastery'
 import {
-  authContextFrom,
-  credentialStoreFrom,
   PiAiAdapter,
-  resolveProfiles,
   type PiAiModelProfile,
   type PiAiProviderProfile,
   type PiAiReasoningEfforts,
 } from '@deepseek-ai/dsh-llm-pi-ai'
+import { authContextFrom, credentialStoreFrom, resolveProfiles } from '@deepseek-ai/dsh-llm-pi-ai/route-support'
 import { resolveImageAttachmentAccess } from '@deepseek-ai/dsh-llm'
 
 export const name = 'llm-local-bridge'

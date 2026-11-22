@@ -23,21 +23,15 @@
  * @module @deepseek-ai/dsh-llm-minimax/provider
  */
 import type { Context } from '@deepseek-ai/cordis'
-import { assertUsableApiKey, LlmError, resolveImageAttachmentAccess } from '@deepseek-ai/dsh-llm'
+import { LlmError, resolveImageAttachmentAccess } from '@deepseek-ai/dsh-llm'
 import type { QuotaRemaining, QuotaWindowPlan } from '@deepseek-ai/dsh-llm'
-import { credentialRef, type CredentialRef } from '@deepseek-ai/dsh-credentials'
+import { credentialRef, normalizeApiKey, type CredentialRef } from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-fs'
 import { classifyMiniMaxProviderError, resolveMiniMaxQuotaRemaining, resolveMiniMaxQuotaWindow } from './quota.ts'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
-import {
-  authContextFrom,
-  credentialStoreFrom,
-  PiAiAdapter,
-  resolveProfiles,
-  type PiAiModelProfile,
-  type PiAiProviderProfile,
-} from '@deepseek-ai/dsh-llm-pi-ai'
+import { PiAiAdapter, type PiAiModelProfile, type PiAiProviderProfile } from '@deepseek-ai/dsh-llm-pi-ai'
+import { authContextFrom, credentialStoreFrom, resolveProfiles } from '@deepseek-ai/dsh-llm-pi-ai/route-support'
 
 /**
  * Provider route this plugin owns; a saved selection names exactly this id.
@@ -155,14 +149,27 @@ export function minimaxProfile(options: MiniMaxRouteOptions): PiAiProviderProfil
  * @param ref - credential reference the deployment named.
  * @returns the usable key.
  */
+function usableApiKey(raw: string, ref: CredentialRef): string {
+  const checked = normalizeApiKey(raw)
+  if (checked.ok) return checked.value
+  throw new LlmError(
+    checked.reason === 'empty'
+      ? `llm-minimax: the API key resolved from ${ref} is blank; set ${ref} to the raw key`
+        + ' (the web Models page writes it) or export it in the launching environment'
+      : `llm-minimax: the API key resolved from ${ref} contains characters no HTTP header can carry;`
+        + ` set ${ref} to the raw key alone (the web Models page writes it)`,
+    'INVALID_CREDENTIAL',
+  )
+}
+
 async function resolveApiKey(ctx: Context, ref: CredentialRef): Promise<string> {
   const credentials = ctx.get('credentials')
   if (credentials !== undefined) {
     const hit = await credentials.resolve(ref)
-    if (hit !== undefined) return assertUsableApiKey(hit.value, 'llm-minimax', ref)
+    if (hit !== undefined) return usableApiKey(hit.value, ref)
   } else {
     const ambient = launchEnvironmentOf(ctx).get(ref)
-    if (ambient !== undefined && ambient.value.length > 0) return assertUsableApiKey(ambient.value, 'llm-minimax', ref)
+    if (ambient !== undefined && ambient.value.length > 0) return usableApiKey(ambient.value, ref)
   }
   throw new LlmError(
     `llm-minimax: no API key for provider route "${MINIMAX_PROVIDER}"; store ${ref} through the credentials`

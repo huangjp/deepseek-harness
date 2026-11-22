@@ -5,6 +5,7 @@ import { registerCommandConversationNode } from './command.ts'
 import { registerCompactionConversationNode } from './compaction.ts'
 import { registerUnknownConversationFallback } from './fallback.ts'
 import { registerInboxConversationNodes } from './inbox.ts'
+import { registerInheritedHistoryConversationNode } from './inherited-history.ts'
 import { registerMessageConversationNode } from './message.ts'
 import { registerRequestPromptConversationNode } from './request-prompt.ts'
 import { registerQuotaWaitConversationNode } from './quota-wait.ts'
@@ -30,6 +31,7 @@ export function registerConversationNodes(ctx: Context): void {
   registerToolConversationNode(ctx)
   registerCommandConversationNode(ctx)
   registerCompactionConversationNode(ctx)
+  registerInheritedHistoryConversationNode(ctx)
   registerRetryConversationNode(ctx)
   registerQuotaWaitConversationNode(ctx)
   registerRouteNoticeConversationNode(ctx)

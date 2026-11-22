@@ -42,7 +42,8 @@ function composeBundles(): { entries: EntryOptions[]; warnings: string[] } {
   const warn = (message: string, ...args: unknown[]): void => { warnings.push(`${message} ${args.join(' ')}`) }
   const base = loadOverlayPatches('routing-defaults', fileURLToPath(new URL('../../base/cordis.patch.yml', import.meta.url)))
   const web = loadOverlayPatches('routing-defaults', fileURLToPath(new URL('../cordis.patch.yml', import.meta.url)))
-  return { entries: applyEntryPatches(applyEntryPatches([], base, warn), web, warn), warnings }
+  const baseEntries = applyEntryPatches([], base, warn).data
+  return { entries: applyEntryPatches(baseEntries, web, warn).data, warnings }
 }
 
 /** Read the routing table the composed bundles mount. */

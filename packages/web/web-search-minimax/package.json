@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-web-search-minimax",
   "description": "MiniMax server-side web search as a ctx.web search provider: one MiniMax API key makes the harness web_search tool answer from MiniMax's own search.",
-  "version": "0.2.1-rc.3",
+  "version": "0.2.2-rc.5",
   "publishConfig": {
     "access": "public"
   },

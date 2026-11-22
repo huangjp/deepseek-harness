@@ -86,7 +86,7 @@ describe('clearTreeBestEffort', () => {
     expect(() => readFileSync(join(root, 'electron.exe'))).toThrow()
   })
 
-  it('keeps a held entry and clears the rest', async () => {
+  it.skipIf(process.platform !== 'win32')('keeps a held entry and clears the rest', async () => {
     const root = workspace()
     const held = join(root, 'resources', 'default_app.asar')
     writeFile(join(root, 'electron.exe'), 'binary')
@@ -101,7 +101,7 @@ describe('clearTreeBestEffort', () => {
   })
 })
 
-describe('extractElectron', () => {
+describe.skipIf(process.platform !== 'win32')('extractElectron', () => {
   it('replaces the previous distribution', async () => {
     const root = workspace()
     const destination = join(root, 'electron')

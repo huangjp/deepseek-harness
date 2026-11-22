@@ -49,7 +49,7 @@ async function composed(): Promise<Context> {
   writeFileSync(join(dir, 'cordis.yml'), '[]\n')
   const profile = {
     name: 'test', startedBundles: ['test-bundle'], dir, patchPath: join(dir, 'cordis.patch.yml'),
-    installAnchor: join(home, 'package.json'), cwd: home, home, overlays: [], telemetryDisabledEnv: undefined,
+    installAnchor: join(home, 'package.json'), cwd: home, home, overlayPaths: [], telemetryDisabledEnv: undefined,
   }
   const ctx = await boot('test', join(dir, 'cordis.yml'), readProfilePatches('test', profile), (context) => {
     context.provide('profileContext', profile)

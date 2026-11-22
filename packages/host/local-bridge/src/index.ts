@@ -27,7 +27,7 @@
  */
 
 import { mkdirSync } from 'node:fs'
-import type { IncomingMessage, ServerResponse } from 'node:http'
+import type { ServerResponse } from 'node:http'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -330,16 +330,6 @@ function preflightFacts(module: Record<string, unknown>): PreflightFacts {
   }
 }
 
-/** 本模块用到的连接信任面；完整的类型归浏览器侧的 connection 包所有。 */
-interface LocalBridgeConnection {
-  requestRejection(request: { readonly headers: IncomingMessage['headers'] }): 401 | 403 | undefined
-}
-
-/** 组合的 connection 服务（类型写在本地：它的包属于浏览器侧）。 */
-function connectionOf(ctx: Context): LocalBridgeConnection {
-  return Reflect.get(ctx, 'connection') as LocalBridgeConnection
-}
-
 /** 一个 JSON 响应（no-store：反代与令牌状态都是实时事实）。 */
 function sendJson(res: ServerResponse, status: number, payload: unknown): void {
   res.statusCode = status
@@ -386,20 +376,25 @@ function registerControlRoutes(ctx: Context, options: ControlRouteOptions & {
 }): void {
   ctx.inject(['webServer', 'connection'], (scope: Context) => {
     const control = options.control
-    /** 拒绝一个不可信或未鉴权的请求；已拒绝时返回 true。 */
-    const rejected = (req: IncomingMessage, res: ServerResponse): boolean => {
-      const rejection = connectionOf(scope).requestRejection(req)
-      if (rejection === undefined) return false
-      res.statusCode = rejection
+    /**
+     * Refuse a caller the web server did not admit as the desktop owner.
+     * `auth: 'required'` makes that admission the connection service's cookie
+     * check, the same one Open-In uses for a document-relative fetch.
+     * @returns whether the response was already ended.
+     */
+    const rejected = (res: ServerResponse, peer: { readonly principal: { readonly kind: string } } | undefined): boolean => {
+      if (peer?.principal.kind === 'owner') return false
+      res.statusCode = 403
       res.end()
       return true
     }
 
     scope.effect(() => scope.webServer.register({
       kind: 'exact',
+      auth: 'required',
       path: LOCAL_BRIDGE_STATUS_PATH,
-      handler: async (req, res) => {
-        if (rejected(req, res)) return
+      handler: async (req, res, peer) => {
+        if (rejected(res, peer)) return
         if (req.method !== 'GET') {
           sendMethodNotAllowed(res, 'GET')
           return
@@ -411,9 +406,10 @@ function registerControlRoutes(ctx: Context, options: ControlRouteOptions & {
 
     scope.effect(() => scope.webServer.register({
       kind: 'exact',
+      auth: 'required',
       path: LOCAL_BRIDGE_REFRESH_PATH,
-      handler: async (req, res) => {
-        if (rejected(req, res)) return
+      handler: async (req, res, peer) => {
+        if (rejected(res, peer)) return
         if (req.method !== 'POST') {
           sendMethodNotAllowed(res, 'POST')
           return
@@ -425,9 +421,10 @@ function registerControlRoutes(ctx: Context, options: ControlRouteOptions & {
 
     scope.effect(() => scope.webServer.register({
       kind: 'exact',
+      auth: 'required',
       path: LOCAL_BRIDGE_LOG_PATH,
-      handler: async (req, res) => {
-        if (rejected(req, res)) return
+      handler: async (req, res, peer) => {
+        if (rejected(res, peer)) return
         if (req.method !== 'GET') {
           sendMethodNotAllowed(res, 'GET')
           return
