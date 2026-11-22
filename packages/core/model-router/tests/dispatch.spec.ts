@@ -4,6 +4,11 @@
  * an untagged listener and the plugin listens ahead of the retry policy.
  * These tests run that dispatch for real over a live Cordis context, because
  * a stubbed context cannot show either fact.
+ *
+ * The same live context also shows whether the plugin survives a real fiber:
+ * Cordis refuses an assignment to a context property it has not declared, and
+ * a plugin that fails there never activates, so its settings namespace never
+ * reaches the model catalog.
  */
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -171,5 +176,18 @@ describe('model-router failure dispatch', () => {
 
     agentEvents(ctx, agent).emit('agent/inbox/claimed', { message: claimed('写一部小说'), turn: 1 })
     expect(selected).toEqual(['p1/m1'])
+  })
+})
+
+describe('model-router activation', () => {
+  it('provides the routing totals when it applies inside a live fiber', async () => {
+    const ctx = await liveContext()
+    let pluginCtx: Context | undefined
+    await ctx.inject(['llm'], (fiberCtx) => {
+      pluginCtx = fiberCtx
+      return apply(fiberCtx, config([LONG_FORM]))
+    })
+
+    expect(pluginCtx?.modelRouter).toBeDefined()
   })
 })

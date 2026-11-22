@@ -49,7 +49,7 @@ declare module '@deepseek-ai/cordis' {
   interface Context {
     /**
      * Process-local routing totals.
-     * Present after the model-router plugin applies. A restart clears it.
+     * Provided as a service once the model-router plugin applies. A restart clears it.
      */
     modelRouter?: ModelRouterStats
   }
@@ -616,7 +616,9 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const health = new ProviderHealth(() => healthPolicy(config))
   const spend = new RouteSpend(() => config.pricing.get())
   const stats = new ModelRouterStats()
-  ctx.modelRouter = stats
+  // Cordis refuses an assignment to a context property it has not declared,
+  // so the totals are registered as a service other plugins can inject.
+  ctx.provide('modelRouter', stats)
   const sticky = new WeakMap<object, StickyRecord>()
   const chains = new WeakMap<object, { targets: readonly RouteTarget[]; hops: number }>()
   const attempts = new Map<string, { provider: string; startedAt: number; ttftMs?: number }>()
