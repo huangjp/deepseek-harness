@@ -211,6 +211,35 @@ describe('beginSubmission', () => {
     ])
   })
 
+  it('moves a transcript echo to the queue when the Host holds it behind an open Turn', async ({ mock, start }) => {
+    const session = await sessionBench(mock, start, SID)
+    await session.open()
+    // The Host opened its Turn; the Client's own running belief never caught up,
+    // so the prompt below is placed as an ordinary transcript echo.
+    await pushEvent(mock, ev.turnStart(SessionSeq(0), 1))
+    const handle = await submitAccepted(session, { mode: 'queue', text: '宿主忙时发出的', attachments: [] })
+    expect(session.getSnapshot().pendingSubmissions.map(echo => echo.placement)).toEqual(['transcript'])
+    // The Host accepts the prompt into its next-turn queue while that Turn runs.
+    await pushEvent(mock, {
+      type: 'agent/inbox/spliced', seq: SessionSeq(1), time: 2,
+      data: { target: 'next-turn', start: 0, inserted: [queuedItem(handle.requestId)] },
+    })
+    expect(session.getSnapshot().pendingSubmissions.map(echo => echo.placement)).toEqual(['queued'])
+  })
+
+  it('keeps the transcript placement for a prompt the Host queued after its Turn ended', async ({ mock, start }) => {
+    const session = await sessionBench(mock, start, SID)
+    await session.open()
+    await pushEvent(mock, ev.turnStart(SessionSeq(0), 1))
+    await pushEvent(mock, ev.turnEnd(SessionSeq(1), 1))
+    const handle = await submitAccepted(session, { mode: 'queue', text: '空闲时发出的', attachments: [] })
+    await pushEvent(mock, {
+      type: 'agent/inbox/spliced', seq: SessionSeq(2), time: 3,
+      data: { target: 'next-turn', start: 0, inserted: [queuedItem(handle.requestId)] },
+    })
+    expect(session.getSnapshot().pendingSubmissions.map(echo => echo.placement)).toEqual(['transcript'])
+  })
+
   it('abandon retires the echo as failed exactly once', async ({ mock, start }) => {
     const session = await sessionBench(mock, start, SID)
     const retirements: PendingSubmissionRetirement[] = []

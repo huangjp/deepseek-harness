@@ -124,6 +124,13 @@ export class Session implements SessionFace {
   private readonly stopObservingInbox: () => void
   private readonly assistantStream = new ClientAssistantStream()
   private running = false
+  /**
+   * The Host's Turn state read from the durable stream. A prompt the Host
+   * accepts while its Turn is open waits in the Inbox queue, so this state —
+   * not the Client's own running belief — decides where such a prompt's echo
+   * belongs.
+   */
+  private hostTurnOpen = false
   private address: SubagentAddress | undefined
   /**
    * Sticky send marker, private input of the composerPhase derivation: set
@@ -145,7 +152,8 @@ export class Session implements SessionFace {
   /** Per-echo settlement state; `retiring` latches the first observation so a
    *  Inbox projection and its durable event cannot both retire one echo. */
   private readonly submissionSettlements = new Map<SessionRequestId, {
-    readonly placement: PendingSubmission['placement']
+    /** The echo surface; the Host's Inbox routing corrects a stale belief (see reconcileSubmissionPlacements). */
+    placement: PendingSubmission['placement']
     /** Latest received Inbox position; null means removed from that queue. */
     receipt?: {
       readonly target: InboxTarget
@@ -905,6 +913,8 @@ export class Session implements SessionFace {
 
   /** Observe durable acceptance even when insertion and claim share one projection notification. */
   private observeSubmissionEvent(event: SessionEventLike): void {
+    if (event.type === 'turn/start') this.hostTurnOpen = true
+    else if (event.type === 'turn/end') this.hostTurnOpen = false
     if (this.submissionSettlements.size === 0) return
     if (event.type === 'agent/inbox/spliced') {
       const { target, start, removedCount = 0, inserted, outcome } = event.data
@@ -920,6 +930,7 @@ export class Session implements SessionFace {
         }
       }
       this.observeSubmissionInsertions(target, inserted, start, event.seq)
+      this.reconcileSubmissionPlacements(target, inserted)
       // A queued echo waits for the inbox projection the queue dock renders, which can arrive after this
       // event; retiring it here would empty the dock for a frame. A claim in the same projection notification
       // still retires it through the durable user message.
@@ -947,6 +958,37 @@ export class Session implements SessionFace {
       // included; a queued echo otherwise leaves once the queue dock renders its row or its message is admitted.
       settlement.receipt = { target, seq, index: start + index, attachments: attachmentRefsIn(message.content) }
       this.acceptPrompt(source.rpcId)
+    }
+  }
+
+  /**
+   * Move one echo onto the surface the Host routes it to. The Client picks the
+   * echo surface from its own running belief, so a prompt submitted while that
+   * belief was stale keeps a transcript echo while the Host holds it in a
+   * queue: the transcript then repeats the message below newer content, and
+   * the queue dock hides the Host's own row for it. An open Host Turn proves
+   * the belief stale, and the Host's queue takes the message from there.
+   *
+   * Only the durable event path decides: the Inbox projection lags it, and a
+   * projection-time decision would also flip the ordinary opening echo of a
+   * prompt the Host accepted while idle.
+   * @param target - the Host Inbox queue that received the messages.
+   * @param messages - the messages the Host inserted into that queue.
+   */
+  private reconcileSubmissionPlacements(target: InboxTarget, messages: readonly UserMessage[]): void {
+    if (!this.hostTurnOpen) return
+    const routed: PendingSubmission['placement'] = target === 'next-turn' ? 'queued' : 'steering'
+    for (const message of messages) {
+      const source = message.source
+      if (source.kind !== 'user' || !('rpcId' in source)) continue
+      const settlement = this.submissionSettlements.get(source.rpcId)
+      if (settlement === undefined || settlement.retiring || settlement.placement === routed) continue
+      settlement.placement = routed
+      this.pendingSubmissions = this.pendingSubmissions.map(echo => echo.requestId === source.rpcId
+        ? { ...echo, placement: routed }
+        : echo)
+      this.refreshAcceptedSubmissions()
+      this.notifier.markDirty()
     }
   }
 
