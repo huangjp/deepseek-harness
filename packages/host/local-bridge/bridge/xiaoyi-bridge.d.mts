@@ -45,3 +45,32 @@ export interface XiaoyiMessage {
  * @returns 交给小艺的提示词；没有可用用户输入时返回空串。
  */
 export function buildPrompt(messages?: XiaoyiMessage[]): string
+
+/**
+ * 把华为拒绝握手时的状态码与正文翻译成一句能照着做的提示。
+ * @param status - 握手响应的 HTTP 状态码（华为用 400/401/403/407 拒绝凭据）。
+ * @param body - 握手响应的正文，可能为空。
+ * @returns 可以直接展示给用户的一句话。
+ */
+export function describeRejection(status: number, body?: string): string
+
+/**
+ * 判断一次握手失败是不是「这枚 xy_token 不再被华为认」。
+ * @param err - 握手失败抛出的错误，带 `status` 与可选的 `body`。
+ * @returns 凭证确定失效时为 true。
+ */
+export function isCredentialRejected(err?: { status?: number; body?: string }): boolean
+
+/**
+ * 作废 cookie 集合里的会话 cookie（xy_token），保留持久 cookie。
+ * @param jar - 缓存里的 cookie 集合。
+ * @returns 不含 xy_token 的 cookie 集合。
+ */
+export function dropSessionToken(jar: Record<string, string>): Record<string, string>
+
+/**
+ * 华为判定这枚 xy_token 失效时，把缓存里的会话 cookie 作废。
+ *
+ * 作废后 `ensureAuth()` 会重新收割，`/health` 也会如实报出「缺 xy_token」。
+ */
+export function invalidateSessionToken(): void

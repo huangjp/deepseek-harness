@@ -120,6 +120,8 @@ The harvester is a Python script, and Python writes its output in the console co
 
 The cookies live for more than a day (measured at over 40 hours). The cache file calls them stale after 24 hours, and `/health` says so with the age, so the signal arrives before a request does. The relay keeps using the cookie until the upstream refuses it, and then harvests it again.
 
+Huawei refuses a handshake with `400`, `401`, `403` or `407`, and only the body tells the cases apart: `{"errorCode":"40002","errorMsg":"token expire or illegal"}` means this session cookie is no longer accepted. The `407` reads like a proxy asking for credentials — and the Windows system proxy is the usual first suspect — so the relay reports the upstream's own reason rather than a bare status, names the action (open the 小艺 chat page in AI Space, send a message, sign in again when the page asks), and drops the refused session cookie from the cache so the next request harvests again. The persistent cookies (device id, app name, JSID, xyxp) stay in the cache, so a fresh sign-in does not start from scratch. `GET /health` reports the refusal as `lastRejection` with its status and message.
+
 ### Tool calls over a text-only upstream
 
 Neither upstream offers function calling. The WorkBuddy gateway is an agent with its own tool allowlist that ignores the caller's tools — asking it to call one makes it reach for its own and fail — and the Copilot `chatHub` frame carries one plain-text prompt with no tool field. Both relays therefore bridge tools through text, in one shared module (`bridge/toolprompt.mjs`):

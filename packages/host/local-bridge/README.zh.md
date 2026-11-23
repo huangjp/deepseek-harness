@@ -120,6 +120,8 @@ kind: "package-reference"
 
 这些 cookie 能活过一天（实测 40 多小时）。缓存文件按 24 小时算超龄，`/health` 会连同已用时长一起报出来，于是信号比失败先到。反代自己仍然会一直用这枚 cookie，直到上游拒收它，那时再重新收割。
 
+华为拒绝握手时可能回 `400`、`401`、`403`、`407`，只有正文能分辨是哪一种：`{"errorCode":"40002","errorMsg":"token expire or illegal"}` 说的是这枚会话 cookie 不再被认。这里的 `407` 读起来像代理要认证 —— 而 Windows 系统代理通常第一个被怀疑 —— 所以反代报的是上游自己给的理由，不是一个光秃秃的状态码，并且写明该做什么（打开「AI空间」的小艺对话页，发一条消息，页面要登录就重新登录）。被拒之后这枚会话 cookie 从缓存里作废，下一次请求重新收割；持久 cookie（设备 id、appName、JSID、xyxp）留在缓存里，重新登录不用从头再来。`GET /health` 把这次拒绝报成 `lastRejection`，连同状态码和消息。
+
 ### 纯文本上游上的工具调用
 
 两个上游都不提供 function calling。WorkBuddy 网关背后是一个自带工具白名单的 agent，它无视调用方给的 tools —— 让它去调一个，它会伸手去够自己的那套然后报错；Copilot 的 `chatHub` 帧只承载一条纯文本 prompt，根本没有工具字段。所以两个反代都用同一份模块（`bridge/toolprompt.mjs`）把工具调用搭在文本上：

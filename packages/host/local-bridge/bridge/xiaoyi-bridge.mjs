@@ -90,6 +90,7 @@ function initRuntime(overrides = {}) {
     || path.join(process.env.LOCALAPPDATA || process.env.USERPROFILE || '.', 'xiaoyi-bridge', 'auth.json');
   harvestScript = authCfg.harvestScript || path.join(__dirname, 'xiaoyi-harvest.py');
   _auth = null; // 换了配置就把内存里的凭证作废
+  lastRejection = null;
 }
 
 // ---------------------------------------------------------------- Python 定位
@@ -129,6 +130,7 @@ function safeReaddir(dir) {
 // ---------------------------------------------------------------- 凭证缓存
 
 let _auth = null; // { jar, at }
+let lastRejection = null; // { at, status, message }
 
 function loadCache() {
   try {
@@ -137,10 +139,10 @@ function loadCache() {
   } catch { return null; }
 }
 
-function saveCache(jar) {
+function saveCache(jar, savedAt = Date.now()) {
   try {
     mkdirSync(path.dirname(cacheFile), { recursive: true });
-    writeFileSync(cacheFile, JSON.stringify({ cookies: jar, savedAt: Date.now() }, null, 1), 'utf8');
+    writeFileSync(cacheFile, JSON.stringify({ cookies: jar, savedAt }, null, 1), 'utf8');
   } catch (e) {
     log('[xiaoyi] 凭证缓存写入失败（不影响本次请求）:', e.message);
   }
@@ -148,6 +150,97 @@ function saveCache(jar) {
 
 function cookieHeader(jar) {
   return REQUIRED.filter((k) => jar[k]).map((k) => `${k}=${jar[k]}`).join('; ');
+}
+
+/**
+ * 作废缓存里的**会话 cookie**（xy_token），保留那几个持久 cookie。
+ *
+ * 持久 cookie（xy_deviceId / xyxp / JSID / xy_appName）一年才换一次，一起删掉等于
+ * 逼用户重新登录；每次都要换的是 xy_token 这枚会话 cookie。
+ *
+ * @param {Record<string, string>} jar 缓存里的 cookie 集合。
+ * @returns {Record<string, string>} 不含 xy_token 的 cookie 集合。
+ */
+export function dropSessionToken(jar) {
+  if (!jar || !jar.xy_token) return jar;
+  const next = { ...jar };
+  delete next.xy_token;
+  return next;
+}
+
+/**
+ * 华为判定这枚 xy_token 失效时，把缓存里的会话 cookie 作废。
+ *
+ * 不作废的话，`ensureAuth()` 会继续端出这枚死 cookie，直到它超过 24 小时的缓存期 ——
+ * 中间每一次请求都拿到同一个「HTTP 407」。作废后下一次请求会重新收割，
+ * `/health` 也会如实报出「缺 xy_token」。
+ */
+export function invalidateSessionToken() {
+  _auth = null;
+  const cached = loadCache();
+  if (!cached?.cookies?.xy_token) return;
+  saveCache(dropSessionToken(cached.cookies), cached.savedAt);
+  log('[xiaoyi] 华为已判定这枚 xy_token 失效，缓存里的会话 cookie 作废（下次请求会重新收割）');
+}
+
+// ---------------------------------------------------------------- 华为的拒绝说明
+
+/**
+ * 华为边缘节点拒绝握手时给出的错误码与说明。
+ *
+ * 实测正文形如 `{"errorCode":"40002","errorMsg":"token expire or illegal"}`。
+ *
+ * @param {string} body 握手失败的响应正文（可能为空）。
+ * @returns {{ code: string, message: string }}
+ */
+function parseHuaweiError(body) {
+  const text = String(body || '');
+  return {
+    code: /"errorCode"\s*:\s*"?([0-9A-Za-z_-]+)"?/.exec(text)?.[1] || '',
+    message: /"errorMsg"\s*:\s*"([^"]*)"/.exec(text)?.[1] || '',
+  };
+}
+
+/**
+ * 把华为的拒绝翻译成一句能照着做的提示。
+ *
+ * 「HTTP 407」本身没有信息量 —— 它长得像「代理要求认证」，但代理是无辜的：407 是
+ * 华为边缘节点拒绝这枚**凭据**时用的状态码（400/401/403/407 都可能是它）。所以提示里
+ * 要点明是凭证过期，并指明去华为「AI空间」重新登录小艺、发一条消息，好让收割器能捞到
+ * 新的 xy_token。
+ *
+ * @param {number} status 握手响应的 HTTP 状态码。
+ * @param {string} body 握手响应的正文（可能为空）。
+ * @returns {string} 可以直接展示给用户的一句话。
+ */
+export function describeRejection(status, body) {
+  const { code, message } = parseHuaweiError(body);
+  const tokenRejected = code === '40002'
+    || /token\s*(expire|illegal|invalid)|unauthor/i.test(message);
+  if (tokenRejected) {
+    return `小艺拒绝了当前凭据（HTTP ${status}${code ? `，errorCode ${code}` : ''}）：`
+      + `华为把这枚 xy_token 判为过期或非法${message ? `（${message}）` : ''}。`
+      + '请打开华为「AI空间」→ 小艺对话页，发一条消息（必要时重新扫码登录小艺），然后重试。';
+  }
+  return `小艺拒绝连接（HTTP ${status}）`;
+}
+
+/**
+ * 判断一次握手失败是不是「这枚 xy_token 不再被华为认」。
+ *
+ * 只有能确定是凭证问题时才作废缓存：401/403 直接是鉴权失败；400/407 要正文明说
+ * token 过期/非法才算 —— 配上读不懂的正文时，那可能只是 WAF 的一页 HTML，
+ * 丢掉还能用的 cookie 反而更糟。
+ *
+ * @param {{ status?: number, body?: string }} err 握手失败抛出的错误。
+ * @returns {boolean}
+ */
+export function isCredentialRejected(err) {
+  const status = Number(err?.status || 0);
+  if (status === 401 || status === 403) return true;
+  if (status !== 400 && status !== 407) return false;
+  const { code, message } = parseHuaweiError(err?.body);
+  return code === '40002' || /token\s*(expire|illegal|invalid)|unauthor/i.test(message);
 }
 
 // ---------------------------------------------------------------- 收割（spawn Python）
@@ -321,12 +414,33 @@ function wsOpen(urlStr, headers = {}, { timeoutMs = 20000 } = {}) {
     }, timeoutMs);
     timer.unref?.();
 
+    // 握手被拒时华为会回一小段正文说明原因（例：{"errorCode":"40002",
+    // "errorMsg":"token expire or illegal"}）。这段正文得留着 —— 状态码「407」本身
+    // 没有信息量，正文才说清是凭证过期还是别的，所以拒绝前把正文读完再报错。
+    let rejecting = false;
+    let rejectStatus = 0;
+    let rejectDone = false;
+    let bodyTimer = null;
+    const bodyChunks = [];
+
+    const finishReject = () => {
+      if (rejectDone) return;
+      rejectDone = true;
+      if (bodyTimer) { clearTimeout(bodyTimer); bodyTimer = null; }
+      const body = Buffer.concat(bodyChunks).toString('utf8').slice(0, 2000);
+      close();
+      reject(Object.assign(new Error(describeRejection(rejectStatus, body)),
+        { status: rejectStatus, code: 'ws_rejected', body }));
+    };
+
     sock.on('error', (e) => {
       clearTimeout(timer);
+      if (rejecting) return;
       if (!handshook) reject(e); else endStream(e);
     });
     sock.on('close', () => {
       clearTimeout(timer);
+      if (rejecting) { finishReject(); return; }
       if (!handshook) reject(Object.assign(new Error('WebSocket 连接被关闭'), { code: 'ws_closed' }));
       else endStream(null);
     });
@@ -392,6 +506,11 @@ function wsOpen(urlStr, headers = {}, { timeoutMs = 20000 } = {}) {
     };
 
     sock.on('data', (chunk) => {
+      if (rejecting) {
+        // 已经拒绝了，但正文还没读完：华为的说明就在后面那几行里。
+        bodyChunks.push(chunk);
+        return;
+      }
       buf = Buffer.concat([buf, chunk]);
       if (!handshook) {
         const idx = buf.indexOf('\r\n\r\n');
@@ -403,8 +522,14 @@ function wsOpen(urlStr, headers = {}, { timeoutMs = 20000 } = {}) {
         const expect = crypto.createHash('sha1').update(key + WS_GUID).digest('base64');
         if (status !== 101 || !accept || accept[1] !== expect) {
           clearTimeout(timer);
-          close();
-          reject(Object.assign(new Error(`小艺拒绝连接（HTTP ${status}）`), { status, code: 'ws_rejected' }));
+          rejecting = true;
+          rejectStatus = status;
+          bodyChunks.push(buf); // 与响应头一起到达的正文
+          buf = Buffer.alloc(0);
+          // 对方未必会关闭连接，所以给正文一个收集上限。
+          bodyTimer = setTimeout(finishReject, 1500);
+          bodyTimer.unref?.();
+          sock.on('end', finishReject);
           return;
         }
         handshook = true;
@@ -720,6 +845,14 @@ async function handleHealth(req, res) {
     ageHours: ageHours === null ? null : Number(ageHours.toFixed(1)),
     stale,
     cacheFile,
+    // 最近一次被华为拒绝的记录：告诉用户到底是凭证过期还是别的。
+    lastRejection: lastRejection
+      ? {
+        at: new Date(lastRejection.at).toISOString(),
+        status: lastRejection.status,
+        message: lastRejection.message,
+      }
+      : null,
     hint: missing.length
       ? '需要 AI空间 正在运行并打开对话页（小艺），xy_token 只能从它的 WebView2 内存里捞'
       : stale
@@ -777,15 +910,40 @@ async function handleChatCompletions(req, res) {
     return { content: buf, reasoning };
   };
 
-  const withRetry = async (onDelta, promptText = prompt) => {
-    let jar = await ensureAuth();
+  /**
+   * 跑一轮；握手被判「凭证失效」时顺手作废缓存里那枚会话 cookie，
+   * 免得下一次请求继续端出同一枚死 cookie。
+   */
+  const runGuarded = async (jar, onDelta, promptText) => {
     try {
       return await run(jar, onDelta, promptText);
     } catch (e) {
+      if (isCredentialRejected(e)) {
+        lastRejection = { at: Date.now(), status: e.status ?? null, message: e.message };
+        invalidateSessionToken();
+      }
+      throw e;
+    }
+  };
+
+  const withRetry = async (onDelta, promptText = prompt) => {
+    let jar = await ensureAuth();
+    try {
+      return await runGuarded(jar, onDelta, promptText);
+    } catch (e) {
       if (!STALE_STATUS.has(e.status)) throw e;
-      log(`[xiaoyi] 令牌被拒（HTTP ${e.status}），重新收割后重试`);
-      jar = await ensureAuth(true);
-      return await run(jar, onDelta, promptText);
+      const rejected = isCredentialRejected(e);
+      log(`[xiaoyi] 令牌被拒（HTTP ${e.status}）${rejected ? '（华为判定凭证失效）' : ''}，重新收割后重试`);
+      if (rejected) invalidateSessionToken();
+      let fresh;
+      try {
+        fresh = await ensureAuth(true);
+      } catch (harvestError) {
+        // 收割失败比「被拒」更接近根因：AI空间 没开、没登录小艺、或者对话页没打开。
+        throw Object.assign(new Error(`${e.message} 重新收割也没成功：${harvestError.message}`),
+          { status: e.status, code: e.code });
+      }
+      return await runGuarded(fresh, onDelta, promptText);
     }
   };
 

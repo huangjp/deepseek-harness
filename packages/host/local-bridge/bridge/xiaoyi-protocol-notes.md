@@ -132,6 +132,16 @@ Node 22 自带全局 `WebSocket`，但**不支持自定义请求头**，而小�
 "Proxy Authentication Required"，别被它误导成代理问题）。这些一律当作"凭证可能过期"，
 重新收割一次再试；429 是限流，重收没用。
 
+拒绝的正文带着原因：`{"errorCode":"40002","errorMsg":"token expire or illegal"}`
+说的是这枚 `xy_token` 已经作废。**重新收割不一定能换到新的** —— 2026-11-23 实测
+收割回来的 `xy_token` 与缓存里那枚 sha1 完全相同（`3074317843…`），说明 AI空间
+渲染进程内存里还是旧会话；换新只能靠在 AI空间 里重新登录小艺（登录了华为账号不等于
+已登录 xiaoyi.huawei.com）并在小艺对话页发一条消息。
+
+因此 `xiaoyi-bridge.mjs` 把 400/407 的正文读出来再判：`errorCode` 是 40002 才按
+"凭据失效"处理（报可执行提示、把 `xy_token` 从缓存里作废，`xy_deviceId`/`xy_appName`/
+`JSID`/`xyxp` 留着），正文是 WAF 页面之类则不判定为凭据失效，免得误删还能用的 cookie。
+
 token 有效期实测 **40+ 小时**（10-19 抓的，10-21 仍在用），所以缓存起来、
 失效才重收。缓存文件 `%LOCALAPPDATA%\xiaoyi-bridge\auth.json`。
 

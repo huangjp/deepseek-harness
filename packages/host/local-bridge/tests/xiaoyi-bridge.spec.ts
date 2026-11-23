@@ -1,9 +1,17 @@
 import { createServer } from 'node:net'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { buildPrompt, startXiaoyiBridge, stopXiaoyiBridge } from '../bridge/xiaoyi-bridge.mjs'
+import {
+  buildPrompt,
+  describeRejection,
+  dropSessionToken,
+  invalidateSessionToken,
+  isCredentialRejected,
+  startXiaoyiBridge,
+  stopXiaoyiBridge,
+} from '../bridge/xiaoyi-bridge.mjs'
 
 /**
  * 小艺反代的 HTTP 表面与生命周期。
@@ -114,6 +122,70 @@ describe('xiaoyi bridge', () => {
     const { base } = await boot()
     await stopXiaoyiBridge()
     await expect(fetch(`${base}/health`)).rejects.toThrow()
+  })
+})
+
+/**
+ * 华为拒绝握手时的诊断。
+ *
+ * 「HTTP 407」看着像代理要认证，其实它是华为边缘节点拒绝这枚 xy_token 时用的状态码 ——
+ * 实测正文是 `{"errorCode":"40002","errorMsg":"token expire or illegal"}`
+ * （见 bridge/xiaoyi-protocol-notes.md）。所以提示得说清「凭证过期」和该去华为
+ * 「AI空间」重新登录；而且被拒之后要把缓存里那枚死 token 作废，否则下一次请求
+ * 还会端出同一枚，继续撞同一个 407。
+ */
+describe('huawei rejection', () => {
+  const EXPIRED_BODY = '{"errorCode":"40002","errorMsg":"token expire or illegal"}'
+
+  it('turns Huawei 40002 into an actionable hint', () => {
+    const message = describeRejection(407, EXPIRED_BODY)
+    expect(message).toContain('40002')
+    expect(message).toContain('AI空间')
+    expect(message).toContain('xy_token')
+    // 别把锅甩给代理：407 在这里是华为在说「这枚凭证我不要」。
+    expect(message).not.toContain('代理')
+  })
+
+  it('keeps the generic wording when the body says nothing useful', () => {
+    expect(describeRejection(400, '<html>WAF</html>')).toBe('小艺拒绝连接（HTTP 400）')
+    expect(describeRejection(407, '')).toBe('小艺拒绝连接（HTTP 407）')
+  })
+
+  it('only treats a 400/407 as a credential problem when the body says so', () => {
+    expect(isCredentialRejected({ status: 407, body: EXPIRED_BODY })).toBe(true)
+    expect(isCredentialRejected({ status: 400, body: EXPIRED_BODY })).toBe(true)
+    expect(isCredentialRejected({ status: 401 })).toBe(true)
+    expect(isCredentialRejected({ status: 403 })).toBe(true)
+    // 正文读不懂时可能只是 WAF 的一页 HTML，这时候丢掉还能用的 cookie 反而更糟。
+    expect(isCredentialRejected({ status: 400, body: '<html>WAF</html>' })).toBe(false)
+    expect(isCredentialRejected({ status: 500 })).toBe(false)
+    expect(isCredentialRejected({})).toBe(false)
+  })
+
+  it('drops only the session cookie', () => {
+    const jar = { xy_token: 't', xy_deviceId: 'd', xy_appName: 'a', JSID: 'j', xyxp: 'x' }
+    expect(dropSessionToken(jar)).toEqual({ xy_deviceId: 'd', xy_appName: 'a', JSID: 'j', xyxp: 'x' })
+    expect(jar.xy_token).toBe('t')
+  })
+
+  it('invalidates the cached session token so the next request re-harvests', async () => {
+    const { base, cacheFile } = await boot()
+    await writeFile(cacheFile, JSON.stringify({
+      cookies: { xy_token: 't', xy_deviceId: 'd', xy_appName: 'a', JSID: 'j', xyxp: 'x' },
+      savedAt: Date.now(),
+    }))
+
+    invalidateSessionToken()
+
+    const cached = JSON.parse(await readFile(cacheFile, 'utf8')) as { cookies: Record<string, string> }
+    expect(cached.cookies.xy_token).toBeUndefined()
+    // 持久 cookie 还在 —— 留着它们，重新登录时不必从头再来。
+    expect(cached.cookies.xy_deviceId).toBe('d')
+
+    const res = await fetch(`${base}/health`)
+    const body = await res.json() as { ok: boolean; missing: string[] }
+    expect(body.ok).toBe(false)
+    expect(body.missing).toEqual(['xy_token'])
   })
 })
 
