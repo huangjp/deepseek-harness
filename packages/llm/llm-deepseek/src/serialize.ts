@@ -132,6 +132,7 @@ export function serialize(
   for (const message of messages) {
     if (message.role === 'assistant') {
       const calls = message.content.filter(block => block.type === 'tool_use')
+      if (pending.size > 0) throw new LlmError('DeepSeek Messages tool calls need immediate results', 'INVALID_REQUEST')
       pending = new Set(calls.map(block => block.id))
       if (pending.size !== calls.length) throw new LlmError('DeepSeek Messages duplicate tool call id', 'INVALID_REQUEST')
     } else if (message.role === 'user') {

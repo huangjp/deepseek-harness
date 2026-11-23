@@ -5,6 +5,7 @@ import { brandString } from '@deepseek-ai/dsh-brand'
 import {
   type ToolCallId,
   contentHasFile,
+  createAssistantMessage,
   createDeveloperMessage,
   createToolResultMessage,
   createUserMessage,
@@ -13,12 +14,15 @@ import {
   offloadedImageText,
   projectImagesForTextModel,
   projectOffloadedImages,
+  projectToolPairing,
   projectToolUpdates,
   requiredImageOffload,
   resolveImageAttachmentAccess,
   requestImageHandleText,
 } from '../src/index.ts'
-import type { ContentBlock, RequestMessage, RequestUserInput, ToolHistory, ToolSchema } from '../src/index.ts'
+import type {
+  AssistantMessage, ContentBlock, RequestMessage, RequestUserInput, ToolHistory, ToolResultMessage, ToolSchema,
+} from '../src/index.ts'
 
 const source = { kind: 'test' as const }
 
@@ -653,5 +657,76 @@ describe('projectToolUpdates', () => {
     const projected = projectToolUpdates([prompt, first, prompt, second], [replacement], 'addition-only', history)
     expect(projected.tools).toEqual([replacement])
     expect(roles(projected.messages)).toEqual([])
+  })
+})
+
+describe('projectToolPairing', () => {
+  const modelSource = { provider: 'test-provider', model: 'test-model' }
+
+  function assistant(calls: readonly string[]): AssistantMessage {
+    return createAssistantMessage({
+      content: [
+        { type: 'text', text: 'calling' },
+        ...calls.map(id => ({ type: 'tool-call' as const, id: brandString<ToolCallId>(id), name: 'search', arguments: '{}' })),
+      ],
+      source: modelSource,
+    })
+  }
+
+  function result(callId: string): ToolResultMessage {
+    return createToolResultMessage({
+      callId: brandString<ToolCallId>(callId),
+      content: [{ type: 'text', text: `result of ${callId}` }],
+      isError: false,
+    })
+  }
+
+  function callIds(message: RequestMessage): readonly string[] {
+    return message.content.flatMap(block => block.type === 'tool-call' ? [block.id] : [])
+  }
+
+  it('keeps an already paired history unchanged', () => {
+    const call = assistant(['call-a'])
+    const answered = result('call-a')
+    const messages = [call, answered]
+    expect(projectToolPairing(messages)).toBe(messages)
+  })
+
+  it('moves a recorded result to the message that requested it', () => {
+    const call = assistant(['call-a'])
+    const answered = result('call-a')
+    const between = createUserMessage({ content: [{ type: 'text', text: 'meanwhile' }], source })
+    const projected = projectToolPairing([call, between, answered])
+    expect(projected.map(message => message.role)).toEqual(['assistant', 'tool', 'user'])
+    expect(projected[0]).toBe(call)
+    expect(projected[1]).toBe(answered)
+    expect(projected[2]).toBe(between)
+  })
+
+  it('drops a call that no result answers', () => {
+    const call = assistant(['call-a', 'call-b'])
+    const answered = result('call-a')
+    const projected = projectToolPairing([call, answered])
+    expect(projected.map(message => message.role)).toEqual(['assistant', 'tool'])
+    expect(callIds(projected[0]!)).toEqual(['call-a'])
+  })
+
+  it('drops a result that no call requested', () => {
+    const call = assistant(['call-a'])
+    const answered = result('call-a')
+    const orphan = result('call-orphan')
+    const projected = projectToolPairing([call, orphan, answered])
+    expect(projected.map(message => message.role)).toEqual(['assistant', 'tool'])
+    expect(projected[1]).toBe(answered)
+  })
+
+  it('answers every call of a multi-call request with its own result', () => {
+    const call = assistant(['call-a', 'call-b'])
+    const first = result('call-a')
+    const second = result('call-b')
+    const projected = projectToolPairing([call, first, second])
+    expect(projected.map(message => message.role)).toEqual(['assistant', 'tool', 'tool'])
+    expect(projected[1]).toBe(first)
+    expect(projected[2]).toBe(second)
   })
 })

@@ -38,7 +38,7 @@ import type { BuiltinLlmFailureCode } from './error.ts'
 import type { QuotaHoldNotice, QuotaRemaining, QuotaRemainingRequest, QuotaWindowPlan, QuotaWindowRequest } from './quota-window.ts'
 import { normalizeLlmFailure } from './adapter-failure.ts'
 import {
-  contentHasFile, contentHasImage, fileHandleText, projectFilesToText, projectImagesForTextModel, projectToolUpdates,
+  contentHasFile, contentHasImage, fileHandleText, projectFilesToText, projectImagesForTextModel, projectToolPairing, projectToolUpdates,
 } from './content.ts'
 import type { FileAttachmentRef, ImageAttachmentRef, ImageRequestTarget } from '@deepseek-ai/dsh-attachment'
 
@@ -1120,6 +1120,8 @@ export class LlmRuntime extends TypertRemoteService {
         && projectedMessages.some(message => contentHasImage(message.content))) {
         projectedMessages = projectImagesForTextModel(projectedMessages)
       }
+      // Tool calls and their results stay paired on every route.
+      projectedMessages = projectToolPairing(projectedMessages)
       // Tool changes are logged on every route; the route's declared mode selects what it receives.
       const projectedTools = projectToolUpdates(projectedMessages, resolvedOptions.tools, modelInfo.toolUpdate, resolvedOptions.toolHistory)
       projectedMessages = projectedTools.messages

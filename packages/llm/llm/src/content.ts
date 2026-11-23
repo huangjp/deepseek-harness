@@ -1,6 +1,6 @@
 /** Content-block structure helpers. @module @deepseek-ai/dsh-llm/content */
 
-import type { ContentBlock, ImageBlock, LlmImageRequestBudget, ToolSchema, ToolUpdate, ToolHistory } from './types.ts'
+import type { ContentBlock, ImageBlock, LlmImageRequestBudget, ToolCallBlock, ToolCallId, ToolSchema, ToolUpdate, ToolHistory } from './types.ts'
 import type { RequestMessage } from './types.ts'
 import type { Message } from './message.ts'
 import type { MessageId } from './types.ts'
@@ -507,4 +507,53 @@ export function projectToolUpdates(
     messages: unchanged ? messages : projectedMessages,
     tools: [...declarations.values()],
   }
+}
+
+/**
+ * Pair every assistant tool call with the tool result that answers it.
+ *
+ * Providers require the result of a tool call in the message directly after the
+ * assistant message that requested it. A history that separates a call from its
+ * result, that never recorded a result, or that carries a result without a
+ * request is rejected by the provider, and the rejection repeats on every later
+ * request because the history keeps its shape.
+ *
+ * The projection moves each recorded result next to the request that produced
+ * it, drops calls that no result answers, and drops results that no call
+ * requested. The durable log keeps the recorded events.
+ *
+ * @param messages - request messages in conversation order.
+ * @returns the paired messages, or the input when every call already has its
+ * result in the following message.
+ */
+export function projectToolPairing(messages: readonly RequestMessage[]): readonly RequestMessage[] {
+  const results = new Map<ToolCallId, RequestMessage>()
+  for (const message of messages) {
+    if (message.role !== 'tool') continue
+    if (!results.has(message.toolCallId)) results.set(message.toolCallId, message)
+  }
+  const projected: RequestMessage[] = []
+  const emitted = new Set<ToolCallId>()
+  for (const message of messages) {
+    if (message.role === 'tool') continue
+    if (message.role !== 'assistant') {
+      projected.push(message)
+      continue
+    }
+    const calls = message.content.filter((block): block is ToolCallBlock => block.type === 'tool-call')
+    const answered = calls.filter(call => results.has(call.id))
+    const content = answered.length === calls.length
+      ? message.content
+      : message.content.filter(block => block.type !== 'tool-call' || results.has(block.id))
+    projected.push(content === message.content ? message : { ...message, content })
+    for (const call of calls) {
+      const result = results.get(call.id)
+      if (result === undefined || emitted.has(call.id)) continue
+      emitted.add(call.id)
+      projected.push(result)
+    }
+  }
+  const unchanged = projected.length === messages.length
+    && projected.every((message, index) => message === messages[index])
+  return unchanged ? messages : projected
 }

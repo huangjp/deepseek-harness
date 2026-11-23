@@ -15,7 +15,9 @@ import LlmRuntime, {
   resolveRetryPolicy,
   StreamChunk,
   createMessage,
+  createAssistantMessage,
   createDeveloperMessage,
+  createToolResultMessage,
   createUserMessage,
 } from '@deepseek-ai/dsh-llm'
 import type {
@@ -27,6 +29,7 @@ import type {
   LlmProviderInfo,
   LlmResolvedModelInfo,
   SystemPromptUpdate,
+  ToolCallId,
 } from '@deepseek-ai/dsh-llm'
 
 import type { ContextFormed } from '@deepseek-ai/dsh-llm'
@@ -217,6 +220,29 @@ describe('LlmRuntime', () => {
     }))
     expect(adapter.lastOptions?.tools).toEqual([search])
     expect(adapter.lastOptions?.messages.map(message => message.role)).toEqual(['user'])
+  })
+
+  it('pairs a tool result with the request that produced it before dispatch', async () => {
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    const adapter = new RecordingAdapter(SCRIPT)
+    ctx.llm.registerAdapter(['test-provider'], adapter)
+    const call = createAssistantMessage({
+      content: [{ type: 'tool-call', id: brandString<ToolCallId>('call-a'), name: 'search', arguments: '{}' }],
+      source: { provider: 'test-provider', model: 'test-model' },
+    })
+    const answered = createToolResultMessage({
+      callId: brandString<ToolCallId>('call-a'),
+      content: [{ type: 'text', text: 'done' }],
+      isError: false,
+    })
+    const between = createUserMessage({ content: [{ type: 'text', text: 'meanwhile' }], source: { kind: 'test' } })
+    await collect(ctx.llm.stream({
+      provider: 'test-provider',
+      model: 'test-model',
+      messages: [call, between, answered],
+    }))
+    expect(adapter.lastOptions?.messages.map(message => message.role)).toEqual(['assistant', 'tool', 'user'])
   })
 
   it.each(['in-history', 'addition-only'] as const)('projects additions and removals before %s adapter dispatch', async (mode) => {

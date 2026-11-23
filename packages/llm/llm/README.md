@@ -124,7 +124,7 @@ The service is built on one separation: **the logical contract is provider-neutr
 | [`src/call-config.ts`](src/call-config.ts) | Call-config validation, adapter-default materialization, and request freezing |
 | [`src/retry-policy.ts`](src/retry-policy.ts) | Provider-owned retry policy resolution (normal and always modes) |
 | [`src/error.ts`](src/error.ts) | `HarnessError`/`LlmError` taxonomy and provider-neutral failure codes |
-| [`src/content.ts`](src/content.ts) | Shared file and image helpers: content walks, file projection, image offload accounting, and offloaded-image projection |
+| [`src/content.ts`](src/content.ts) | Shared file and image helpers: content walks, file projection, image offload accounting, offloaded-image projection, and tool-call/result pairing |
 | [`src/adapter-failure.ts`](src/adapter-failure.ts) | Failure normalization into terminal finish chunks |
 
 ### Main flow
@@ -140,6 +140,7 @@ File detection reads current content, including tool-role result content, on eve
 - **Prepared calls are one-shot** — a prepared call can be dispatched exactly once, and its call-config fields must match the prepared config.
 - **Image projection follows the captured route** — durable `ImageBlock` references become route-specific request versions only for image-capable models; text-only models receive stable placeholders.
 - **File projection is unconditional** — no provider receives file bytes; every route gets one deterministic handle line per `FileBlock`, and the model reads the saved copy with its file tools on demand.
+- **Tool calls stay paired with their results** — a recorded tool result reaches the provider directly after the assistant message that requested it; a call without a recorded result and a result without a request are dropped from the request, so a history that separates the two never fails every later request.
 - **Protocol ordering** — `usage` precedes `finish`, tool arguments stay raw JSON strings, and nothing follows the terminal `finish`.
 - **Registry mutations are atomic** — route and directory registration validates the whole candidate set before anything moves, so a refused change leaves the previous state serving.
 
