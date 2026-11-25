@@ -100,6 +100,58 @@ function Quote-Arg($value) {
     return "$value"
 }
 
+# ---- 看门狗进程：脚本被强杀时把系统代理还原回来 ----
+# 强杀（任务管理器、宿主被杀、断电）会让下面的 finally 不执行，系统代理就留在
+# 127.0.0.1:<拦截端口> 上 —— 那个端口只有本脚本在跑时才有东西监听，于是整台机器
+# 的出境流量全部超时。备份文件能让人**下次手动再跑一遍**时补还原，可中间那段时间
+# 机器是坏的。所以切代理之后再拉起一个独立进程当看门狗：它等父进程退出后检查
+# 备份是否还在，还在就说明父进程没走到 finally，由它把代理还原回去。
+function Start-ProxyWatchdog {
+    $exe = $null
+    try { $exe = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName } catch { }
+    if (-not $exe) { $exe = Join-Path $PSHOME 'powershell.exe' }
+    if (-not $exe -or -not (Test-Path $exe)) { return }
+    $scriptPath = $PSCommandPath
+    if (-not $scriptPath) { return }
+    $env:DSH_COPILOT_PROXY_WATCHDOG = '1'
+    $env:DSH_COPILOT_PROXY_PARENT_PID = "$PID"
+    $env:DSH_COPILOT_PROXY_BACKUP = $ProxyBackup
+    $env:DSH_COPILOT_PROXY_MITM_PORT = "$MitmPort"
+    try {
+        Start-Process -FilePath $exe `
+            -ArgumentList @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', (Quote-Arg $scriptPath)) `
+            -WindowStyle Hidden -ErrorAction Stop | Out-Null
+    } catch { }
+    Remove-Item Env:\DSH_COPILOT_PROXY_WATCHDOG, Env:\DSH_COPILOT_PROXY_PARENT_PID, `
+        Env:\DSH_COPILOT_PROXY_BACKUP, Env:\DSH_COPILOT_PROXY_MITM_PORT -ErrorAction SilentlyContinue
+}
+
+if ($env:DSH_COPILOT_PROXY_WATCHDOG -eq '1') {
+    # 看门狗自身：等父进程退出，然后按备份文件还原系统代理。
+    $parentPid = 0
+    try { $parentPid = [int]$env:DSH_COPILOT_PROXY_PARENT_PID } catch { }
+    $watchdogBackup = $env:DSH_COPILOT_PROXY_BACKUP
+    $watchdogPort = 0
+    try { $watchdogPort = [int]$env:DSH_COPILOT_PROXY_MITM_PORT } catch { }
+    $watchdogDeadline = (Get-Date).AddMinutes(30)
+    while ((Get-Date) -lt $watchdogDeadline) {
+        if ($parentPid -gt 0 -and -not (Get-Process -Id $parentPid -ErrorAction SilentlyContinue)) { break }
+        Start-Sleep -Seconds 1
+    }
+    if ($watchdogBackup -and (Test-Path $watchdogBackup)) {
+        try {
+            $stale = Get-Content $watchdogBackup -Raw | ConvertFrom-Json
+            $cur = Get-ProxySnapshot
+            # 只在代理仍然指着本轮的拦截端口时才还原：期间别人改过就别去覆盖。
+            if ($cur.Enable -eq 1 -and $cur.Server -eq "127.0.0.1:$watchdogPort" -and $stale -and $null -ne $stale.Enable) {
+                Set-SystemProxy $stale.Enable $stale.Server
+            }
+        } catch { }
+        Remove-Item $watchdogBackup -ErrorAction SilentlyContinue
+    }
+    return
+}
+
 try {
     Add-Type -ErrorAction Stop @"
 using System;
@@ -312,6 +364,8 @@ try { $before | ConvertTo-Json -Compress | Set-Content -Path $ProxyBackup -Encod
 
 Write-Host "临时切换系统代理 → 127.0.0.1:$MitmPort"
 Set-SystemProxy 1 "127.0.0.1:$MitmPort"
+# 拉起看门狗：本进程被强杀（finally 不执行）时，由它把系统代理还原回去。
+Start-ProxyWatchdog
 Start-Sleep -Seconds 2
 
 try {
