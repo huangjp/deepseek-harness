@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.2-rc.5/pwsh-command-timeout-policy/guide.md
+/:
+  en: 789a26e146faa19c
+  zh: ae2dc0670ffb68f3
+/a-powershell-command-that-passes-its-timeout-is-terminated-instead-of-promoted:
+  en: 80814b310fa9fe88
+  zh: f2e89b8ed01324a9
+/a-powershell-command-that-passes-its-timeout-is-terminated-instead-of-promoted/change:
+  en: 3005b4ebb7ec5807
+  zh: fa93109217e54aab
+/a-powershell-command-that-passes-its-timeout-is-terminated-instead-of-promoted/migration:
+  en: 175cfc4ccb3bde5d
+  zh: 6490f4bcfa57609b

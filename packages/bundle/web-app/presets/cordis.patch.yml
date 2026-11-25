@@ -27,6 +27,11 @@
           - id: tool-pwsh
             name: '@deepseek-ai/dsh-tool-pwsh'
             disabled: !!js process.platform !== 'win32'
+            config:
+              # Kill the command on expiry instead of promoting it to a
+              # background job: a promoted job keeps its shell alive until it
+              # finishes on its own or job_kill stops it.
+              promoteOnTimeout: false
           - id: tool-fs
             name: '@deepseek-ai/dsh-tool-fs'
             config:

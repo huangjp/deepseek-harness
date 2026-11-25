@@ -718,6 +718,24 @@
 - id: tool-pwsh
   disabled: true
 
+# ── 一次性命令的进程卫生（只用上游插件已有的 Config，不改它们的源码）────
+#
+# 每条一次性命令跑在 Job Object 包裹的私有 runner 里，命令结束 runner 带着整棵
+# 进程树退出；唯一会堆积常驻 shell 的是"前台命令超时后被提升成后台 job"这条
+# 路径 —— 提升后的 job 只能等它自己跑完或被 job_kill 停掉，没有空闲回收。
+# preset 里的 tool-pwsh 行已经关掉了提升，这里再收紧两处既有 Config：
+#   - jobs：每个 owner 的并发后台 job 上限 10 → 4。
+#   - pwsh-sandbox：默认超时 2 分钟 → 10 分钟（上限 maxTimeoutMs 不变），
+#     让长命令在被终止前有机会跑完。
+
+- id: jobs
+  config:
+    maxConcurrentJobsPerOwner: 4
+
+- id: pwsh-sandbox
+  config:
+    timeoutMs: 600000
+
 # The background-job REGISTRY stays on the host plane; only the model-facing
 # `job_*` controls move. Its producers — `tool-bash` here and `tool-terminal`
 # elsewhere — are preset rows that resolve it
