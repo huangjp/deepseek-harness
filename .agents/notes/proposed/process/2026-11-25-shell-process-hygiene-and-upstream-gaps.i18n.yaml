@@ -1,0 +1,22 @@
+# Bilingual-pair consistency record for 2026-11-25-shell-process-hygiene-and-upstream-gaps.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/proposed/process/2026-11-25-shell-process-hygiene-and-upstream-gaps.md
+/agent-note-shell-process-hygiene-in-the-shipped-profile-and-two-upstream-gaps:
+  en: a34390982ad01b02
+  zh: db9aaac53c7d943f
+/agent-note-shell-process-hygiene-in-the-shipped-profile-and-two-upstream-gaps/problem:
+  en: a2f951575d019d10
+  zh: d57310f46dfd9775
+/agent-note-shell-process-hygiene-in-the-shipped-profile-and-two-upstream-gaps/proposal:
+  en: 0470d5b177d6be14
+  zh: 7551eb01ea5b0f0d
+/agent-note-shell-process-hygiene-in-the-shipped-profile-and-two-upstream-gaps/alternatives-considered:
+  en: 1f18b5068c3c51f0
+  zh: dabf12889c8e44ff
+/agent-note-shell-process-hygiene-in-the-shipped-profile-and-two-upstream-gaps/acceptance-criteria:
+  en: b5a152e397107106
+  zh: 1719fec0b1eed468
+/agent-note-shell-process-hygiene-in-the-shipped-profile-and-two-upstream-gaps/risks:
+  en: eab52e396b7af41f
+  zh: b8ce31f46603fc69
